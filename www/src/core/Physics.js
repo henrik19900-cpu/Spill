@@ -111,3 +111,31 @@ export function degToRad(deg) {
 export function radToDeg(rad) {
     return rad * (180 / Math.PI);
 }
+
+/**
+ * Hermite smoothstep — ease-in / ease-out curve between 0 and 1.
+ * Returns 0 when t <= 0, 1 when t >= 1.
+ * @param {number} t
+ * @returns {number}
+ */
+export function smoothstep(t) {
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    return t * t * (3 - 2 * t);
+}
+
+/**
+ * Simple seeded-ish noise helper. Returns a pseudo-random value in [-1, 1]
+ * based on the current time — useful for turbulence effects.
+ * Uses two layered sine waves for organic feel without needing a full
+ * Perlin implementation.
+ * @param {number} t - time in seconds
+ * @param {number} seed - offset seed so different axes are uncorrelated
+ * @returns {number}
+ */
+export function turbulenceNoise(t, seed = 0) {
+    return (
+        0.5 * Math.sin(t * 3.7 + seed) +
+        0.3 * Math.sin(t * 7.3 + seed * 2.1) +
+        0.2 * Math.sin(t * 13.1 + seed * 0.7)
+    );
+}

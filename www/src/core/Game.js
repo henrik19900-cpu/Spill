@@ -50,6 +50,21 @@ export class Game {
     // Config (loaded async)
     this.config = null;
 
+    // Loading progress tracking
+    this._loadProgress = 0;       // 0..1
+    this._loadStepCount = 4;      // config, modules(3 sub), scene
+    this._loadStepsComplete = 0;
+    this._loadStartTime = performance.now();
+
+    // Debug mode
+    this.debug = false;
+    this._fpsFrames = 0;
+    this._fpsLastTime = 0;
+    this._fpsDisplay = 0;
+
+    // Error tracking – avoid spamming console with the same error
+    this._lastLoopError = '';
+
     // Set up canvas sizing immediately
     this._setupCanvas();
     this._onResize = this._setupCanvas.bind(this);
@@ -207,19 +222,40 @@ export class Game {
     if (this.running) return;
     this.running = true;
 
-    this._init().then(() => {
-      this.lastTimestamp = performance.now();
-      this._rafId = requestAnimationFrame(this._loop.bind(this));
+    // Enable debug mode via URL param: ?debug=1
+    this.debug = new URLSearchParams(window.location.search).has('debug');
+
+    // Start the render loop immediately so the loading screen is visible
+    // while async initialisation runs in the background.
+    this.lastTimestamp = performance.now();
+    this._fpsLastTime = this.lastTimestamp;
+    this._rafId = requestAnimationFrame(this._loop.bind(this));
+
+    this._init().catch((err) => {
+      console.error('[Game] Fatal error during initialisation:', err);
     });
   }
 
+  _advanceLoadProgress() {
+    this._loadStepsComplete++;
+    this._loadProgress = Math.min(this._loadStepsComplete / this._loadStepCount, 1);
+  }
+
   async _init() {
-    // Show loading state
-    this._renderLoading();
+    this._loadStartTime = performance.now();
 
     await this._loadConfig();
+    this._advanceLoadProgress();           // 1/4
+
     await this._loadModules();
+    this._advanceLoadProgress();           // 2/4  (counted as one group)
+
     await this._loadDefaultScene();
+    this._advanceLoadProgress();           // 3/4
+
+    // Small artificial delay so the user can see the bar reach ~100 %
+    await new Promise((r) => setTimeout(r, 120));
+    this._advanceLoadProgress();           // 4/4
 
     // Transition to MENU once everything is ready
     this.setState(GameState.MENU);
@@ -236,20 +272,43 @@ export class Game {
   _loop(timestamp) {
     if (!this.running) return;
 
-    // Delta in seconds, clamped to avoid huge jumps (e.g. after tab switch)
-    let frameTime = (timestamp - this.lastTimestamp) / 1000;
-    if (frameTime > this.maxFrameTime) frameTime = this.maxFrameTime;
-    this.lastTimestamp = timestamp;
+    try {
+      // Delta in seconds, clamped to avoid huge jumps (e.g. after tab switch)
+      let frameTime = (timestamp - this.lastTimestamp) / 1000;
+      if (frameTime > this.maxFrameTime) frameTime = this.maxFrameTime;
+      this.lastTimestamp = timestamp;
 
-    // Fixed-timestep update
-    this.accumulator += frameTime;
-    while (this.accumulator >= this.fixedDt) {
-      this.update(this.fixedDt);
-      this.accumulator -= this.fixedDt;
+      // FPS counter (debug mode)
+      if (this.debug) {
+        this._fpsFrames++;
+        if (timestamp - this._fpsLastTime >= 1000) {
+          this._fpsDisplay = this._fpsFrames;
+          this._fpsFrames = 0;
+          this._fpsLastTime = timestamp;
+        }
+      }
+
+      // Fixed-timestep update – skip updates while still loading
+      if (this._state !== GameState.LOADING) {
+        this.accumulator += frameTime;
+        while (this.accumulator >= this.fixedDt) {
+          this.update(this.fixedDt);
+          this.accumulator -= this.fixedDt;
+        }
+      }
+
+      // Render once per frame
+      this.render();
+
+    } catch (err) {
+      // Log the error but do NOT kill the loop.  Deduplicate consecutive
+      // identical errors to avoid flooding the console.
+      const msg = err && err.message ? err.message : String(err);
+      if (msg !== this._lastLoopError) {
+        console.error('[Game] Error in game loop:', err);
+        this._lastLoopError = msg;
+      }
     }
-
-    // Render once per frame
-    this.render();
 
     this._rafId = requestAnimationFrame(this._loop.bind(this));
   }
@@ -286,22 +345,112 @@ export class Game {
     if (this.currentScene && typeof this.currentScene.render === 'function') {
       this.currentScene.render(ctx, width, height);
     }
+
+    // Debug FPS overlay
+    if (this.debug) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(4, 4, 64, 22);
+      ctx.fillStyle = '#0f0';
+      ctx.font = '13px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`FPS: ${this._fpsDisplay}`, 10, 8);
+      ctx.restore();
+    }
   }
 
   _renderLoading() {
     const { ctx, width, height } = this;
+    const now = performance.now();
+    const elapsed = (now - this._loadStartTime) / 1000;  // seconds
+    const cx = width / 2;
+    const cy = height / 2;
+
+    ctx.save();
     ctx.clearRect(0, 0, width, height);
 
-    // Dark background
-    ctx.fillStyle = '#1a1a2e';
+    // -- Winter sky gradient background --
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0, '#0b1a3b');   // dark night sky
+    grad.addColorStop(0.6, '#163d6e'); // deep blue
+    grad.addColorStop(1, '#6baed6');   // lighter horizon
+    ctx.fillStyle = grad;
     ctx.fillRect(0, 0, width, height);
 
-    // Loading text
+    // -- Falling snowflakes --
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    const flakeCount = 40;
+    for (let i = 0; i < flakeCount; i++) {
+      // Deterministic pseudo-random per flake, animated over time
+      const seed = i * 137.5;
+      const x = ((seed * 2.3) % width + Math.sin(elapsed * 0.4 + seed) * 30) % width;
+      const y = ((seed * 1.7 + elapsed * (20 + (i % 5) * 12)) % (height + 20)) - 10;
+      const r = 1.2 + (i % 3) * 0.8;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // -- Title --
     ctx.fillStyle = '#ffffff';
-    ctx.font = '20px sans-serif';
+    ctx.font = 'bold 26px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Laster…', width / 2, height / 2);
+    ctx.fillText('Vinter-OL Spill', cx, cy - 50);
+
+    // -- Pulsing "Laster..." text with animated dots --
+    const dotCount = Math.floor(elapsed * 2.5) % 4;  // 0..3
+    const dots = '.'.repeat(dotCount);
+    const pulse = 0.7 + 0.3 * Math.sin(elapsed * 3);
+    ctx.globalAlpha = pulse;
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#d0e8ff';
+    ctx.fillText('Laster' + dots, cx, cy - 14);
+    ctx.globalAlpha = 1;
+
+    // -- Progress bar --
+    const barW = Math.min(260, width * 0.5);
+    const barH = 14;
+    const barX = cx - barW / 2;
+    const barY = cy + 14;
+    const radius = barH / 2;
+    const progress = this._loadProgress;
+
+    // Bar track (dark, rounded)
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW, barH, radius);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fill();
+
+    // Bar fill (icy gradient, rounded)
+    if (progress > 0.01) {
+      const fillW = Math.max(barH, barW * progress); // min width = pill shape
+      const barGrad = ctx.createLinearGradient(barX, 0, barX + fillW, 0);
+      barGrad.addColorStop(0, '#74b9ff');
+      barGrad.addColorStop(1, '#a0e7ff');
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, fillW, barH, radius);
+      ctx.fillStyle = barGrad;
+      ctx.fill();
+
+      // Shimmer highlight
+      const shimmerX = barX + ((elapsed * 80) % fillW);
+      const shimGrad = ctx.createRadialGradient(shimmerX, barY + barH / 2, 0, shimmerX, barY + barH / 2, 30);
+      shimGrad.addColorStop(0, 'rgba(255,255,255,0.35)');
+      shimGrad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = shimGrad;
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, fillW, barH, radius);
+      ctx.fill();
+    }
+
+    // Percentage text
+    ctx.font = '12px sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(Math.round(progress * 100) + ' %', cx, barY + barH + 18);
+
+    ctx.restore();
   }
 
   // -----------------------------------------------------------------------
