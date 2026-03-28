@@ -113,66 +113,43 @@ export default class Scoreboard {
     // -------------------------------------------------------------------
 
     _renderHeader(ctx, width, height) {
-        const y = 48;
+        const padX = 14;
 
-        // Background bar with gradient
-        const headerGrad = ctx.createLinearGradient(0, 0, 0, 100);
-        headerGrad.addColorStop(0, 'rgba(0,0,0,0.5)');
-        headerGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        // Dark header panel
+        const headerGrad = ctx.createLinearGradient(0, 0, 0, 95);
+        headerGrad.addColorStop(0, 'rgba(0,0,0,0.7)');
+        headerGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
         ctx.fillStyle = headerGrad;
-        ctx.fillRect(0, 0, width, 100);
+        ctx.fillRect(0, 0, width, 95);
+
+        // Bottom accent line (Norwegian tricolor)
+        const accentY = 92;
+        const thirdW = width / 3;
+        ctx.fillStyle = '#BA0C2F';
+        ctx.fillRect(0, accentY, thirdW, 3);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(thirdW, accentY, thirdW, 3);
+        ctx.fillStyle = '#00205B';
+        ctx.fillRect(thirdW * 2, accentY, thirdW + 1, 3);
 
         ctx.save();
 
-        // Title with glow
-        ctx.shadowColor = 'rgba(200,220,255,0.6)';
-        ctx.shadowBlur = 16;
+        // Title "RESULTATER"
         ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${Math.min(width * 0.08, 32)}px sans-serif`;
+        ctx.font = `bold ${Math.max(Math.min(width * 0.075, 30), 18)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('RESULTATER', width / 2, y);
+        ctx.letterSpacing = '3px';
+        ctx.fillText('RESULTATER', width / 2, 34);
 
-        // Second pass for extra brightness
-        ctx.shadowBlur = 0;
-        ctx.fillText('RESULTATER', width / 2, y);
+        // Hill name subtitle
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.font = `${Math.max(Math.min(width * 0.035, 14), 12)}px sans-serif`;
+        ctx.letterSpacing = '1px';
+        ctx.fillText('Holmenkollbakken K120', width / 2, 62);
+
+        ctx.letterSpacing = '0px';
         ctx.restore();
-
-        // Decorative underline with gold gradient
-        const lineW = Math.min(width * 0.5, 200);
-        const lineY = y + 24;
-        const lineX = (width - lineW) / 2;
-
-        const lineGrad = ctx.createLinearGradient(lineX, 0, lineX + lineW, 0);
-        lineGrad.addColorStop(0, 'rgba(255,215,0,0)');
-        lineGrad.addColorStop(0.2, 'rgba(255,215,0,0.8)');
-        lineGrad.addColorStop(0.5, 'rgba(255,240,150,1)');
-        lineGrad.addColorStop(0.8, 'rgba(255,215,0,0.8)');
-        lineGrad.addColorStop(1, 'rgba(255,215,0,0)');
-
-        ctx.fillStyle = lineGrad;
-        ctx.fillRect(lineX, lineY, lineW, 2.5);
-
-        // Small diamond ornament in center
-        ctx.save();
-        ctx.translate(width / 2, lineY + 1);
-        ctx.rotate(Math.PI / 4);
-        ctx.fillStyle = '#FFD700';
-        ctx.fillRect(-3.5, -3.5, 7, 7);
-        ctx.restore();
-
-        // Norwegian flag accent below
-        const accentW = Math.min(width * 0.3, 120);
-        const barH = 2.5;
-        const barY = lineY + 10;
-        const barX = (width - accentW) / 2;
-
-        ctx.fillStyle = '#BA0C2F';
-        ctx.fillRect(barX, barY, accentW / 3, barH);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(barX + accentW / 3, barY, accentW / 3, barH);
-        ctx.fillStyle = '#00205B';
-        ctx.fillRect(barX + (accentW / 3) * 2, barY, accentW / 3, barH);
     }
 
     // -------------------------------------------------------------------

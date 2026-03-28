@@ -321,6 +321,7 @@ export default class SkihoppGame {
                     windDirection: this.wind.getDirection(),
                     phase: state,
                     takeoffQuality: jumperState.takeoffQuality,
+                    landingQuality: jumperState.landingQuality,
                 });
                 break;
 
@@ -346,6 +347,11 @@ export default class SkihoppGame {
                         stylePoints: this._scoreResult.stylePoints,
                         windComp: this._scoreResult.windCompensation,
                         totalPoints: this._scoreResult.totalPoints,
+                        distance: this._scoreResult.distance,
+                        kPoint: this.hill.kPoint || 120,
+                        hillName: this.hill.name || 'Storbakke',
+                        rating: this._scoreResult.rating,
+                        ratingTier: this._scoreResult.ratingTier,
                         bestDistance: this._bestDistance,
                         animationProgress: progress,
                     });
