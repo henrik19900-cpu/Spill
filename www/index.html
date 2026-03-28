@@ -11,6 +11,19 @@
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
+  <div id="errorOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);color:#ff4444;font:14px monospace;padding:20px;overflow:auto;z-index:9999;white-space:pre-wrap;"></div>
+  <script>
+    window.onerror = function(msg, src, line, col, err) {
+      var el = document.getElementById('errorOverlay');
+      el.style.display = 'block';
+      el.textContent += 'ERROR: ' + msg + '\nFile: ' + src + ':' + line + '\n\n';
+    };
+    window.addEventListener('unhandledrejection', function(e) {
+      var el = document.getElementById('errorOverlay');
+      el.style.display = 'block';
+      el.textContent += 'PROMISE ERROR: ' + (e.reason ? (e.reason.message || e.reason) : 'unknown') + '\n' + (e.reason && e.reason.stack ? e.reason.stack : '') + '\n\n';
+    });
+  </script>
   <script type="module" src="src/core/Game.js"></script>
 </body>
 </html>

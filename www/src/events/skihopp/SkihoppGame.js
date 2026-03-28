@@ -106,7 +106,7 @@ export default class SkihoppGame {
             hillsData = game.config.hills;
         } else {
             try {
-                const resp = await fetch('src/data/hills.json');
+                const resp = await fetch('./src/data/hills.json');
                 hillsData = await resp.json();
             } catch (e) {
                 console.warn('[SkihoppGame] Could not load hills.json, using inline fallback.', e.message);

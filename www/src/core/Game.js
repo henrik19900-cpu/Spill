@@ -149,7 +149,7 @@ export class Game {
   // -----------------------------------------------------------------------
   async _loadConfig() {
     try {
-      const resp = await fetch('src/data/config.json');
+      const resp = await fetch('./src/data/config.json');
       this.config = await resp.json();
       if (this.config.game && this.config.game.targetFPS) {
         this.targetFPS = this.config.game.targetFPS;
