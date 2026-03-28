@@ -29,6 +29,7 @@ export default class Hill {
         this._tablePoints = [];
         this._landingPoints = [];
         this._outrunPoints = [];
+        this._normals = [];  // surface normal vectors parallel to landing/outrun points
 
         this._generate();
     }
@@ -42,25 +43,23 @@ export default class Hill {
         this._generateTable();
         this._generateLanding();
         this._generateOutrun();
+        this._computeNormals();
     }
 
     /**
      * Inrun: straight slope coming down at inrunAngle, ending with a smooth
      * circular-arc transition into the table. The transition radius is chosen
-     * so the curvature feels natural (~60-80 m on large hills).
+     * so the curvature feels natural (~80-120 m on large hills).
      */
     _generateInrun() {
         const angleRad = this.inrunAngle * DEG_TO_RAD;
         const tableRad = this.tableAngle * DEG_TO_RAD;
 
-        // Transition curve radius (bigger hills get a larger radius)
-        const transitionRadius = this.inrunLength * 0.8;
+        // Transition curve radius - larger for smoother feel (real hills use ~100m+)
+        const transitionRadius = this.inrunLength * 1.2;
 
         // Angular span the transition must cover
         const angleDelta = angleRad - tableRad;
-
-        // Arc length of the transition curve
-        const transitionArcLen = transitionRadius * angleDelta;
 
         // Horizontal / vertical extent of the transition arc
         const transitionDx = transitionRadius * (Math.sin(angleRad) - Math.sin(tableRad));
@@ -68,7 +67,6 @@ export default class Hill {
 
         // The transition ends at the start of the table. The table starts at
         // x = -tableLength * cos(tableAngle), y = -tableLength * sin(tableAngle)
-        // (measured back from origin along the table direction).
         const tableDx = this.tableLength * Math.cos(tableRad);
         const tableDy = this.tableLength * Math.sin(tableRad);
 
@@ -87,12 +85,11 @@ export default class Hill {
         const straightStartX = transStartX - Math.max(straightHorizontal, 0);
         const straightStartY = transStartY - Math.max(straightHorizontal, 0) * Math.tan(angleRad);
 
-        // --- Generate straight section points ---
-        const numStraight = 40;
-        const straightLen = Math.sqrt(
-            (transStartX - straightStartX) ** 2 + (transStartY - straightStartY) ** 2
-        );
+        // Store inrun start for public accessor
+        this._inrunStartPos = { x: straightStartX, y: straightStartY };
 
+        // --- Generate straight section points (more detail) ---
+        const numStraight = 80;
         for (let i = 0; i <= numStraight; i++) {
             const t = i / numStraight;
             this._inrunPoints.push({
@@ -101,17 +98,12 @@ export default class Hill {
             });
         }
 
-        // --- Generate transition curve points ---
-        // Parametrise by angle from inrunAngle down to tableAngle.
-        // Centre of the circular arc sits perpendicular to the slope at the
-        // transition start, offset by transitionRadius toward the "inside" of
-        // the curve (i.e., above the slope surface).
-        const numTransition = 60;
+        // --- Generate transition curve points (high detail for smoothness) ---
+        const numTransition = 120;
         for (let i = 1; i <= numTransition; i++) {
             const t = i / numTransition;
-            const currentAngle = angleRad - t * angleDelta; // sweeps from inrunAngle to tableAngle
+            const currentAngle = angleRad - t * angleDelta;
 
-            // Position along the arc relative to the transition start
             const dx = transitionRadius * (Math.sin(angleRad) - Math.sin(currentAngle));
             const dy = transitionRadius * (Math.cos(currentAngle) - Math.cos(angleRad));
 
@@ -131,7 +123,7 @@ export default class Hill {
         const tableDx = this.tableLength * Math.cos(tableRad);
         const tableDy = this.tableLength * Math.sin(tableRad);
 
-        const numTable = 10;
+        const numTable = 20;
         for (let i = 0; i <= numTable; i++) {
             const t = i / numTable;
             this._tablePoints.push({
@@ -142,116 +134,122 @@ export default class Hill {
     }
 
     /**
-     * Landing slope (unnarenn): a smooth curve from the table edge downward,
-     * modelled as a quadratic/cubic bezier that:
-     *   - starts at (0, 0) heading at landingAngle below horizontal
-     *   - reaches the K-point at the configured distance
-     *   - continues to the HS point
-     *   - gradually flattens toward the outrun
+     * Landing slope (unnarenn): realistic ski jump landing profile.
      *
-     * The profile is generated with a parametric approach: the slope angle
-     * increases quickly after the lip, reaches a maximum (landingAngle) near
-     * the steepest part, then decreases toward zero at the outrun.
+     * Real ski jump geometry: the landing slope starts steep (matching
+     * the trajectory of the jumper leaving the table), reaches maximum
+     * steepness around 40-60% of K-point distance, then gradually
+     * flattens toward the outrun. The profile uses a piecewise model:
+     *
+     *   Phase 1 (0 to K-point): steep and getting steeper - modeled
+     *     with an angle that rises via smooth cubic interpolation.
+     *   Phase 2 (K-point to HS): still steep but beginning to flatten.
+     *   Phase 3 (HS to outrun): transition to flat via circular arc.
+     *
+     * K-point and HS-point are placed by measuring cumulative surface
+     * distance from the table edge.
      */
     _generateLanding() {
         const landRad = this.landingAngle * DEG_TO_RAD;
-        const steep = this.landingSteepness; // controls how aggressively the curve steepens
+        const steep = this.landingSteepness;
 
-        // We'll map horizontal distance d to a slope angle theta(d) using a
-        // smooth function. The K-point lies at a specific horizontal distance;
-        // we need to figure out where that is.
-        //
-        // On a real hill the "K-point distance" is measured along the hill
-        // surface from the table edge. We approximate the horizontal component.
-        //
-        // The landing profile follows: y(x) = a*x^2 + b*x
-        // At x=0: y=0, slope = b (= tan(tableAngle) provides continuity, but
-        // the lip creates a break so the landing slope starts fresh).
-        //
-        // We use a piecewise model:
-        //   Phase 1 (0 to K-point): parabolic drop
-        //   Phase 2 (K-point to HS): continuing curve
-        //   Phase 3 (HS to flat): transition to flat
-
-        // K-point horizontal distance: the "kPoint" value is roughly the
-        // distance along the slope. We convert to horizontal.
         const kSlope = this.kPoint;
         const hsSlope = this.hillSize;
 
-        // Average angle for K-point distance -> horizontal projection
-        const avgAngleK = landRad * 0.55;
-        const kHoriz = kSlope * Math.cos(avgAngleK);
-        const avgAngleHS = landRad * 0.50;
-        const hsHoriz = hsSlope * Math.cos(avgAngleHS);
+        // We model the slope angle theta as a function of cumulative
+        // surface distance s. The angle profile:
+        //   - Starts at a small angle (table lip break)
+        //   - Rises steeply to a maximum near 50-65% of K distance
+        //   - Stays near maximum through K-point
+        //   - Gradually decreases past HS toward zero at the outrun
 
-        // Build the landing profile using a smooth angle function.
-        // theta(d) = landingAngle * f(d), where f rises from 0 to 1 near the
-        // steepest part then falls back to 0.
-        //
-        // We use: theta(d) = A * d * exp(-B * d) -- a Rayleigh-like shape that
-        // peaks at d = 1/B, then decays.
+        const initialAngle = this.tableAngle * DEG_TO_RAD * 0.5; // small lip angle
+        const maxAngle = landRad * (1.0 + steep * 0.2);          // peak steepness
 
-        // The peak angle should be near landingAngle and occur around 40-60% of kHoriz.
-        const peakDist = kHoriz * 0.5;
-        const B = 1 / peakDist;
-        // At peak: theta_max = A * peakDist * exp(-1) => A = theta_max * e / peakDist
-        const peakAngle = landRad * (1 + steep * 0.3);
-        const A = (peakAngle * Math.E) / peakDist;
+        // Distance markers for the angle profile
+        const peakStart = kSlope * 0.35;   // angle ramps up to here
+        const peakEnd = kSlope * 0.75;     // angle starts declining here
+        const flatStart = hsSlope * 1.25;  // angle reaches ~0 here
 
-        // Total horizontal extent of the landing slope: from 0 to a distance
-        // well past HS where the slope is essentially flat.
-        const totalDist = hsHoriz * 1.3;
+        // Total surface distance to generate
+        const totalSurfaceDist = hsSlope * 1.35;
 
-        const numLanding = 200;
-        let prevX = 0;
-        let prevY = 0;
+        // Number of landing points (high detail)
+        const numLanding = 400;
+        const stepSize = totalSurfaceDist / numLanding;
 
+        let x = 0;
+        let y = 0;
         this._landingPoints.push({ x: 0, y: 0 });
 
-        // Store K and HS positions
         this._kPointPos = null;
         this._hsPointPos = null;
 
         let cumulativeDist = 0;
 
         for (let i = 1; i <= numLanding; i++) {
-            const d = (i / numLanding) * totalDist;
-            const stepSize = totalDist / numLanding;
+            cumulativeDist = i * stepSize;
 
-            // Angle at this horizontal distance
-            const theta = A * d * Math.exp(-B * d);
+            // Compute slope angle at this surface distance
+            let theta;
+            if (cumulativeDist <= peakStart) {
+                // Phase 1a: ramp up from initial angle to max angle
+                const t = cumulativeDist / peakStart;
+                // Smooth cubic ease-in
+                const s = t * t * (3 - 2 * t);
+                theta = initialAngle + (maxAngle - initialAngle) * s;
+            } else if (cumulativeDist <= peakEnd) {
+                // Phase 1b: hold near max angle (slight plateau)
+                const t = (cumulativeDist - peakStart) / (peakEnd - peakStart);
+                // Very gentle decline: stay within 95-100% of max
+                theta = maxAngle * (1.0 - 0.05 * t);
+            } else if (cumulativeDist <= flatStart) {
+                // Phase 2: decline from near-max to near-zero
+                const t = (cumulativeDist - peakEnd) / (flatStart - peakEnd);
+                // Smooth cosine-based ease-out
+                const s = 0.5 * (1 - Math.cos(Math.PI * t));
+                const endAngle = maxAngle * 0.02; // nearly flat
+                theta = maxAngle * 0.95 * (1 - s) + endAngle * s;
+            } else {
+                // Phase 3: essentially flat (tiny residual slope)
+                const overshoot = (cumulativeDist - flatStart) / (totalSurfaceDist - flatStart);
+                theta = maxAngle * 0.02 * Math.max(0, 1 - overshoot);
+            }
 
-            const dx = stepSize;
-            const dy = Math.tan(theta) * dx;
-
-            const x = prevX + dx;
-            const y = prevY + dy;
-
-            // Track cumulative surface distance for K-point / HS detection
-            cumulativeDist += Math.sqrt(dx * dx + dy * dy);
+            // Step along the surface at angle theta
+            const dx = stepSize * Math.cos(theta);
+            const dy = stepSize * Math.sin(theta);
+            x += dx;
+            y += dy;
 
             this._landingPoints.push({ x, y });
 
+            // Detect K-point and HS-point by cumulative surface distance
             if (this._kPointPos === null && cumulativeDist >= kSlope) {
                 this._kPointPos = { x, y };
             }
             if (this._hsPointPos === null && cumulativeDist >= hsSlope) {
                 this._hsPointPos = { x, y };
             }
-
-            prevX = x;
-            prevY = y;
         }
 
         // Fallback in case cumulative distance never reached targets
         if (!this._kPointPos) {
-            this._kPointPos = this._landingPoints[Math.floor(numLanding * 0.7)];
+            const idx = Math.min(
+                Math.floor((kSlope / totalSurfaceDist) * numLanding),
+                numLanding
+            );
+            this._kPointPos = { ...this._landingPoints[idx] };
         }
         if (!this._hsPointPos) {
-            this._hsPointPos = this._landingPoints[Math.floor(numLanding * 0.85)];
+            const idx = Math.min(
+                Math.floor((hsSlope / totalSurfaceDist) * numLanding),
+                numLanding
+            );
+            this._hsPointPos = { ...this._landingPoints[idx] };
         }
 
-        this._landingEnd = { x: prevX, y: prevY };
+        this._landingEnd = { x, y };
     }
 
     /**
@@ -270,17 +268,18 @@ export default class Hill {
         const endAngle = Math.atan2(dy0, dx0);
 
         // Transition from endAngle to 0 over a curve, then flat
-        const transitionLength = this.flatLength * 0.3;
-        const flatLength = this.flatLength * 0.7;
+        const transitionLength = this.flatLength * 0.35;
+        const flatLength = this.flatLength * 0.65;
 
-        const numTransition = 30;
+        const numTransition = 60;
         let x = startX;
         let y = startY;
 
         for (let i = 1; i <= numTransition; i++) {
             const t = i / numTransition;
-            // Smoothly reduce angle to zero using cosine interpolation
-            const angle = endAngle * (1 - t) * (1 - t); // quadratic ease-out
+            // Smooth cosine ease-out for angle reduction
+            const ease = 0.5 * (1 - Math.cos(Math.PI * t));
+            const angle = endAngle * (1 - ease);
             const step = transitionLength / numTransition;
             const sdx = step * Math.cos(angle);
             const sdy = step * Math.sin(angle);
@@ -291,13 +290,55 @@ export default class Hill {
 
         // Flat section at constant y
         const flatY = y;
-        const numFlat = 20;
+        const numFlat = 40;
         for (let i = 1; i <= numFlat; i++) {
             const t = i / numFlat;
             this._outrunPoints.push({
                 x: x + t * flatLength,
                 y: flatY,
             });
+        }
+
+        this._outrunEndPos = { x: x + flatLength, y: flatY };
+    }
+
+    /**
+     * Compute surface normal vectors for the landing slope and outrun.
+     * Each normal points "upward" (away from the hill surface), which is
+     * used for proper landing angle calculation. Normals are stored as
+     * unit vectors {nx, ny} in a parallel array to landing+outrun points.
+     */
+    _computeNormals() {
+        const points = [...this._landingPoints, ...this._outrunPoints];
+        this._normals = [];
+
+        for (let i = 0; i < points.length; i++) {
+            let dx, dy;
+            if (i === 0) {
+                dx = points[1].x - points[0].x;
+                dy = points[1].y - points[0].y;
+            } else if (i === points.length - 1) {
+                dx = points[i].x - points[i - 1].x;
+                dy = points[i].y - points[i - 1].y;
+            } else {
+                // Central difference for smoother normals
+                dx = points[i + 1].x - points[i - 1].x;
+                dy = points[i + 1].y - points[i - 1].y;
+            }
+
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len < 1e-12) {
+                this._normals.push({ nx: 0, ny: -1 });
+            } else {
+                // Normal is perpendicular to tangent, pointing "up" (negative y)
+                // Tangent = (dx, dy), normal = (-dy, dx) then normalize
+                // Since y-positive is down, "up" normal should have negative ny
+                let nx = -dy / len;
+                let ny = dx / len;
+                // Ensure normal points upward (ny < 0 in our coord system)
+                if (ny > 0) { nx = -nx; ny = -ny; }
+                this._normals.push({ nx, ny });
+            }
         }
     }
 
@@ -318,6 +359,14 @@ export default class Hill {
         ];
     }
 
+    /**
+     * Returns the total profile with inrun points having negative x values,
+     * suitable for rendering the complete hill from start to finish.
+     */
+    getTotalProfile() {
+        return this.getProfile();
+    }
+
     /** Points for the inrun section (includes transition curve). */
     getInrunPoints() {
         return [...this._inrunPoints, ...this._tablePoints];
@@ -326,6 +375,20 @@ export default class Hill {
     /** Points for the landing slope (unnarenn) and outrun. */
     getLandingPoints() {
         return [...this._landingPoints, ...this._outrunPoints];
+    }
+
+    /**
+     * Returns the {x, y} position of the top of the inrun (start gate area).
+     */
+    getInrunStartPosition() {
+        return { ...this._inrunStartPos };
+    }
+
+    /**
+     * Returns the {x, y} position at the very end of the outrun.
+     */
+    getOutrunEndPosition() {
+        return { ...this._outrunEndPos };
     }
 
     /**
@@ -346,7 +409,6 @@ export default class Hill {
 
             if ((p0.x <= distance && p1.x >= distance) ||
                 (p0.x >= distance && p1.x <= distance)) {
-                // Linear interpolation
                 const segDx = p1.x - p0.x;
                 if (Math.abs(segDx) < 1e-9) return p0.y;
                 const t = (distance - p0.x) / segDx;
@@ -386,6 +448,38 @@ export default class Hill {
     }
 
     /**
+     * Returns the surface normal vector {nx, ny} at a given horizontal
+     * distance from takeoff. The normal points away from the hill surface
+     * (upward). Used for computing proper landing angles.
+     * @param {number} distance - horizontal distance from takeoff (positive = downhill)
+     * @returns {{nx: number, ny: number}} unit normal vector
+     */
+    getNormalAtDistance(distance) {
+        const points = [...this._landingPoints, ...this._outrunPoints];
+
+        for (let i = 0; i < points.length - 1; i++) {
+            const p0 = points[i];
+            const p1 = points[i + 1];
+
+            if (p0.x <= distance && p1.x >= distance) {
+                const segDx = p1.x - p0.x;
+                if (Math.abs(segDx) < 1e-9) return this._normals[i];
+                const t = (distance - p0.x) / segDx;
+                // Interpolate between adjacent normals
+                const n0 = this._normals[i];
+                const n1 = this._normals[i + 1];
+                if (!n0 || !n1) return { nx: 0, ny: -1 };
+                const nx = n0.nx + t * (n1.nx - n0.nx);
+                const ny = n0.ny + t * (n1.ny - n0.ny);
+                const len = Math.sqrt(nx * nx + ny * ny);
+                return len > 1e-12 ? { nx: nx / len, ny: ny / len } : { nx: 0, ny: -1 };
+            }
+        }
+
+        return { nx: 0, ny: -1 };
+    }
+
+    /**
      * Returns the {x, y} position of the K-point on the landing slope.
      */
     getKPointPosition() {
@@ -397,5 +491,51 @@ export default class Hill {
      */
     getHSPointPosition() {
         return { ...this._hsPointPos };
+    }
+
+    /**
+     * Compute {x, y} position along the inrun at a given distance from
+     * the top. Distance is measured along the surface from the inrun start.
+     * @param {number} distance - surface distance from the top of the inrun
+     * @returns {{x: number, y: number}} position on the inrun
+     */
+    getPositionAlongInrun(distance) {
+        const points = [...this._inrunPoints, ...this._tablePoints];
+        let cumDist = 0;
+
+        for (let i = 1; i < points.length; i++) {
+            const dx = points[i].x - points[i - 1].x;
+            const dy = points[i].y - points[i - 1].y;
+            const segLen = Math.sqrt(dx * dx + dy * dy);
+
+            if (cumDist + segLen >= distance) {
+                const remain = distance - cumDist;
+                const t = segLen > 1e-12 ? remain / segLen : 0;
+                return {
+                    x: points[i - 1].x + t * dx,
+                    y: points[i - 1].y + t * dy,
+                };
+            }
+
+            cumDist += segLen;
+        }
+
+        // Past the end - return last point (table edge)
+        const last = points[points.length - 1];
+        return { x: last.x, y: last.y };
+    }
+
+    /**
+     * Returns the total surface length of the inrun (from start to table edge).
+     */
+    getInrunSurfaceLength() {
+        const points = [...this._inrunPoints, ...this._tablePoints];
+        let total = 0;
+        for (let i = 1; i < points.length; i++) {
+            const dx = points[i].x - points[i - 1].x;
+            const dy = points[i].y - points[i - 1].y;
+            total += Math.sqrt(dx * dx + dy * dy);
+        }
+        return total;
     }
 }

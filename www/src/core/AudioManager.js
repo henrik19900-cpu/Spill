@@ -27,9 +27,23 @@ export default class AudioManager {
     /** Currently playing wind node chain – so we can update / stop it */
     this._windSource = null;
     this._windGain = null;
+    this._windFilter = null;
+
+    /** Crowd ambience node chain */
+    this._crowdSource = null;
+    this._crowdGain = null;
+    this._crowdFilter = null;
+
+    /** Menu ambience node chain */
+    this._menuOsc = null;
+    this._menuLfo = null;
+    this._menuGain = null;
 
     /** Flag: has the context been initialised? */
     this._initialised = false;
+
+    /** Flag: has the context been resumed at least once? */
+    this._resumed = false;
 
     // Bind the one-time resume handler so we can remove it later.
     this._resumeHandler = this._initContext.bind(this);
@@ -70,8 +84,11 @@ export default class AudioManager {
     if (!this._initialised) {
       this._initContext();
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
+    if (!this._resumed && this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume();
+    }
+    if (this.ctx && this.ctx.state === 'running') {
+      this._resumed = true;
     }
   }
 
@@ -117,57 +134,78 @@ export default class AudioManager {
    * @param {number} speed – 0-1 normalised wind intensity
    */
   playWind(speed) {
-    this._ensureContext();
-    if (!this.ctx) return;
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
 
-    // Clamp
-    speed = Math.max(0, Math.min(1, speed));
+      // Clamp
+      speed = Math.max(0, Math.min(1, speed));
 
-    // If wind is already playing, just update the parameters
-    if (this._windSource) {
-      if (speed <= 0) {
-        this._windGain.gain.linearRampToValueAtTime(0, this.ctx.currentTime + 0.3);
-        this._windSource.stop(this.ctx.currentTime + 0.4);
-        this._windSource = null;
-        this._windGain = null;
+      // If wind is already playing, just update the parameters
+      if (this._windSource) {
+        if (speed <= 0) {
+          this.stopWind();
+          return;
+        }
+        // Smoothly change volume & filter
+        this._windGain.gain.linearRampToValueAtTime(speed * 0.3, this.ctx.currentTime + 0.1);
+        if (this._windFilter) {
+          this._windFilter.frequency.linearRampToValueAtTime(
+            300 + speed * 700,
+            this.ctx.currentTime + 0.1
+          );
+        }
         return;
       }
-      // Smoothly change volume & filter
-      this._windGain.gain.linearRampToValueAtTime(speed * 0.3, this.ctx.currentTime + 0.1);
-      if (this._windFilter) {
-        this._windFilter.frequency.linearRampToValueAtTime(
-          300 + speed * 700,
-          this.ctx.currentTime + 0.1
-        );
-      }
-      return;
+
+      if (speed <= 0) return;
+
+      // Create noise source (long buffer, looped)
+      const noiseBuf = this._createNoise(2);
+      const source = this.ctx.createBufferSource();
+      source.buffer = noiseBuf;
+      source.loop = true;
+
+      // Low-pass filter — higher speed → higher cutoff → brighter wind
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 300 + speed * 700;
+      filter.Q.value = 1.0;
+
+      // Gain
+      const gain = this.ctx.createGain();
+      gain.gain.value = speed * 0.3;
+
+      this._chain(source, filter, gain, this._masterGain);
+
+      source.start();
+
+      this._windSource = source;
+      this._windGain = gain;
+      this._windFilter = filter;
+    } catch (e) {
+      console.warn('AudioManager.playWind error:', e);
     }
+  }
 
-    if (speed <= 0) return;
-
-    // Create noise source (long buffer, looped)
-    const noiseBuf = this._createNoise(2);
-    const source = this.ctx.createBufferSource();
-    source.buffer = noiseBuf;
-    source.loop = true;
-
-    // Low-pass filter — higher speed → higher cutoff → brighter wind
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 300 + speed * 700;
-    filter.Q.value = 1.0;
-
-    // Gain
-    const gain = this.ctx.createGain();
-    gain.gain.value = speed * 0.3;
-
-    this._chain(source, filter, gain, this._masterGain);
-
-    source.start();
-
-    this._windSource = source;
-    this._windGain = gain;
-    this._windFilter = filter;
+  /**
+   * Stop the continuous wind sound with a short fade-out.
+   */
+  stopWind() {
+    try {
+      if (!this._windSource || !this.ctx) return;
+      const now = this.ctx.currentTime;
+      this._windGain.gain.linearRampToValueAtTime(0, now + 0.2);
+      this._windSource.stop(now + 0.25);
+      this._windSource = null;
+      this._windGain = null;
+      this._windFilter = null;
+    } catch (e) {
+      console.warn('AudioManager.stopWind error:', e);
+      this._windSource = null;
+      this._windGain = null;
+      this._windFilter = null;
+    }
   }
 
   /**
