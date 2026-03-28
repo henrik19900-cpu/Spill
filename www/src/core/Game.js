@@ -119,7 +119,7 @@ export class Game {
   // -----------------------------------------------------------------------
   // Scene management
   // -----------------------------------------------------------------------
-  setScene(scene) {
+  async setScene(scene) {
     // Tear down previous scene
     if (this.currentScene && typeof this.currentScene.destroy === 'function') {
       this.currentScene.destroy();
@@ -128,8 +128,9 @@ export class Game {
     this.currentScene = scene;
 
     // Initialise new scene with a reference back to the engine
+    // (await in case init is async, e.g. fetches data)
     if (scene && typeof scene.init === 'function') {
-      scene.init(this);
+      await scene.init(this);
     }
   }
 
@@ -193,7 +194,7 @@ export class Game {
     try {
       const { default: SkihoppGame } = await import('../events/skihopp/SkihoppGame.js');
       const scene = new SkihoppGame();
-      this.setScene(scene);
+      await this.setScene(scene);
     } catch (e) {
       console.warn('[Game] Default scene (SkihoppGame) not available yet.', e.message);
     }

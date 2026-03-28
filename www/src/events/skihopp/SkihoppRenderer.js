@@ -170,7 +170,7 @@ export default class SkihoppRenderer {
      * @param {object} wind        - { speed, direction }
      */
     render(ctx, width, height, jumperState, gameState, wind) {
-        if (!this._initialized) return;
+        if (!this._initialized || !this.renderer) return;
 
         // --- Camera management ---
         this._updateCamera(jumperState, gameState, 1 / 60);
@@ -191,6 +191,7 @@ export default class SkihoppRenderer {
 
     _updateCamera(jumperState, gameState, dt) {
         const r = this.renderer;
+        if (!r) return;
         let targetZoom, targetX, targetY;
 
         switch (gameState) {

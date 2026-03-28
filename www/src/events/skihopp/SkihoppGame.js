@@ -330,7 +330,7 @@ export default class SkihoppGame {
             case GameState.INRUN:
                 // Run has started - play ambient sounds
                 if (this._audio) {
-                    this._audio.playWind(this.wind.getSpeed());
+                    this._audio.playWind(this.wind.getSpeed() / 3);
                 }
                 break;
 
@@ -452,9 +452,10 @@ export default class SkihoppGame {
         if (!this._audio) return;
 
         // Continuous wind sound during active phases
+        // Wind speed is 0-3 m/s; normalise to 0-1 for AudioManager
         if (state === GameState.INRUN || state === GameState.FLIGHT ||
             state === GameState.TAKEOFF || state === GameState.LANDING) {
-            this._audio.playWind(this.wind.getSpeed());
+            this._audio.playWind(this.wind.getSpeed() / 3);
         }
     }
 

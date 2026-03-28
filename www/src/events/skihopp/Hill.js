@@ -22,6 +22,8 @@ export default class Hill {
         this.landingAngle = config.landingAngle;
         this.landingSteepness = config.landingSteepness;
         this.flatLength = config.flatLength;
+        this.gateCount = config.gateCount || 25;
+        this.defaultGate = config.defaultGate || 20;
 
         this._inrunPoints = [];
         this._tablePoints = [];
