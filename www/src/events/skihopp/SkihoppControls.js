@@ -284,8 +284,8 @@ export default class SkihoppControls {
     // Haptic feedback
     this._vibrate(30);
 
-    // Transition to flight
-    this.game.setState(GameState.FLIGHT);
+    // Do NOT transition to FLIGHT here — let SkihoppPhysics._updateTakeoff()
+    // handle the transition after computing launch velocity.
   }
 
   _handleLandingTap() {
@@ -333,10 +333,9 @@ export default class SkihoppControls {
     if (state === GameState.TAKEOFF && !this._takeoffTapped) {
       const elapsed = performance.now() - this._takeoffWindowStart;
       if (elapsed > TAKEOFF_POOR_MS) {
-        // Auto-miss: transition to flight with quality 0
+        // Auto-miss: set quality to 0; physics will handle the transition
         js.takeoffQuality = 0.0;
         this._takeoffTapped = true;
-        this.game.setState(GameState.FLIGHT);
       }
     }
 

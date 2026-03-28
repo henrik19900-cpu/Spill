@@ -200,6 +200,7 @@ export default class HUD {
         const arrowY = y;
         const dir = (d.windDirection || 0) * (Math.PI / 180); // degrees to rad
 
+        ctx.save();
         ctx.translate(arrowX, arrowY);
         ctx.rotate(dir);
 
@@ -214,7 +215,7 @@ export default class HUD {
         ctx.lineTo(5, 5);
         ctx.stroke();
 
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.restore();
 
         // Wind speed text
         ctx.fillStyle = '#ffffff';
