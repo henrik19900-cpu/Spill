@@ -152,7 +152,7 @@ export default class AudioManager {
         if (this._windFilter) {
           this._windFilter.frequency.linearRampToValueAtTime(
             300 + speed * 700,
-            this.ctx.currentTime + 0.1
+            this.ctx.currentTime + 0.1,
           );
         }
         return;
@@ -166,7 +166,7 @@ export default class AudioManager {
       source.buffer = noiseBuf;
       source.loop = true;
 
-      // Low-pass filter — higher speed → higher cutoff → brighter wind
+      // Low-pass filter — higher speed -> higher cutoff -> brighter wind
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'lowpass';
       filter.frequency.value = 300 + speed * 700;
@@ -209,47 +209,51 @@ export default class AudioManager {
   }
 
   /**
-   * Short swoosh for takeoff — quick frequency sweep with a noise burst.
+   * Short swoosh for takeoff -- quick frequency sweep with a noise burst.
    */
   playSwoosh() {
-    this._ensureContext();
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    const duration = 0.25;
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const duration = 0.25;
 
-    // --- Noise burst through bandpass ---
-    const noiseBuf = this._createNoise(duration);
-    const noiseSrc = this.ctx.createBufferSource();
-    noiseSrc.buffer = noiseBuf;
+      // --- Noise burst through bandpass ---
+      const noiseBuf = this._createNoise(duration);
+      const noiseSrc = this.ctx.createBufferSource();
+      noiseSrc.buffer = noiseBuf;
 
-    const bp = this.ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(3000, now);
-    bp.frequency.exponentialRampToValueAtTime(300, now + duration);
-    bp.Q.value = 0.5;
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(3000, now);
+      bp.frequency.exponentialRampToValueAtTime(300, now + duration);
+      bp.Q.value = 0.5;
 
-    const noiseGain = this.ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.5, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.5, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + duration);
 
-    this._chain(noiseSrc, bp, noiseGain, this._masterGain);
+      this._chain(noiseSrc, bp, noiseGain, this._masterGain);
 
-    // --- Oscillator frequency sweep ---
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(1200, now);
-    osc.frequency.exponentialRampToValueAtTime(200, now + duration);
+      // --- Oscillator frequency sweep ---
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1200, now);
+      osc.frequency.exponentialRampToValueAtTime(200, now + duration);
 
-    const oscGain = this.ctx.createGain();
-    oscGain.gain.setValueAtTime(0.15, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+      const oscGain = this.ctx.createGain();
+      oscGain.gain.setValueAtTime(0.15, now);
+      oscGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
 
-    this._chain(osc, oscGain, this._masterGain);
+      this._chain(osc, oscGain, this._masterGain);
 
-    noiseSrc.start(now);
-    noiseSrc.stop(now + duration);
-    osc.start(now);
-    osc.stop(now + duration);
+      noiseSrc.start(now);
+      noiseSrc.stop(now + duration);
+      osc.start(now);
+      osc.stop(now + duration);
+    } catch (e) {
+      console.warn('AudioManager.playSwoosh error:', e);
+    }
   }
 
   /**
@@ -257,56 +261,60 @@ export default class AudioManager {
    * @param {number} intensity – 0-1, louder/longer for better jumps
    */
   playCrowdCheer(intensity = 0.5) {
-    this._ensureContext();
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    intensity = Math.max(0, Math.min(1, intensity));
-    const duration = 1.0 + intensity * 2.0; // 1-3 seconds
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      intensity = Math.max(0, Math.min(1, intensity));
+      const duration = 1.0 + intensity * 2.0; // 1-3 seconds
 
-    // Layer 1 — low rumble noise
-    const rumbleBuf = this._createNoise(duration);
-    const rumbleSrc = this.ctx.createBufferSource();
-    rumbleSrc.buffer = rumbleBuf;
+      // Layer 1 -- low rumble noise
+      const rumbleBuf = this._createNoise(duration);
+      const rumbleSrc = this.ctx.createBufferSource();
+      rumbleSrc.buffer = rumbleBuf;
 
-    const rumbleLp = this.ctx.createBiquadFilter();
-    rumbleLp.type = 'lowpass';
-    rumbleLp.frequency.value = 600;
-    rumbleLp.Q.value = 1;
+      const rumbleLp = this.ctx.createBiquadFilter();
+      rumbleLp.type = 'lowpass';
+      rumbleLp.frequency.value = 600;
+      rumbleLp.Q.value = 1;
 
-    const rumbleGain = this.ctx.createGain();
-    rumbleGain.gain.setValueAtTime(0.001, now);
-    rumbleGain.gain.linearRampToValueAtTime(intensity * 0.35, now + 0.15);
-    rumbleGain.gain.setValueAtTime(intensity * 0.35, now + duration * 0.6);
-    rumbleGain.gain.linearRampToValueAtTime(0.0, now + duration);
+      const rumbleGain = this.ctx.createGain();
+      rumbleGain.gain.setValueAtTime(0.001, now);
+      rumbleGain.gain.linearRampToValueAtTime(intensity * 0.35, now + 0.15);
+      rumbleGain.gain.setValueAtTime(intensity * 0.35, now + duration * 0.6);
+      rumbleGain.gain.linearRampToValueAtTime(0.0, now + duration);
 
-    this._chain(rumbleSrc, rumbleLp, rumbleGain, this._masterGain);
+      this._chain(rumbleSrc, rumbleLp, rumbleGain, this._masterGain);
 
-    // Layer 2 — mid-range "roar"
-    const roarBuf = this._createNoise(duration);
-    const roarSrc = this.ctx.createBufferSource();
-    roarSrc.buffer = roarBuf;
+      // Layer 2 -- mid-range "roar"
+      const roarBuf = this._createNoise(duration);
+      const roarSrc = this.ctx.createBufferSource();
+      roarSrc.buffer = roarBuf;
 
-    const roarBp = this.ctx.createBiquadFilter();
-    roarBp.type = 'bandpass';
-    roarBp.frequency.value = 2000;
-    roarBp.Q.value = 0.8;
+      const roarBp = this.ctx.createBiquadFilter();
+      roarBp.type = 'bandpass';
+      roarBp.frequency.value = 2000;
+      roarBp.Q.value = 0.8;
 
-    const roarGain = this.ctx.createGain();
-    roarGain.gain.setValueAtTime(0.001, now);
-    roarGain.gain.linearRampToValueAtTime(intensity * 0.2, now + 0.2);
-    // Wobble the crowd — modulate gain slightly for realism
-    for (let t = 0.3; t < duration - 0.3; t += 0.15) {
-      const wobble = intensity * (0.15 + Math.random() * 0.1);
-      roarGain.gain.linearRampToValueAtTime(wobble, now + t);
+      const roarGain = this.ctx.createGain();
+      roarGain.gain.setValueAtTime(0.001, now);
+      roarGain.gain.linearRampToValueAtTime(intensity * 0.2, now + 0.2);
+      // Wobble the crowd -- modulate gain slightly for realism
+      for (let t = 0.3; t < duration - 0.3; t += 0.15) {
+        const wobble = intensity * (0.15 + Math.random() * 0.1);
+        roarGain.gain.linearRampToValueAtTime(wobble, now + t);
+      }
+      roarGain.gain.linearRampToValueAtTime(0.0, now + duration);
+
+      this._chain(roarSrc, roarBp, roarGain, this._masterGain);
+
+      rumbleSrc.start(now);
+      rumbleSrc.stop(now + duration);
+      roarSrc.start(now);
+      roarSrc.stop(now + duration);
+    } catch (e) {
+      console.warn('AudioManager.playCrowdCheer error:', e);
     }
-    roarGain.gain.linearRampToValueAtTime(0.0, now + duration);
-
-    this._chain(roarSrc, roarBp, roarGain, this._masterGain);
-
-    rumbleSrc.start(now);
-    rumbleSrc.stop(now + duration);
-    roarSrc.start(now);
-    roarSrc.stop(now + duration);
   }
 
   /**
@@ -314,66 +322,89 @@ export default class AudioManager {
    * @param {number} quality – 0 (crash) to 1 (perfect telemark)
    */
   playLanding(quality = 0.5) {
-    this._ensureContext();
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
-    quality = Math.max(0, Math.min(1, quality));
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      quality = Math.max(0, Math.min(1, quality));
 
-    // --- Low-frequency "thud" oscillator ---
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(80 + quality * 40, now); // 80-120 Hz
-    osc.frequency.exponentialRampToValueAtTime(30, now + 0.3);
+      // --- Deep thud oscillator (60Hz sine) ---
+      const thud = this.ctx.createOscillator();
+      thud.type = 'sine';
+      thud.frequency.setValueAtTime(60, now);
+      thud.frequency.exponentialRampToValueAtTime(25, now + 0.35);
 
-    const oscGain = this.ctx.createGain();
-    oscGain.gain.setValueAtTime(0.6, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      const thudGain = this.ctx.createGain();
+      const thudVol = 0.5 + quality * 0.3; // good landing = fuller thud
+      thudGain.gain.setValueAtTime(thudVol, now);
+      thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
 
-    this._chain(osc, oscGain, this._masterGain);
+      this._chain(thud, thudGain, this._masterGain);
 
-    // --- Noise layer for "crunch" — louder on bad landings ---
-    const crunchDuration = 0.15 + (1 - quality) * 0.2;
-    const noiseBuf = this._createNoise(crunchDuration);
-    const noiseSrc = this.ctx.createBufferSource();
-    noiseSrc.buffer = noiseBuf;
+      // --- Mid body oscillator (80-120Hz) for tonal character ---
+      const body = this.ctx.createOscillator();
+      body.type = 'sine';
+      body.frequency.setValueAtTime(80 + quality * 40, now);
+      body.frequency.exponentialRampToValueAtTime(30, now + 0.25);
 
-    const hp = this.ctx.createBiquadFilter();
-    hp.type = 'highpass';
-    hp.frequency.value = 800;
+      const bodyGain = this.ctx.createGain();
+      bodyGain.gain.setValueAtTime(0.3 * quality, now);
+      bodyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
 
-    const noiseGain = this.ctx.createGain();
-    const noiseVol = (1 - quality) * 0.4; // worse landing → more crunch
-    noiseGain.gain.setValueAtTime(noiseVol, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + crunchDuration);
+      this._chain(body, bodyGain, this._masterGain);
 
-    this._chain(noiseSrc, hp, noiseGain, this._masterGain);
+      // --- Noise burst for impact -- louder on bad landings ---
+      const crunchDuration = 0.1 + (1 - quality) * 0.25;
+      const noiseBuf = this._createNoise(crunchDuration);
+      const noiseSrc = this.ctx.createBufferSource();
+      noiseSrc.buffer = noiseBuf;
 
-    osc.start(now);
-    osc.stop(now + 0.35);
-    noiseSrc.start(now);
-    noiseSrc.stop(now + crunchDuration);
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 600 + (1 - quality) * 400;
+
+      const noiseGain = this.ctx.createGain();
+      const noiseVol = 0.1 + (1 - quality) * 0.35; // worse landing = more crunch
+      noiseGain.gain.setValueAtTime(noiseVol, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + crunchDuration);
+
+      this._chain(noiseSrc, hp, noiseGain, this._masterGain);
+
+      thud.start(now);
+      thud.stop(now + 0.4);
+      body.start(now);
+      body.stop(now + 0.3);
+      noiseSrc.start(now);
+      noiseSrc.stop(now + crunchDuration);
+    } catch (e) {
+      console.warn('AudioManager.playLanding error:', e);
+    }
   }
 
   /**
    * Short tick / click for tap feedback during inrun.
    */
   playTick() {
-    this._ensureContext();
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
 
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(1000, now);
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1000, now);
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.3, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
 
-    this._chain(osc, gain, this._masterGain);
+      this._chain(osc, gain, this._masterGain);
 
-    osc.start(now);
-    osc.stop(now + 0.06);
+      osc.start(now);
+      osc.stop(now + 0.06);
+    } catch (e) {
+      console.warn('AudioManager.playTick error:', e);
+    }
   }
 
   /**
@@ -381,33 +412,38 @@ export default class AudioManager {
    * Sine wave at ~800 Hz with a quick attack/decay envelope.
    */
   playJudgeReveal() {
-    this._ensureContext();
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
 
-    const osc = this.ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(800, now);
-    osc.frequency.setValueAtTime(820, now + 0.05); // tiny shimmer
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.setValueAtTime(820, now + 0.05); // tiny shimmer
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(0.35, now + 0.01);  // fast attack
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.35, now + 0.01); // fast attack
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
 
-    this._chain(osc, gain, this._masterGain);
+      this._chain(osc, gain, this._masterGain);
 
-    osc.start(now);
-    osc.stop(now + 0.45);
+      osc.start(now);
+      osc.stop(now + 0.45);
+    } catch (e) {
+      console.warn('AudioManager.playJudgeReveal error:', e);
+    }
   }
 
   /**
    * Victory fanfare — a short celebratory melody played with oscillators.
    */
   playFanfare() {
-    this._ensureContext();
-    if (!this.ctx) return;
-    const now = this.ctx.currentTime;
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
 
     // Simple ascending melody: C5 E5 G5 C6 (held)
     const notes = [
@@ -449,6 +485,149 @@ export default class AudioManager {
       osc2.start(now + note.start);
       osc2.stop(now + note.start + note.dur + 0.01);
     });
+    } catch (e) {
+      console.warn('AudioManager.playFanfare error:', e);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Continuous ambience methods
+  // -----------------------------------------------------------------------
+
+  /**
+   * Continuous crowd ambience -- filtered noise loop.
+   * Reuses existing nodes if already playing; just updates volume.
+   * @param {number} intensity -- 0-1 controls volume
+   */
+  playCrowdAmbience(intensity = 0.5) {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+
+      intensity = Math.max(0, Math.min(1, intensity));
+
+      // If already playing, just update volume
+      if (this._crowdSource) {
+        this._crowdGain.gain.linearRampToValueAtTime(
+          intensity * 0.25,
+          this.ctx.currentTime + 0.1,
+        );
+        return;
+      }
+
+      // Create looped noise source
+      const noiseBuf = this._createNoise(2);
+      const source = this.ctx.createBufferSource();
+      source.buffer = noiseBuf;
+      source.loop = true;
+
+      // Bandpass filter to shape crowd-like murmur
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.value = 800;
+      filter.Q.value = 0.6;
+
+      const gain = this.ctx.createGain();
+      gain.gain.value = intensity * 0.25;
+
+      this._chain(source, filter, gain, this._masterGain);
+
+      source.start();
+
+      this._crowdSource = source;
+      this._crowdGain = gain;
+      this._crowdFilter = filter;
+    } catch (e) {
+      console.warn('AudioManager.playCrowdAmbience error:', e);
+    }
+  }
+
+  /**
+   * Stop the continuous crowd ambience with a short fade-out.
+   */
+  stopCrowdAmbience() {
+    try {
+      if (!this._crowdSource || !this.ctx) return;
+      const now = this.ctx.currentTime;
+      this._crowdGain.gain.linearRampToValueAtTime(0, now + 0.2);
+      this._crowdSource.stop(now + 0.25);
+      this._crowdSource = null;
+      this._crowdGain = null;
+      this._crowdFilter = null;
+    } catch (e) {
+      console.warn('AudioManager.stopCrowdAmbience error:', e);
+      this._crowdSource = null;
+      this._crowdGain = null;
+      this._crowdFilter = null;
+    }
+  }
+
+  /**
+   * Gentle low drone for the menu screen -- 100Hz sine with slow LFO.
+   */
+  playMenuAmbience() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+
+      // Already playing -- do nothing
+      if (this._menuOsc) return;
+
+      const now = this.ctx.currentTime;
+
+      // Main drone oscillator
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = 100;
+
+      // Slow LFO to modulate the drone gain
+      const lfo = this.ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.value = 0.3; // slow wobble
+
+      const lfoGain = this.ctx.createGain();
+      lfoGain.gain.value = 0.04; // subtle modulation depth
+
+      // Main gain
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0.08;
+
+      // LFO -> gain modulation
+      lfo.connect(lfoGain);
+      lfoGain.connect(gain.gain);
+
+      this._chain(osc, gain, this._masterGain);
+
+      osc.start(now);
+      lfo.start(now);
+
+      this._menuOsc = osc;
+      this._menuLfo = lfo;
+      this._menuGain = gain;
+    } catch (e) {
+      console.warn('AudioManager.playMenuAmbience error:', e);
+    }
+  }
+
+  /**
+   * Stop the menu ambience with a short fade-out.
+   */
+  stopMenuAmbience() {
+    try {
+      if (!this._menuOsc || !this.ctx) return;
+      const now = this.ctx.currentTime;
+      this._menuGain.gain.linearRampToValueAtTime(0, now + 0.3);
+      this._menuOsc.stop(now + 0.35);
+      this._menuLfo.stop(now + 0.35);
+      this._menuOsc = null;
+      this._menuLfo = null;
+      this._menuGain = null;
+    } catch (e) {
+      console.warn('AudioManager.stopMenuAmbience error:', e);
+      this._menuOsc = null;
+      this._menuLfo = null;
+      this._menuGain = null;
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -499,6 +678,25 @@ export default class AudioManager {
       this._windFilter = null;
     }
 
+    // Stop crowd ambience if playing
+    if (this._crowdSource) {
+      try { this._crowdSource.stop(); } catch (_) { /* already stopped */ }
+      this._crowdSource = null;
+      this._crowdGain = null;
+      this._crowdFilter = null;
+    }
+
+    // Stop menu ambience if playing
+    if (this._menuOsc) {
+      try {
+        this._menuOsc.stop();
+        this._menuLfo.stop();
+      } catch (_) { /* already stopped */ }
+      this._menuOsc = null;
+      this._menuLfo = null;
+      this._menuGain = null;
+    }
+
     // Close context
     if (this.ctx) {
       this.ctx.close();
@@ -507,6 +705,7 @@ export default class AudioManager {
 
     this._masterGain = null;
     this._initialised = false;
+    this._resumed = false;
 
     // Remove any lingering listeners
     const events = ['touchstart', 'touchend', 'mousedown', 'keydown', 'click'];
