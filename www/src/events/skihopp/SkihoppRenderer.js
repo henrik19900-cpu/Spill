@@ -51,6 +51,7 @@ export default class SkihoppRenderer {
         this._snowParticles = [];
 
         this._initialized = false;
+        this._time = 0;
     }
 
     // ------------------------------------------------------------------
@@ -82,12 +83,14 @@ export default class SkihoppRenderer {
     _generateStars() {
         const rng = seededRandom(42);
         this._stars = [];
-        for (let i = 0; i < 35; i++) {
+        for (let i = 0; i < 60; i++) {
             this._stars.push({
                 x: rng(),
-                y: rng() * 0.55,          // keep in upper portion
-                r: 0.5 + rng() * 1.5,     // radius in px
-                a: 0.4 + rng() * 0.6,     // alpha
+                y: rng() * 0.55,
+                r: 0.5 + rng() * 1.8,
+                a: 0.3 + rng() * 0.7,
+                twinkleSpeed: 0.5 + rng() * 2.0,
+                twinkleOffset: rng() * Math.PI * 2,
             });
         }
     }
@@ -145,7 +148,7 @@ export default class SkihoppRenderer {
     _generateSnowParticles() {
         const rng = seededRandom(999);
         this._snowParticles = [];
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < 80; i++) {
             this._snowParticles.push({
                 x: rng(),
                 y: rng(),
@@ -172,8 +175,19 @@ export default class SkihoppRenderer {
     render(ctx, width, height, jumperState, gameState, wind) {
         if (!this._initialized || !this.renderer) return;
 
+        this._time += 1 / 60;
+
         // --- Camera management ---
         this._updateCamera(jumperState, gameState, 1 / 60);
+
+        // Camera shake from vibration/landing
+        const vib = jumperState.vibration || 0;
+        if (vib > 0.01) {
+            const shakeX = (Math.random() - 0.5) * vib * 4;
+            const shakeY = (Math.random() - 0.5) * vib * 4;
+            ctx.save();
+            ctx.translate(shakeX, shakeY);
+        }
 
         // --- Draw layers back-to-front ---
         this._drawSky(ctx, width, height);
@@ -183,6 +197,11 @@ export default class SkihoppRenderer {
         this._drawSpectators(ctx);
         this._drawJumper(ctx, jumperState);
         this._drawSnowParticles(ctx, width, height);
+
+        // Restore camera shake transform
+        if ((jumperState.vibration || 0) > 0.01) {
+            ctx.restore();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -236,17 +255,42 @@ export default class SkihoppRenderer {
 
     _drawSky(ctx, w, h) {
         const grad = ctx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0, '#0a0a2e');
-        grad.addColorStop(0.65, '#1a3a6e');
+        grad.addColorStop(0, '#050520');
+        grad.addColorStop(0.4, '#0a0a2e');
+        grad.addColorStop(0.7, '#1a3a6e');
         grad.addColorStop(1, '#243b6e');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
 
-        // Stars
+        // Aurora borealis
+        const t = (this._time || 0);
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        for (let i = 0; i < 3; i++) {
+            const baseY = h * (0.12 + i * 0.06);
+            ctx.beginPath();
+            ctx.moveTo(0, baseY);
+            for (let x = 0; x <= w; x += 4) {
+                const wave = Math.sin(x * 0.008 + t * 0.4 + i * 2.1) * 20
+                           + Math.sin(x * 0.015 + t * 0.7 + i) * 10;
+                ctx.lineTo(x, baseY + wave);
+            }
+            ctx.lineTo(w, h * 0.4);
+            ctx.lineTo(0, h * 0.4);
+            ctx.closePath();
+            const colors = ['rgba(0,255,128,0.06)', 'rgba(80,200,255,0.04)', 'rgba(180,100,255,0.03)'];
+            ctx.fillStyle = colors[i];
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // Twinkling stars
         for (const s of this._stars) {
+            const twinkle = 0.5 + 0.5 * Math.sin(t * s.twinkleSpeed + s.twinkleOffset);
+            const alpha = s.a * (0.4 + 0.6 * twinkle);
             ctx.beginPath();
             ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,255,255,${s.a})`;
+            ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
             ctx.fill();
         }
     }
