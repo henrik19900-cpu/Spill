@@ -31,6 +31,7 @@ import Scoreboard from '../../ui/Scoreboard.js';
 
 const OPTIMAL_FLIGHT_ANGLE = 35;           // degrees
 const STABILITY_DEVIATION_TOLERANCE = 15;  // degrees from optimal before stability drops
+const COUNTDOWN_DURATION = 3.0;            // seconds for "3... 2... 1... HOP!" countdown
 const LANDING_TO_SCORE_DELAY = 1.5;        // seconds after landing before showing score
 const SCORE_ANIMATION_DURATION = 3.0;      // seconds for judge reveal animation
 
@@ -67,8 +68,14 @@ export default class SkihoppGame {
         this._scoreResult = null;
         this._scoreAnimationTime = 0;
 
+        // Countdown timer (READY -> INRUN)
+        this._countdownTimer = 0;
+
         // Landing delay timer
         this._landingTimer = 0;
+
+        // Best distance tracking
+        this._bestDistance = 0;
 
         // Flight stability tracking
         this._flightSamples = 0;
@@ -201,12 +208,28 @@ export default class SkihoppGame {
             ? -this.wind.getSpeed()
             : this.wind.getSpeed();
 
+        // Countdown timer during READY state
+        if (state === GameState.READY) {
+            this._countdownTimer += dt;
+            if (this._countdownTimer >= COUNTDOWN_DURATION) {
+                this.game.setState(GameState.INRUN);
+            }
+        }
+
         // Controls and physics only run during active gameplay
         if (state === GameState.INRUN || state === GameState.TAKEOFF ||
             state === GameState.FLIGHT || state === GameState.LANDING) {
 
-            this.controls.update(dt);
-            this.physics.update(dt);
+            try {
+                this.controls.update(dt);
+            } catch (e) {
+                console.error('[SkihoppGame] controls.update() error:', e);
+            }
+            try {
+                this.physics.update(dt);
+            } catch (e) {
+                console.error('[SkihoppGame] physics.update() error:', e);
+            }
         }
 
         // Track flight stability during FLIGHT phase
@@ -250,6 +273,35 @@ export default class SkihoppGame {
                 break;
 
             case GameState.READY:
+                // Render the 3D scene behind the countdown
+                this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                    speed: this.wind.getSpeed(),
+                    direction: this.wind.getDirection(),
+                });
+
+                // Draw countdown overlay
+                {
+                    const remaining = COUNTDOWN_DURATION - this._countdownTimer;
+                    let countdownText;
+                    if (remaining > 2) countdownText = '3...';
+                    else if (remaining > 1) countdownText = '2...';
+                    else if (remaining > 0) countdownText = '1...';
+                    else countdownText = 'HOP!';
+
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 72px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+                    ctx.shadowBlur = 8;
+                    ctx.fillText(countdownText, width / 2, height / 2);
+                    ctx.restore();
+                }
+                break;
+
             case GameState.INRUN:
             case GameState.TAKEOFF:
             case GameState.FLIGHT:
@@ -279,6 +331,12 @@ export default class SkihoppGame {
                     direction: this.wind.getDirection(),
                 });
 
+                // Semi-transparent dim overlay
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                ctx.fillRect(0, 0, width, height);
+                ctx.restore();
+
                 // Judge display with animation
                 if (this._scoreResult) {
                     const progress = Math.min(1, this._scoreAnimationTime / SCORE_ANIMATION_DURATION);
@@ -288,6 +346,7 @@ export default class SkihoppGame {
                         stylePoints: this._scoreResult.stylePoints,
                         windComp: this._scoreResult.windCompensation,
                         totalPoints: this._scoreResult.totalPoints,
+                        bestDistance: this._bestDistance,
                         animationProgress: progress,
                     });
                 }
@@ -322,9 +381,15 @@ export default class SkihoppGame {
                 this.jumper.reset();
                 this.physics.reset();
                 this._resetFlightTracking();
+                this._countdownTimer = 0;
                 this._landingTimer = 0;
                 this._scoreResult = null;
                 this._scoreAnimationTime = 0;
+
+                // Stop wind sound from previous run
+                if (this._audio && typeof this._audio.stopWind === 'function') {
+                    this._audio.stopWind();
+                }
                 break;
 
             case GameState.INRUN:
@@ -345,13 +410,26 @@ export default class SkihoppGame {
                 // Finalise flight stability on jumper state
                 jumperState.flightStability = this._calculateFinalStability();
 
-                // Landing sound
+                // Track best distance
+                if (jumperState.landingDistance > this._bestDistance) {
+                    this._bestDistance = jumperState.landingDistance;
+                }
+
+                // Stop crowd ambience from flight, play landing sound
                 if (this._audio) {
+                    if (typeof this._audio.stopCrowdAmbience === 'function') {
+                        this._audio.stopCrowdAmbience();
+                    }
                     this._audio.playLanding(jumperState.landingQuality);
                 }
                 break;
 
             case GameState.SCORE:
+                // Stop wind sound when leaving active phases
+                if (this._audio && typeof this._audio.stopWind === 'function') {
+                    this._audio.stopWind();
+                }
+
                 // Calculate score
                 this._scoreResult = this.scoringSystem.calculateScore({
                     distance: jumperState.landingDistance,
@@ -399,9 +477,16 @@ export default class SkihoppGame {
                 this.jumper.reset();
                 this.physics.reset();
                 this._resetFlightTracking();
+                this._countdownTimer = 0;
                 this._landingTimer = 0;
                 this._scoreResult = null;
                 this._scoreAnimationTime = 0;
+
+                // Stop all looping audio
+                if (this._audio) {
+                    if (typeof this._audio.stopWind === 'function') this._audio.stopWind();
+                    if (typeof this._audio.stopCrowdAmbience === 'function') this._audio.stopCrowdAmbience();
+                }
                 break;
 
             default:
@@ -457,6 +542,15 @@ export default class SkihoppGame {
             state === GameState.TAKEOFF || state === GameState.LANDING) {
             this._audio.playWind(this.wind.getSpeed() / 4);
         }
+
+        // Crowd ambience during flight that builds with distance
+        if (state === GameState.FLIGHT && typeof this._audio.playCrowdAmbience === 'function') {
+            const jumperState = this.jumper.getState();
+            const kPoint = this.hill.kPoint || 120;
+            // Volume ramps from 0.2 to 1.0 as distance approaches (and exceeds) K-point
+            const intensity = Math.min(1.0, 0.2 + 0.8 * (jumperState.distance / kPoint));
+            this._audio.playCrowdAmbience(intensity);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -492,5 +586,7 @@ export default class SkihoppGame {
         this._input = null;
         this._scoreResult = null;
         this._jumpResults = [];
+        this._bestDistance = 0;
+        this._countdownTimer = 0;
     }
 }

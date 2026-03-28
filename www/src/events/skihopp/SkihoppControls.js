@@ -235,6 +235,11 @@ export default class SkihoppControls {
         this._handleScoreTap();
         break;
 
+      case GameState.RESULTS:
+        // Tap to jump again quickly (skip menu)
+        this.game.setState(GameState.READY);
+        break;
+
       default:
         break;
     }
