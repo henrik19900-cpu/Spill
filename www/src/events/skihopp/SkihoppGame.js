@@ -1,0 +1,495 @@
+/**
+ * SkihoppGame.js - Main scene orchestrator for the ski jumping event
+ *
+ * Wires together all subsystems (physics, controls, rendering, scoring,
+ * wind, UI) and drives the game state machine. Loaded by Game.js as
+ * the default scene via setScene().
+ *
+ * Lifecycle:
+ *   init(game) -> update(dt) / render(ctx,w,h) each frame -> destroy()
+ *
+ * State flow:
+ *   MENU -> READY -> INRUN -> TAKEOFF -> FLIGHT -> LANDING -> SCORE -> RESULTS
+ */
+
+import { GameState } from '../../core/Game.js';
+import Hill from './Hill.js';
+import Jumper from './Jumper.js';
+import SkihoppPhysics from './SkihoppPhysics.js';
+import SkihoppRenderer from './SkihoppRenderer.js';
+import SkihoppControls from './SkihoppControls.js';
+import ScoringSystem from './ScoringSystem.js';
+import Wind from './Wind.js';
+import MenuScreen from '../../ui/MenuScreen.js';
+import HUD from '../../ui/HUD.js';
+import JudgeDisplay from '../../ui/JudgeDisplay.js';
+import Scoreboard from '../../ui/Scoreboard.js';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const OPTIMAL_FLIGHT_ANGLE = 35;           // degrees
+const STABILITY_DEVIATION_TOLERANCE = 15;  // degrees from optimal before stability drops
+const LANDING_TO_SCORE_DELAY = 1.5;        // seconds after landing before showing score
+const SCORE_ANIMATION_DURATION = 3.0;      // seconds for judge reveal animation
+
+// ---------------------------------------------------------------------------
+// SkihoppGame
+// ---------------------------------------------------------------------------
+
+export default class SkihoppGame {
+    constructor() {
+        /** @type {import('../../core/Game.js').Game} */
+        this.game = null;
+
+        // Subsystems (created in init)
+        this.hill = null;
+        this.jumper = null;
+        this.physics = null;
+        this.skihoppRenderer = null;
+        this.controls = null;
+        this.scoringSystem = null;
+        this.wind = null;
+
+        // UI components
+        this.menuScreen = null;
+        this.hud = null;
+        this.judgeDisplay = null;
+        this.scoreboard = null;
+
+        // Module references
+        this._audio = null;
+        this._renderer = null;
+        this._input = null;
+
+        // Score state
+        this._scoreResult = null;
+        this._scoreAnimationTime = 0;
+
+        // Landing delay timer
+        this._landingTimer = 0;
+
+        // Flight stability tracking
+        this._flightSamples = 0;
+        this._stabilityAccum = 0;
+
+        // Jump results history (for scoreboard)
+        this._jumpResults = [];
+
+        // Input unsub handles
+        this._unsubs = [];
+    }
+
+    // ------------------------------------------------------------------
+    // Lifecycle
+    // ------------------------------------------------------------------
+
+    /**
+     * Called by Game.setScene(). Sets up all subsystems.
+     * @param {import('../../core/Game.js').Game} game
+     */
+    async init(game) {
+        this.game = game;
+
+        // Grab engine modules
+        this._audio = game.getModule('audio');
+        this._renderer = game.getModule('renderer');
+        this._input = game.getModule('input');
+
+        // ----------------------------------------------------------
+        // 1. Load hill data
+        // ----------------------------------------------------------
+        let hillsData = null;
+
+        if (game.config && game.config.hills) {
+            hillsData = game.config.hills;
+        } else {
+            try {
+                const resp = await fetch('src/data/hills.json');
+                hillsData = await resp.json();
+            } catch (e) {
+                console.warn('[SkihoppGame] Could not load hills.json, using inline fallback.', e.message);
+                hillsData = null;
+            }
+        }
+
+        // Default to K120 (large hill)
+        const hillKey = (game.config && game.config.defaultHill) || 'K120';
+        const hillConfig = hillsData ? (hillsData[hillKey] || Object.values(hillsData)[0]) : {
+            name: 'Storbakke K120',
+            kPoint: 120,
+            hillSize: 140,
+            inrunLength: 98,
+            inrunAngle: 37,
+            tableAngle: 11,
+            tableLength: 7.2,
+            landingAngle: 36,
+            landingSteepness: 0.57,
+            flatLength: 100,
+            gateCount: 25,
+            defaultGate: 20,
+        };
+
+        // ----------------------------------------------------------
+        // 2. Create Hill
+        // ----------------------------------------------------------
+        this.hill = new Hill(hillConfig);
+
+        // ----------------------------------------------------------
+        // 3. Create Jumper
+        // ----------------------------------------------------------
+        this.jumper = new Jumper();
+
+        // ----------------------------------------------------------
+        // 4. Create Physics
+        // ----------------------------------------------------------
+        this.physics = new SkihoppPhysics(game, this.hill, this.jumper.getState());
+
+        // ----------------------------------------------------------
+        // 5. Create Renderer
+        // ----------------------------------------------------------
+        this.skihoppRenderer = new SkihoppRenderer();
+        this.skihoppRenderer.init(game, this.hill, this._renderer);
+
+        // ----------------------------------------------------------
+        // 6. Create Controls
+        // ----------------------------------------------------------
+        this.controls = new SkihoppControls(game);
+        this.controls.init(game, this.jumper.getState());
+
+        // ----------------------------------------------------------
+        // 7. Create Wind
+        // ----------------------------------------------------------
+        this.wind = new Wind();
+
+        // ----------------------------------------------------------
+        // 8. Create Scoring System
+        // ----------------------------------------------------------
+        this.scoringSystem = new ScoringSystem(hillConfig);
+
+        // ----------------------------------------------------------
+        // 9. Create UI components
+        // ----------------------------------------------------------
+        this.menuScreen = new MenuScreen();
+        this.hud = new HUD();
+        this.judgeDisplay = new JudgeDisplay();
+        this.scoreboard = new Scoreboard();
+
+        // ----------------------------------------------------------
+        // 10. Set initial state
+        // ----------------------------------------------------------
+        game.setState(GameState.MENU);
+    }
+
+    // ------------------------------------------------------------------
+    // Update (called every fixed timestep)
+    // ------------------------------------------------------------------
+
+    /**
+     * @param {number} dt - fixed timestep in seconds
+     */
+    update(dt) {
+        const state = this.game.getState();
+
+        // Wind updates continuously (even on menu for ambient feel)
+        this.wind.update(dt);
+
+        // Feed wind speed into jumper state so physics can use it
+        const jumperState = this.jumper.getState();
+        jumperState.wind = this.wind.isHeadwind()
+            ? -this.wind.getSpeed()
+            : this.wind.getSpeed();
+
+        // Controls and physics only run during active gameplay
+        if (state === GameState.INRUN || state === GameState.TAKEOFF ||
+            state === GameState.FLIGHT || state === GameState.LANDING) {
+
+            this.controls.update(dt);
+            this.physics.update(dt);
+        }
+
+        // Track flight stability during FLIGHT phase
+        if (state === GameState.FLIGHT) {
+            this._trackFlightStability(dt);
+        }
+
+        // Landing delay: wait before transitioning to SCORE
+        if (state === GameState.LANDING) {
+            this._landingTimer += dt;
+            if (this._landingTimer >= LANDING_TO_SCORE_DELAY) {
+                this.game.setState(GameState.SCORE);
+            }
+        }
+
+        // Score animation progress
+        if (state === GameState.SCORE) {
+            this._scoreAnimationTime += dt;
+        }
+
+        // Audio: wind sound proportional to speed
+        this._updateAudio(state);
+    }
+
+    // ------------------------------------------------------------------
+    // Render (called every frame)
+    // ------------------------------------------------------------------
+
+    /**
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {number} width
+     * @param {number} height
+     */
+    render(ctx, width, height) {
+        const state = this.game.getState();
+        const jumperState = this.jumper.getState();
+
+        switch (state) {
+            case GameState.MENU:
+                this.menuScreen.render(ctx, width, height);
+                break;
+
+            case GameState.READY:
+            case GameState.INRUN:
+            case GameState.TAKEOFF:
+            case GameState.FLIGHT:
+            case GameState.LANDING:
+                // Render the 3D scene
+                this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                    speed: this.wind.getSpeed(),
+                    direction: this.wind.getDirection(),
+                });
+
+                // Overlay the HUD
+                this.hud.render(ctx, width, height, {
+                    speed: jumperState.speed,
+                    distance: jumperState.distance,
+                    bodyAngle: jumperState.bodyAngle,
+                    windSpeed: this.wind.getSpeed(),
+                    windDirection: this.wind.getDirection(),
+                    phase: state,
+                    takeoffQuality: jumperState.takeoffQuality,
+                });
+                break;
+
+            case GameState.SCORE:
+                // Frozen scene behind the score overlay
+                this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                    speed: this.wind.getSpeed(),
+                    direction: this.wind.getDirection(),
+                });
+
+                // Judge display with animation
+                if (this._scoreResult) {
+                    const progress = Math.min(1, this._scoreAnimationTime / SCORE_ANIMATION_DURATION);
+                    this.judgeDisplay.render(ctx, width, height, {
+                        judges: this._scoreResult.judges,
+                        distancePoints: this._scoreResult.distancePoints,
+                        stylePoints: this._scoreResult.stylePoints,
+                        windComp: this._scoreResult.windCompensation,
+                        totalPoints: this._scoreResult.totalPoints,
+                        animationProgress: progress,
+                    });
+                }
+                break;
+
+            case GameState.RESULTS:
+                this.scoreboard.render(ctx, width, height, {
+                    jumps: this._jumpResults,
+                    currentJumper: this._jumpResults.length - 1,
+                });
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // State change handler (called by Game state machine)
+    // ------------------------------------------------------------------
+
+    /**
+     * @param {string} newState - new GameState value
+     * @param {string} prevState - previous GameState value
+     */
+    onStateChange(newState, prevState) {
+        const jumperState = this.jumper.getState();
+
+        switch (newState) {
+            case GameState.READY:
+                // Reset jumper for a new attempt
+                this.jumper.reset();
+                this.physics.reset();
+                this._resetFlightTracking();
+                this._landingTimer = 0;
+                this._scoreResult = null;
+                this._scoreAnimationTime = 0;
+                break;
+
+            case GameState.INRUN:
+                // Run has started - play ambient sounds
+                if (this._audio) {
+                    this._audio.playWind(this.wind.getSpeed());
+                }
+                break;
+
+            case GameState.TAKEOFF:
+                // Swoosh sound at the table edge
+                if (this._audio) {
+                    this._audio.playSwoosh();
+                }
+                break;
+
+            case GameState.LANDING:
+                // Finalise flight stability on jumper state
+                jumperState.flightStability = this._calculateFinalStability();
+
+                // Landing sound
+                if (this._audio) {
+                    this._audio.playLanding(jumperState.landingQuality);
+                }
+                break;
+
+            case GameState.SCORE:
+                // Calculate score
+                this._scoreResult = this.scoringSystem.calculateScore({
+                    distance: jumperState.landingDistance,
+                    takeoffQuality: jumperState.takeoffQuality,
+                    flightStability: jumperState.flightStability,
+                    landingQuality: jumperState.landingQuality,
+                    windSpeed: this.wind.getSpeed(),
+                    windDirection: this.wind.getDirection(),
+                    gate: this.hill.defaultGate,
+                });
+
+                this._scoreAnimationTime = 0;
+
+                // Audio effects for score reveal
+                if (this._audio) {
+                    this._audio.playJudgeReveal();
+                    this._audio.playCrowdCheer(
+                        this._scoreResult.totalPoints > 120 ? 1.0 : 0.5
+                    );
+                }
+                break;
+
+            case GameState.RESULTS:
+                // Add this jump to the results list
+                this._jumpResults.push({
+                    name: 'Spiller',
+                    country: 'NOR',
+                    distance: jumperState.landingDistance,
+                    totalPoints: this._scoreResult ? this._scoreResult.totalPoints : 0,
+                    rank: this._jumpResults.length + 1,
+                });
+
+                // Re-sort by total points descending and update ranks
+                this._jumpResults.sort((a, b) => b.totalPoints - a.totalPoints);
+                this._jumpResults.forEach((r, i) => { r.rank = i + 1; });
+
+                // Fanfare for good scores
+                if (this._audio && this._scoreResult && this._scoreResult.totalPoints > 130) {
+                    this._audio.playFanfare();
+                }
+                break;
+
+            case GameState.MENU:
+                // Full reset when returning to menu
+                this.jumper.reset();
+                this.physics.reset();
+                this._resetFlightTracking();
+                this._landingTimer = 0;
+                this._scoreResult = null;
+                this._scoreAnimationTime = 0;
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Flight stability tracking
+    // ------------------------------------------------------------------
+
+    /**
+     * Track how steadily the jumper holds the optimal body angle during flight.
+     * Samples each physics tick; large deviations reduce the accumulated score.
+     */
+    _trackFlightStability(dt) {
+        const angle = this.jumper.getState().bodyAngle;
+        const deviation = Math.abs(angle - OPTIMAL_FLIGHT_ANGLE);
+
+        // Stability contribution for this tick: 1.0 when perfect, dropping
+        // toward 0 as deviation increases beyond the tolerance threshold.
+        const sample = Math.max(0, 1.0 - deviation / STABILITY_DEVIATION_TOLERANCE);
+
+        this._stabilityAccum += sample;
+        this._flightSamples++;
+    }
+
+    /**
+     * Calculate the final flight stability score (0-1) as the average of
+     * all sampled ticks during flight.
+     * @returns {number}
+     */
+    _calculateFinalStability() {
+        if (this._flightSamples === 0) return 1.0;
+        return this._stabilityAccum / this._flightSamples;
+    }
+
+    _resetFlightTracking() {
+        this._flightSamples = 0;
+        this._stabilityAccum = 0;
+    }
+
+    // ------------------------------------------------------------------
+    // Audio helpers
+    // ------------------------------------------------------------------
+
+    _updateAudio(state) {
+        if (!this._audio) return;
+
+        // Continuous wind sound during active phases
+        if (state === GameState.INRUN || state === GameState.FLIGHT ||
+            state === GameState.TAKEOFF || state === GameState.LANDING) {
+            this._audio.playWind(this.wind.getSpeed());
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Cleanup
+    // ------------------------------------------------------------------
+
+    destroy() {
+        if (this.controls) {
+            this.controls.destroy();
+        }
+
+        // Clear unsub handles
+        for (const unsub of this._unsubs) {
+            unsub();
+        }
+        this._unsubs = [];
+
+        // Null out references
+        this.game = null;
+        this.hill = null;
+        this.jumper = null;
+        this.physics = null;
+        this.skihoppRenderer = null;
+        this.controls = null;
+        this.scoringSystem = null;
+        this.wind = null;
+        this.menuScreen = null;
+        this.hud = null;
+        this.judgeDisplay = null;
+        this.scoreboard = null;
+        this._audio = null;
+        this._renderer = null;
+        this._input = null;
+        this._scoreResult = null;
+        this._jumpResults = [];
+    }
+}

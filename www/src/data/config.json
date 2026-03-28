@@ -1,0 +1,47 @@
+{
+  "game": {
+    "targetFPS": 60,
+    "canvasWidth": 390,
+    "canvasHeight": 844,
+    "gravity": 9.81,
+    "defaultHill": "K120"
+  },
+  "skihopp": {
+    "inrun": {
+      "maxSpeed": 92,
+      "tapBoostPerTap": 0.8,
+      "friction": 0.02,
+      "perfectTapWindow": 150
+    },
+    "takeoff": {
+      "perfectWindow": 100,
+      "goodWindow": 250,
+      "poorWindow": 500,
+      "perfectBonus": 1.0,
+      "goodBonus": 0.6,
+      "poorBonus": 0.2
+    },
+    "flight": {
+      "optimalAngle": 35,
+      "maxAngle": 55,
+      "minAngle": 10,
+      "liftCoefficient": 0.4,
+      "dragCoefficient": 0.15,
+      "angleChangeRate": 60,
+      "windEffect": 0.3
+    },
+    "landing": {
+      "telemarkWindow": 300,
+      "telemarkPerfectBonus": 3.0,
+      "telemarkGoodBonus": 1.5,
+      "noTelemarkPenalty": -2.0
+    },
+    "scoring": {
+      "meterValueK90": 2.0,
+      "meterValueK120": 1.8,
+      "basePoints": 60,
+      "maxStylePoints": 20,
+      "judgeCount": 5
+    }
+  }
+}

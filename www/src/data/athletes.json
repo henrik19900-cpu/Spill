@@ -1,0 +1,24 @@
+{
+  "players": [
+    { "name": "Spiller", "country": "NOR", "skill": 0.85, "isHuman": true },
+    { "name": "Kraft", "country": "AUT", "skill": 0.92 },
+    { "name": "Kobayashi", "country": "JPN", "skill": 0.94 },
+    { "name": "Lindvik", "country": "NOR", "skill": 0.90 },
+    { "name": "Geiger", "country": "GER", "skill": 0.88 },
+    { "name": "Kubacki", "country": "POL", "skill": 0.89 },
+    { "name": "Granerud", "country": "NOR", "skill": 0.93 },
+    { "name": "Zajc", "country": "SLO", "skill": 0.87 },
+    { "name": "Forfang", "country": "NOR", "skill": 0.86 },
+    { "name": "Stoch", "country": "POL", "skill": 0.91 },
+    { "name": "Wellinger", "country": "GER", "skill": 0.88 },
+    { "name": "Prevc", "country": "SLO", "skill": 0.87 },
+    { "name": "Tande", "country": "NOR", "skill": 0.85 },
+    { "name": "Johansson", "country": "NOR", "skill": 0.84 },
+    { "name": "Freund", "country": "GER", "skill": 0.83 },
+    { "name": "Ammann", "country": "SUI", "skill": 0.82 },
+    { "name": "Kasai", "country": "JPN", "skill": 0.80 },
+    { "name": "Klimov", "country": "RUS", "skill": 0.79 },
+    { "name": "Fannemel", "country": "NOR", "skill": 0.84 },
+    { "name": "Eisenbichler", "country": "GER", "skill": 0.86 }
+  ]
+}

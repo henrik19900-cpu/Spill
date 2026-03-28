@@ -1,0 +1,30 @@
+{
+  "K90": {
+    "name": "Normalbakke K90",
+    "kPoint": 90,
+    "hillSize": 100,
+    "inrunLength": 87,
+    "inrunAngle": 35,
+    "tableAngle": 11,
+    "tableLength": 7,
+    "landingAngle": 35.5,
+    "landingSteepness": 0.56,
+    "flatLength": 80,
+    "gateCount": 20,
+    "defaultGate": 15
+  },
+  "K120": {
+    "name": "Storbakke K120",
+    "kPoint": 120,
+    "hillSize": 140,
+    "inrunLength": 98,
+    "inrunAngle": 37,
+    "tableAngle": 11,
+    "tableLength": 7.2,
+    "landingAngle": 36,
+    "landingSteepness": 0.57,
+    "flatLength": 100,
+    "gateCount": 25,
+    "defaultGate": 20
+  }
+}

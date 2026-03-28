@@ -1,0 +1,19 @@
+{
+  "name": "vinter-ol-spill",
+  "version": "1.0.0",
+  "description": "Vinter-OL Spill - Skihopp og andre vintergrener",
+  "main": "www/index.html",
+  "scripts": {
+    "dev": "cd www && python3 -m http.server 8000",
+    "cap:init": "npx cap init 'Vinter-OL' com.vinterol.spill --web-dir www",
+    "cap:android": "npx cap add android",
+    "cap:sync": "npx cap sync",
+    "cap:run": "npx cap run android"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/haptics": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0"
+  }
+}
