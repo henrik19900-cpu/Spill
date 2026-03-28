@@ -27,9 +27,23 @@ export default class AudioManager {
     /** Currently playing wind node chain – so we can update / stop it */
     this._windSource = null;
     this._windGain = null;
+    this._windFilter = null;
+
+    /** Crowd ambience node chain */
+    this._crowdSource = null;
+    this._crowdGain = null;
+    this._crowdFilter = null;
+
+    /** Menu ambience node chain */
+    this._menuOsc = null;
+    this._menuLfo = null;
+    this._menuGain = null;
 
     /** Flag: has the context been initialised? */
     this._initialised = false;
+
+    /** Flag: has the context been resumed at least once? */
+    this._resumed = false;
 
     // Bind the one-time resume handler so we can remove it later.
     this._resumeHandler = this._initContext.bind(this);
@@ -70,8 +84,11 @@ export default class AudioManager {
     if (!this._initialised) {
       this._initContext();
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
+    if (!this._resumed && this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume();
+    }
+    if (this.ctx && this.ctx.state === 'running') {
+      this._resumed = true;
     }
   }
 
