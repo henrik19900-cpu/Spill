@@ -10,7 +10,7 @@
  *   Positive y = downward.
  */
 
-import { Vec2, GRAVITY, clamp, degToRad, radToDeg } from '../../core/Physics.js';
+import { Vec2, GRAVITY, clamp, lerp, degToRad, radToDeg, smoothstep, turbulenceNoise } from '../../core/Physics.js';
 import { GameState } from '../../core/Game.js';
 
 // ---------------------------------------------------------------------------
@@ -45,6 +45,24 @@ function createJumperState() {
         // Landing results
         landingDistance: 0,
         landingQuality: 0,
+
+        // --- New fields for improved physics ---
+
+        // Camera shake / vibration intensity (0-1, driven by inrun speed)
+        vibration: 0,
+
+        // Impact force at landing (m/s perpendicular to slope — used for style scoring)
+        impactForce: 0,
+
+        // Current turbulence offset applied (so renderer can visualize it)
+        turbulenceX: 0,
+        turbulenceY: 0,
+
+        // Wind value (m/s, positive = headwind, negative = tailwind)
+        wind: 0,
+
+        // Accumulated flight time (seconds, used for turbulence seed)
+        flightTime: 0,
     };
 }
 
@@ -72,7 +90,8 @@ export default class SkihoppPhysics {
 
         // Internal bookkeeping
         this._takeoffTimer = 0;       // seconds elapsed in TAKEOFF phase
-        this._takeoffDuration = 0.3;  // seconds the TAKEOFF phase lasts
+        this._takeoffDuration = 0.25; // seconds the TAKEOFF phase lasts
+        this._inrunTime = 0;          // accumulated inrun time for vibration
     }
 
     // ------------------------------------------------------------------
@@ -101,6 +120,7 @@ export default class SkihoppPhysics {
         this.cfgLanding = cfg.landing || {};
 
         this._takeoffTimer = 0;
+        this._inrunTime = 0;
         this._resetInrun();
     }
 
@@ -139,48 +159,65 @@ export default class SkihoppPhysics {
     reset() {
         Object.assign(this.jumper, createJumperState());
         this._takeoffTimer = 0;
+        this._inrunTime = 0;
         this._resetInrun();
     }
 
     // ------------------------------------------------------------------
-    // INRUN
+    // INRUN — Improved with natural acceleration curve and vibration
     // ------------------------------------------------------------------
 
     /** Place the jumper at the start of the inrun. */
     _resetInrun() {
-        // Distance is the full inrun length (positive = meters remaining to table)
         const inrunLength = this.hill.inrunLength || 100;
         this.jumper.distance = inrunLength;
         this.jumper.speed = 0;
-
-        // Position the jumper on the hill surface at the start
+        this._inrunTime = 0;
         this._syncPositionToInrun();
     }
 
     _updateInrun(dt) {
         const j = this.jumper;
-        const friction = this.cfgInrun.friction || 0.02;
-        const maxSpeed = this.cfgInrun.maxSpeed || 92;
+        this._inrunTime += dt;
 
-        // Slope angle at current position (distance remaining, mapped to
-        // a negative x relative to takeoff)
+        const friction     = this.cfgInrun.friction   || 0.02;
+        const maxSpeed     = this.cfgInrun.maxSpeed    || 26;   // m/s (~93.6 km/h)
+
+        // Slope angle at current position
         const xOnHill = -j.distance;
         const slopeAngle = degToRad(Math.abs(this.hill.getAngleAtDistance(xOnHill)));
 
-        // Acceleration = gravity component along slope minus friction drag
-        const a = GRAVITY * Math.sin(slopeAngle) - friction * j.speed;
+        // --- Natural acceleration with quadratic air resistance ---
+        // Gravity component along slope
+        const gravityPull = GRAVITY * Math.sin(slopeAngle);
+
+        // Friction: linear (ski friction) + quadratic (air drag) for natural speed curve
+        const airDragCoeff = 0.005;  // small air drag on inrun
+        const totalDrag = friction * GRAVITY * Math.cos(slopeAngle) + airDragCoeff * j.speed * j.speed;
+
+        const a = gravityPull - totalDrag;
         j.speed += a * dt;
         j.speed = clamp(j.speed, 0, maxSpeed);
+
+        // --- Vibration / camera shake at high speed ---
+        // Starts becoming noticeable above 60% max speed, peaks at max speed
+        const speedRatio = j.speed / maxSpeed;
+        const vibrationOnset = 0.6;
+        if (speedRatio > vibrationOnset) {
+            const vibrationT = (speedRatio - vibrationOnset) / (1.0 - vibrationOnset);
+            j.vibration = smoothstep(vibrationT) * 0.8; // 0-0.8 range
+        } else {
+            j.vibration = 0;
+        }
 
         // Reduce remaining distance
         j.distance -= j.speed * dt;
 
         if (j.distance <= 0) {
             j.distance = 0;
-            // Place jumper at the table edge origin
             j.x = 0;
             j.y = 0;
-            // Transition to TAKEOFF
+            j.vibration = 0; // kill vibration at transition
             this.game.setState(GameState.TAKEOFF);
             this._takeoffTimer = 0;
             return;
@@ -194,36 +231,53 @@ export default class SkihoppPhysics {
         const xOnHill = -this.jumper.distance;
         this.jumper.x = xOnHill;
         this.jumper.y = this.hill.getHeightAtDistance(xOnHill);
-
-        // Align body angle to slope
         this.jumper.bodyAngle = this.hill.getAngleAtDistance(xOnHill);
     }
 
     // ------------------------------------------------------------------
-    // TAKEOFF
+    // TAKEOFF — Powerful launch with quality-based upward boost
     // ------------------------------------------------------------------
 
     _updateTakeoff(dt) {
         const j = this.jumper;
         this._takeoffTimer += dt;
 
-        if (this._takeoffTimer >= this._takeoffDuration) {
-            // Compute launch parameters based on takeoff quality (set by controls)
-            const quality = clamp(j.takeoffQuality, 0, 1);
-            const tableAngle = degToRad(this.hill.tableAngle || 11);
+        // Smooth progress through the takeoff phase (0 -> 1)
+        const progress = clamp(this._takeoffTimer / this._takeoffDuration, 0, 1);
 
-            // Speed modification — better timing preserves more speed
-            const launchSpeed = j.speed * (0.8 + 0.2 * quality);
+        // During takeoff, the jumper rises slightly off the table via an upward
+        // impulse. Use smoothstep so the transition is smooth, not jarring.
+        const eased = smoothstep(progress);
 
-            // Flight angle — table angle plus an upward boost for good timing
-            // Upward = more negative y component, so we subtract the boost from
-            // the table angle (table angle is positive = nose down toward landing)
-            const boostDeg = quality * 5;
-            const launchAngle = tableAngle - degToRad(boostDeg);
+        // Blend table position toward launch position
+        const tableAngleRad = degToRad(this.hill.tableAngle || 11);
+        j.x = lerp(-0.5, 0, eased);  // slide forward along the table
+        j.y = lerp(this.hill.getHeightAtDistance(-0.5), 0, eased);
+
+        // Body angle: smoothly pitch from inrun angle toward launch angle
+        const quality = clamp(j.takeoffQuality, 0, 1);
+        const boostDeg = quality * 6;  // perfect timing -> 6 degrees upward boost
+        const targetBodyAngle = radToDeg(tableAngleRad) - boostDeg;
+        const inrunAngle = this.hill.getAngleAtDistance(-1) || radToDeg(tableAngleRad);
+        j.bodyAngle = lerp(inrunAngle, targetBodyAngle, eased);
+
+        if (progress >= 1.0) {
+            // --- Compute launch parameters ---
+
+            // Speed modification: perfect timing preserves ~97% of speed; poor ~82%
+            const speedRetention = 0.82 + 0.15 * quality;
+            const launchSpeed = j.speed * speedRetention;
+
+            // Launch angle: table angle minus an upward boost for good timing
+            const launchAngle = tableAngleRad - degToRad(boostDeg);
+
+            // Upward velocity kick for a "powerful" feel at good timing
+            // This adds a small vertical impulse independent of the angle change
+            const upwardKick = quality * 1.8; // m/s upward at perfect timing
 
             // Convert to velocity components
             j.vx = launchSpeed * Math.cos(launchAngle);
-            j.vy = launchSpeed * Math.sin(launchAngle);
+            j.vy = launchSpeed * Math.sin(launchAngle) - upwardKick;
 
             // Position at the table edge
             j.x = 0;
@@ -232,29 +286,36 @@ export default class SkihoppPhysics {
             // Set body angle to launch angle
             j.bodyAngle = radToDeg(launchAngle);
 
+            // Reset flight time
+            j.flightTime = 0;
+
             // Transition to FLIGHT
             this.game.setState(GameState.FLIGHT);
         }
     }
 
     // ------------------------------------------------------------------
-    // FLIGHT
+    // FLIGHT — Realistic but fun aerodynamics with turbulence
     // ------------------------------------------------------------------
 
     _updateFlight(dt) {
         const j = this.jumper;
         const cfg = this.cfgFlight;
 
-        const liftCoeff   = cfg.liftCoefficient  || 0.4;
-        const dragCoeff   = cfg.dragCoefficient   || 0.15;
+        // --- Configurable parameters ---
+        const liftCoeff    = cfg.liftCoefficient  || 0.52;
+        const dragCoeff    = cfg.dragCoefficient   || 0.11;
         const optimalAngle = degToRad(cfg.optimalAngle || 35);
-        const windEffect  = cfg.windEffect        || 0.3;
+        const windEffect   = cfg.windEffect        || 0.5;
+        const turbStrength = cfg.turbulenceStrength || 0.35;
+
+        // Advance flight clock
+        j.flightTime += dt;
 
         // Current velocity vector
         const vel = new Vec2(j.vx, j.vy);
         const speed = vel.length();
         if (speed < 0.01) {
-            // Basically stalled — just drop
             j.vy += GRAVITY * dt;
             j.y += j.vy * dt;
             this._checkLanding();
@@ -263,50 +324,71 @@ export default class SkihoppPhysics {
 
         const velDir = vel.normalize();
 
-        // Velocity direction angle (radians, relative to horizontal)
+        // Velocity direction angle (radians)
         const velAngle = Math.atan2(j.vy, j.vx);
 
         // Body angle in radians
         const bodyRad = degToRad(j.bodyAngle);
 
-        // Angle of attack: difference between body orientation and velocity direction
-        // Positive AoA = body pitched up relative to movement
+        // Angle of attack: body orientation minus velocity direction
         const aoa = bodyRad - velAngle;
 
         // ---- Forces ----
 
-        // 1. Gravity (acts straight down, +y)
+        // 1. Gravity
         let ax = 0;
         let ay = GRAVITY;
 
-        // 2. Drag — opposes velocity, proportional to v^2
-        //    Drag increases when body angle deviates from the velocity direction
-        const dragAngleFactor = 1.0 + 0.5 * Math.abs(aoa);
+        // 2. Drag — opposes velocity, v^2 scaling
+        //    Drag penalty grows with AoA deviation from optimal (stall at extremes)
+        const aoaAbs = Math.abs(aoa);
+        const dragAngleFactor = 1.0 + 0.8 * aoaAbs + 0.3 * aoaAbs * aoaAbs;
         const dragMagnitude = dragCoeff * speed * speed * dragAngleFactor;
         ax -= velDir.x * dragMagnitude;
         ay -= velDir.y * dragMagnitude;
 
-        // 3. Lift — perpendicular to velocity (upward component)
-        //    Depends on how close the angle of attack is to the optimal angle.
-        //    Lift direction: rotate velocity direction 90 degrees "upward"
-        //    (i.e., perpendicular, pointing away from the ground).
-        const liftDir = new Vec2(-velDir.y, velDir.x); // 90° CCW of velocity
+        // 3. Lift — perpendicular to velocity, depends on AoA proximity to optimal
+        //    Lift direction: 90 degrees CCW of velocity (points "up" relative to flight path)
+        const liftDir = new Vec2(-velDir.y, velDir.x);
 
-        // Lift effectiveness: peaks at optimal AoA, drops off on either side
-        const aoaDiff = Math.abs(aoa - optimalAngle);
-        const liftEfficiency = Math.max(0, 1.0 - (aoaDiff / optimalAngle));
-        const liftMagnitude = liftCoeff * speed * speed * liftEfficiency;
+        // Lift effectiveness curve: Gaussian-like around optimal AoA
+        // Small angle changes near optimal have visible but not catastrophic effects
+        const aoaDiff = aoa - optimalAngle;
+        const sigma = optimalAngle * 0.7; // width of the lift "sweet spot"
+        const liftEfficiency = Math.exp(-(aoaDiff * aoaDiff) / (2 * sigma * sigma));
 
-        // Lift should push the jumper "up" (negative y). If liftDir.y > 0
-        // we need to flip it so it acts upward.
+        // V-style bonus: when near optimal angle, lift is significantly higher
+        // This makes the optimal ~35 degree angle give noticeably more distance
+        const vStyleBonus = liftEfficiency > 0.8 ? 1.0 + 0.25 * (liftEfficiency - 0.8) / 0.2 : 1.0;
+
+        const liftMagnitude = liftCoeff * speed * speed * liftEfficiency * vStyleBonus;
+
+        // Ensure lift pushes upward (negative y in our coordinate system)
         const liftSign = liftDir.y <= 0 ? 1 : -1;
         ax += liftDir.x * liftMagnitude * liftSign;
         ay += liftDir.y * liftMagnitude * liftSign;
 
-        // 4. Wind — simple horizontal force
-        // Wind value can be set externally on the jumper (j.wind), defaulting to 0.
+        // 4. Wind — headwind (positive) gives extra lift and slower horizontal,
+        //           tailwind (negative) reduces lift and pushes along
         const wind = j.wind || 0;
-        ax += wind * windEffect;
+        // Headwind: increases effective airspeed -> more lift, more drag
+        // We model this as a direct horizontal force plus a lift modifier
+        const windForce = wind * windEffect;
+        ax -= windForce;  // headwind slows horizontal movement
+        // Headwind also boosts lift (positive wind = higher, longer jumps)
+        const windLiftBoost = wind * 0.15 * speed;
+        ay -= windLiftBoost; // upward force from headwind
+
+        // 5. Turbulence — small random perturbations the player must counteract
+        //    Intensity builds over flight time (more turbulence further from hill)
+        const turbRamp = clamp(j.flightTime / 1.5, 0, 1); // ramps up over 1.5 seconds
+        const turbX = turbulenceNoise(j.flightTime, 0) * turbStrength * turbRamp;
+        const turbY = turbulenceNoise(j.flightTime, 42.0) * turbStrength * turbRamp * 0.6;
+        ax += turbX;
+        ay += turbY;
+        // Expose turbulence for the renderer
+        j.turbulenceX = turbX;
+        j.turbulenceY = turbY;
 
         // ---- Integration (semi-implicit Euler) ----
         j.vx += ax * dt;
@@ -321,6 +403,10 @@ export default class SkihoppPhysics {
         this._checkLanding();
     }
 
+    // ------------------------------------------------------------------
+    // Landing detection — smooth with interpolated contact and impact force
+    // ------------------------------------------------------------------
+
     _checkLanding() {
         const j = this.jumper;
 
@@ -329,22 +415,45 @@ export default class SkihoppPhysics {
 
         const hillY = this.hill.getHeightAtDistance(j.x);
         if (j.y >= hillY) {
-            // Jumper has reached or crossed the hill surface
+            // --- Interpolate the exact landing point ---
+            // Step back to find where the jumper crossed the surface
+            // Use previous position (before this frame's integration) for precision
+            const prevX = j.x - j.vx * (1 / 60); // approximate previous x
+            const prevY = j.y - j.vy * (1 / 60); // approximate previous y
+            const prevHillY = this.hill.getHeightAtDistance(prevX);
 
-            // Snap to the surface
-            j.y = hillY;
+            // Linear interpolation factor for when jumper crossed the surface
+            const above = prevHillY - prevY;   // how far above the surface before
+            const below = j.y - hillY;         // how far below the surface after
+            const total = above + below;
+            const t = total > 0.001 ? above / total : 1.0;
 
-            // Record landing distance (horizontal from takeoff)
+            // Interpolated landing position
+            j.x = lerp(prevX, j.x, t);
+            j.y = this.hill.getHeightAtDistance(j.x);
+
+            // Interpolated velocity at landing
+            // (since we used semi-implicit Euler, velocity is already updated;
+            //  we approximate the landing-moment velocity via the same lerp)
+
+            // --- Landing distance ---
             j.landingDistance = j.x;
 
-            // Calculate landing quality based on angle matching
-            // Compare trajectory angle with hill slope angle
+            // --- Landing quality: angle matching ---
             const trajectoryAngle = radToDeg(Math.atan2(j.vy, j.vx));
             const hillAngle = this.hill.getAngleAtDistance(j.x);
             const angleDiff = Math.abs(trajectoryAngle - hillAngle);
 
-            // Perfect match (0 diff) = quality 1.0, 30+ degrees off = 0
-            j.landingQuality = clamp(1.0 - angleDiff / 30, 0, 1);
+            // Perfect match (0 diff) = 1.0, 25+ degrees off = 0
+            j.landingQuality = clamp(1.0 - angleDiff / 25, 0, 1);
+
+            // --- Impact force (perpendicular component of velocity relative to slope) ---
+            // Used for style scoring: lower impact = cleaner landing
+            const hillAngleRad = degToRad(hillAngle);
+            const hillNormal = new Vec2(-Math.sin(hillAngleRad), Math.cos(hillAngleRad));
+            const impactVel = new Vec2(j.vx, j.vy);
+            // Dot product with hill normal gives the perpendicular impact speed
+            j.impactForce = Math.abs(impactVel.dot(hillNormal));
 
             // Transition to LANDING state
             this.game.setState(GameState.LANDING);
@@ -352,19 +461,21 @@ export default class SkihoppPhysics {
     }
 
     // ------------------------------------------------------------------
-    // LANDING (outrun deceleration)
+    // LANDING (outrun deceleration) — smoother with slope-aware braking
     // ------------------------------------------------------------------
 
     _updateLanding(dt) {
         const j = this.jumper;
 
-        // Deceleration on the outrun
-        const deceleration = 8; // m/s^2 — aggressive braking on the flat
         const slopeAngle = degToRad(this.hill.getAngleAtDistance(j.x));
 
-        // Speed along the slope, decreasing
+        // Deceleration: base braking + extra from a rough landing
+        const baseDecel = 6;    // m/s^2
+        const impactDecel = j.impactForce > 5 ? 2.0 : 0; // extra braking if hard landing
+        const deceleration = baseDecel + impactDecel;
+
         if (j.speed > 0) {
-            // Gravity component along slope aids or resists depending on direction
+            // Gravity along slope (helps on downhill, hinders on flat/uphill)
             const gravComponent = GRAVITY * Math.sin(slopeAngle);
             j.speed += (gravComponent - deceleration) * dt;
             j.speed = Math.max(j.speed, 0);
@@ -381,7 +492,8 @@ export default class SkihoppPhysics {
             j.vy = 0;
         }
 
-        // Align body angle to slope during outrun
-        j.bodyAngle = this.hill.getAngleAtDistance(j.x);
+        // Smoothly align body angle to slope during outrun
+        const targetAngle = this.hill.getAngleAtDistance(j.x);
+        j.bodyAngle = lerp(j.bodyAngle, targetAngle, clamp(dt * 8, 0, 1));
     }
 }

@@ -73,6 +73,7 @@ export default class Tournament {
       windSpeed: wind ? wind.getSpeed() : 0.5 + Math.random() * 1.5,
       windDirection: wind ? wind.getDirection() : Math.random() * 360,
       gate: this.hillConfig.defaultGate,
+      jumperNationality: athlete.country || null,
     });
 
     return { ...result, distance, athleteName: athlete.name, country: athlete.country };
@@ -100,7 +101,7 @@ export default class Tournament {
   /**
    * Advance to the next jumper. Returns status object.
    */
-  nextJumper() {
+  nextJumper(wind) {
     this.currentJumperIndex++;
 
     if (this.currentJumperIndex >= this.athletes.length) {
@@ -115,6 +116,11 @@ export default class Tournament {
       // Start next round - in round 2, only top 30 jump (or all if fewer)
       this.currentRound++;
       this.currentJumperIndex = 0;
+
+      // Shift wind conditions for the new round
+      if (wind && typeof wind.shiftForNewRound === 'function') {
+        wind.shiftForNewRound();
+      }
 
       if (this.currentRound === 2) {
         this._calculateRankings();

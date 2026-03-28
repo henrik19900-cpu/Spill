@@ -8,10 +8,10 @@
   },
   "skihopp": {
     "inrun": {
-      "maxSpeed": 92,
-      "tapBoostPerTap": 0.8,
-      "friction": 0.02,
-      "perfectTapWindow": 150
+      "maxSpeed": 26,
+      "tapBoostPerTap": 0.5,
+      "friction": 0.018,
+      "perfectTapWindow": 140
     },
     "takeoff": {
       "perfectWindow": 100,
@@ -22,19 +22,22 @@
       "poorBonus": 0.2
     },
     "flight": {
-      "optimalAngle": 35,
+      "optimalAngle": 33,
       "maxAngle": 55,
       "minAngle": 10,
-      "liftCoefficient": 0.4,
-      "dragCoefficient": 0.15,
-      "angleChangeRate": 60,
-      "windEffect": 0.3
+      "liftCoefficient": 0.52,
+      "dragCoefficient": 0.11,
+      "angleChangeRate": 55,
+      "windEffect": 0.5,
+      "turbulenceStrength": 0.35,
+      "vStyleLiftBonus": 0.08
     },
     "landing": {
       "telemarkWindow": 300,
       "telemarkPerfectBonus": 3.0,
       "telemarkGoodBonus": 1.5,
-      "noTelemarkPenalty": -2.0
+      "noTelemarkPenalty": -2.0,
+      "maxSafeLandingAngle": 55
     },
     "scoring": {
       "meterValueK90": 2.0,
