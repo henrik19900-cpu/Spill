@@ -46,7 +46,7 @@ export default class SkihoppRenderer {
 
         // Pre-generated visual data
         this._stars = [];
-        this._mountains = [[], [], []]; // 3 parallax layers
+        this._mountains = [[], [], [], []]; // 4 parallax layers
         this._spectators = [];
         this._snowParticles = [];
 
@@ -83,14 +83,15 @@ export default class SkihoppRenderer {
     _generateStars() {
         const rng = seededRandom(42);
         this._stars = [];
-        for (let i = 0; i < 60; i++) {
+        for (let i = 0; i < 90; i++) {
             this._stars.push({
                 x: rng(),
-                y: rng() * 0.55,
+                y: rng() * 0.50,
                 r: 0.5 + rng() * 1.8,
                 a: 0.3 + rng() * 0.7,
                 twinkleSpeed: 0.5 + rng() * 2.0,
                 twinkleOffset: rng() * Math.PI * 2,
+                sparkle: rng() < 0.12, // ~12% of stars get a cross/sparkle shape
             });
         }
     }
@@ -98,12 +99,13 @@ export default class SkihoppRenderer {
     _generateMountains() {
         const rng = seededRandom(1337);
         const layerConfigs = [
-            { baseY: 0.40, variance: 0.12, color: '#0d1530', peaks: 12 },
-            { baseY: 0.48, variance: 0.10, color: '#162040', peaks: 14 },
-            { baseY: 0.55, variance: 0.08, color: '#1d2d50', peaks: 16 },
+            { baseY: 0.38, variance: 0.14, color: '#080e24', peaks: 22 },
+            { baseY: 0.44, variance: 0.11, color: '#0f1a38', peaks: 24 },
+            { baseY: 0.52, variance: 0.09, color: '#1a2848', peaks: 26 },
+            { baseY: 0.58, variance: 0.07, color: '#2a3a5c', peaks: 28 },
         ];
 
-        this._mountains = layerConfigs.map(cfg => {
+        this._mountains = layerConfigs.map((cfg, layerIdx) => {
             const pts = [];
             // Extend well beyond screen width for parallax scrolling
             const count = cfg.peaks;
@@ -111,11 +113,24 @@ export default class SkihoppRenderer {
                 const t = i / count;
                 // Use a wide range so parallax never runs out of mountains
                 pts.push({
-                    x: -0.3 + t * 1.6,
+                    x: -0.4 + t * 1.8,
                     y: cfg.baseY - rng() * cfg.variance,
                 });
             }
-            return { points: pts, color: cfg.color };
+
+            // Generate pine tree positions for the nearest layer
+            let pines = [];
+            if (layerIdx === layerConfigs.length - 1) {
+                for (let i = 0; i < 60; i++) {
+                    pines.push({
+                        t: rng(),            // 0-1 position along ridge
+                        h: 6 + rng() * 10,   // tree height in px
+                        w: 3 + rng() * 4,    // tree width in px
+                    });
+                }
+            }
+
+            return { points: pts, color: cfg.color, pines };
         });
     }
 
@@ -159,14 +174,29 @@ export default class SkihoppRenderer {
     _generateSnowParticles() {
         const rng = seededRandom(999);
         this._snowParticles = [];
-        for (let i = 0; i < 80; i++) {
+        for (let i = 0; i < 100; i++) {
+            // Depth layer: 0 = far background, 1 = near foreground
+            const depth = rng();
+            // Size scales with depth: background 1-2px, foreground 2-4px
+            const r = 1 + depth * 3;
+            // Larger / closer particles fall faster
+            const baseFallSpeed = 0.03 + depth * 0.1;
+            // Larger particles are more opaque
+            const alpha = 0.15 + depth * 0.6;
+            // Whether this particle renders as a snowflake shape (only larger ones)
+            const isFlake = r > 2.5 && rng() < 0.4;
+
             this._snowParticles.push({
                 x: rng(),
                 y: rng(),
-                r: 1 + rng() * 2,
-                speedX: (rng() - 0.5) * 0.15,
-                speedY: 0.05 + rng() * 0.1,
-                alpha: 0.2 + rng() * 0.5,
+                r,
+                depth,
+                baseDriftX: (rng() - 0.5) * 0.08,
+                speedY: baseFallSpeed,
+                alpha,
+                isFlake,
+                wobblePhase: rng() * Math.PI * 2,
+                wobbleSpeed: 0.5 + rng() * 1.5,
             });
         }
     }
@@ -186,6 +216,7 @@ export default class SkihoppRenderer {
     render(ctx, width, height, jumperState, gameState, wind) {
         if (!this._initialized || !this.renderer) return;
 
+        this._wind = wind || { speed: 0, direction: 0 };
         this._time += 1 / 60;
 
         // --- Camera management ---
@@ -298,44 +329,130 @@ export default class SkihoppRenderer {
     // ------------------------------------------------------------------
 
     _drawSky(ctx, w, h) {
+        // Richer sky gradient: very dark top, deep blue middle, slight teal near horizon
         const grad = ctx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0, '#050520');
-        grad.addColorStop(0.4, '#0a0a2e');
-        grad.addColorStop(0.7, '#1a3a6e');
-        grad.addColorStop(1, '#243b6e');
+        grad.addColorStop(0, '#020210');
+        grad.addColorStop(0.25, '#060828');
+        grad.addColorStop(0.45, '#0a1240');
+        grad.addColorStop(0.65, '#0e2a5e');
+        grad.addColorStop(0.80, '#133a5c');
+        grad.addColorStop(0.92, '#1a4a58');
+        grad.addColorStop(1, '#1e5460');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
 
-        // Aurora borealis
+        // Subtle warm amber/orange glow at horizon
+        const hGlowGrad = ctx.createLinearGradient(0, h * 0.75, 0, h);
+        hGlowGrad.addColorStop(0, 'rgba(255,180,80,0)');
+        hGlowGrad.addColorStop(0.4, 'rgba(255,160,60,0.04)');
+        hGlowGrad.addColorStop(0.7, 'rgba(255,140,40,0.06)');
+        hGlowGrad.addColorStop(1, 'rgba(255,120,30,0.03)');
+        ctx.fillStyle = hGlowGrad;
+        ctx.fillRect(0, h * 0.75, w, h * 0.25);
+
+        // Aurora borealis: 5 overlapping sine waves, vivid green/teal/purple
         const t = (this._time || 0);
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
-        for (let i = 0; i < 3; i++) {
-            const baseY = h * (0.12 + i * 0.06);
+        const auroraLayers = [
+            { baseY: 0.10, color: [64, 255, 128],  alpha: 0.10, freqs: [0.007, 0.013, 0.021], speeds: [0.35, 0.6, 0.25] },
+            { baseY: 0.14, color: [64, 255, 221],  alpha: 0.09, freqs: [0.009, 0.017, 0.006], speeds: [0.45, 0.3, 0.55] },
+            { baseY: 0.18, color: [128, 64, 255],  alpha: 0.08, freqs: [0.006, 0.014, 0.023], speeds: [0.5, 0.7, 0.35] },
+            { baseY: 0.13, color: [64, 255, 180],  alpha: 0.11, freqs: [0.011, 0.019, 0.008], speeds: [0.3, 0.5, 0.65] },
+            { baseY: 0.21, color: [100, 80, 255],  alpha: 0.08, freqs: [0.008, 0.016, 0.025], speeds: [0.55, 0.4, 0.3] },
+        ];
+        for (let i = 0; i < auroraLayers.length; i++) {
+            const al = auroraLayers[i];
+            const baseY = h * al.baseY;
             ctx.beginPath();
             ctx.moveTo(0, baseY);
-            for (let x = 0; x <= w; x += 4) {
-                const wave = Math.sin(x * 0.008 + t * 0.4 + i * 2.1) * 20
-                           + Math.sin(x * 0.015 + t * 0.7 + i) * 10;
+            for (let x = 0; x <= w; x += 3) {
+                const wave = Math.sin(x * al.freqs[0] + t * al.speeds[0] + i * 1.8) * 22
+                           + Math.sin(x * al.freqs[1] + t * al.speeds[1] + i * 0.7) * 14
+                           + Math.sin(x * al.freqs[2] + t * al.speeds[2] + i * 2.5) * 8;
                 ctx.lineTo(x, baseY + wave);
             }
-            ctx.lineTo(w, h * 0.4);
-            ctx.lineTo(0, h * 0.4);
+            ctx.lineTo(w, h * 0.38);
+            ctx.lineTo(0, h * 0.38);
             ctx.closePath();
-            const colors = ['rgba(0,255,128,0.06)', 'rgba(80,200,255,0.04)', 'rgba(180,100,255,0.03)'];
-            ctx.fillStyle = colors[i];
+
+            // Vertical gradient fade for each aurora band
+            const aGrad = ctx.createLinearGradient(0, baseY - 25, 0, h * 0.38);
+            const [r, g, b] = al.color;
+            aGrad.addColorStop(0, `rgba(${r},${g},${b},${(al.alpha * 0.3).toFixed(3)})`);
+            aGrad.addColorStop(0.3, `rgba(${r},${g},${b},${al.alpha.toFixed(3)})`);
+            aGrad.addColorStop(0.7, `rgba(${r},${g},${b},${(al.alpha * 0.5).toFixed(3)})`);
+            aGrad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+            ctx.fillStyle = aGrad;
             ctx.fill();
         }
         ctx.restore();
 
-        // Twinkling stars
+        // Crescent moon in the upper-left portion of the sky
+        const moonX = w * 0.18;
+        const moonY = h * 0.10;
+        const moonR = Math.min(w, h) * 0.030;
+        // Soft glow around the moon
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const moonGlow = ctx.createRadialGradient(moonX, moonY, moonR * 0.5, moonX, moonY, moonR * 4);
+        moonGlow.addColorStop(0, 'rgba(200,220,255,0.12)');
+        moonGlow.addColorStop(0.5, 'rgba(180,200,240,0.04)');
+        moonGlow.addColorStop(1, 'rgba(150,180,220,0)');
+        ctx.fillStyle = moonGlow;
+        ctx.fillRect(moonX - moonR * 5, moonY - moonR * 5, moonR * 10, moonR * 10);
+        ctx.restore();
+        // Crescent: draw bright disc with a clipped-out section for the crescent shape.
+        // We avoid 'destination-out' on the main canvas because it would punch through
+        // the sky gradient. Instead, draw the crescent as an arc path.
+        ctx.save();
+        // Create a clipping region: the full moon circle MINUS the shadow circle
+        // Using even-odd fill rule to create the crescent shape
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+        // Counter-arc for the shadow (drawn counter-clockwise for even-odd subtraction)
+        ctx.arc(moonX + moonR * 0.5, moonY - moonR * 0.15, moonR * 0.85, 0, Math.PI * 2, true);
+        ctx.fillStyle = 'rgba(230,235,255,0.9)';
+        ctx.fill('evenodd');
+        ctx.restore();
+
+        // Twinkling stars with sparkle shapes on bright ones
         for (const s of this._stars) {
             const twinkle = 0.5 + 0.5 * Math.sin(t * s.twinkleSpeed + s.twinkleOffset);
-            const alpha = s.a * (0.4 + 0.6 * twinkle);
-            ctx.beginPath();
-            ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
-            ctx.fill();
+            const alpha = s.a * (0.2 + 0.8 * twinkle);
+            const sx = s.x * w;
+            const sy = s.y * h;
+
+            if (s.sparkle) {
+                // Cross/sparkle shape: 4 radiating lines from center
+                const armLen = s.r * 2.5 + twinkle * 2.0;
+                ctx.save();
+                ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+                ctx.lineWidth = 0.7;
+                ctx.beginPath();
+                ctx.moveTo(sx, sy - armLen);
+                ctx.lineTo(sx, sy + armLen);
+                ctx.moveTo(sx - armLen, sy);
+                ctx.lineTo(sx + armLen, sy);
+                const diagLen = armLen * 0.55;
+                ctx.moveTo(sx - diagLen, sy - diagLen);
+                ctx.lineTo(sx + diagLen, sy + diagLen);
+                ctx.moveTo(sx + diagLen, sy - diagLen);
+                ctx.lineTo(sx - diagLen, sy + diagLen);
+                ctx.stroke();
+                // Bright center dot
+                ctx.beginPath();
+                ctx.arc(sx, sy, s.r * 0.8, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255,255,255,${Math.min(1, alpha * 1.3).toFixed(2)})`;
+                ctx.fill();
+                ctx.restore();
+            } else {
+                // Regular dot star
+                ctx.beginPath();
+                ctx.arc(sx, sy, s.r, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+                ctx.fill();
+            }
         }
     }
 
@@ -344,44 +461,64 @@ export default class SkihoppRenderer {
     // ------------------------------------------------------------------
 
     _drawMountains(ctx, w, h) {
-        const parallaxFactors = [0.1, 0.2, 0.3];
+        const parallaxFactors = [0.08, 0.16, 0.28, 0.42];
         const cameraX = this.renderer.cameraX;
+        const numLayers = this._mountains.length;
 
-        // --- Warm amber glow at horizon line ---
-        const glowTop = h * 0.35;
-        const glowBottom = h * 0.65;
-        const glowGrad = ctx.createLinearGradient(0, glowTop, 0, glowBottom);
-        glowGrad.addColorStop(0, 'rgba(255,190,90,0)');
-        glowGrad.addColorStop(0.3, 'rgba(255,170,70,0.10)');
-        glowGrad.addColorStop(0.5, 'rgba(255,155,55,0.12)');
-        glowGrad.addColorStop(0.7, 'rgba(255,140,40,0.07)');
-        glowGrad.addColorStop(1, 'rgba(255,120,30,0)');
-        ctx.fillStyle = glowGrad;
-        ctx.fillRect(0, glowTop, w, glowBottom - glowTop);
-
-        for (let layer = 0; layer < 3; layer++) {
-            const { points, color } = this._mountains[layer];
+        for (let layer = 0; layer < numLayers; layer++) {
+            const { points, color, pines } = this._mountains[layer];
             const offsetX = -cameraX * parallaxFactors[layer] * 0.01;
 
-            // Draw the mountain silhouette
+            // Draw the mountain silhouette using smooth quadratic curves
             ctx.beginPath();
             const firstPt = points[0];
             ctx.moveTo((firstPt.x + offsetX) * w, firstPt.y * h);
 
             for (let i = 1; i < points.length; i++) {
-                const pt = points[i];
-                ctx.lineTo((pt.x + offsetX) * w, pt.y * h);
+                const prev = points[i - 1];
+                const curr = points[i];
+                // Smooth curve through midpoints for a natural silhouette
+                const cpx = ((prev.x + curr.x) / 2 + offsetX) * w;
+                const cpy = ((prev.y + curr.y) / 2) * h;
+                ctx.quadraticCurveTo(
+                    (prev.x + offsetX) * w, prev.y * h,
+                    cpx, cpy
+                );
             }
+            // Final segment to last point
+            const lastPt = points[points.length - 1];
+            ctx.lineTo((lastPt.x + offsetX) * w, lastPt.y * h);
 
             // Close along the bottom
-            ctx.lineTo((points[points.length - 1].x + offsetX) * w, h);
-            ctx.lineTo((points[0].x + offsetX) * w, h);
+            ctx.lineTo((lastPt.x + offsetX) * w, h);
+            ctx.lineTo((firstPt.x + offsetX) * w, h);
             ctx.closePath();
             ctx.fillStyle = color;
             ctx.fill();
 
+            // Subtle edge highlight on top of each layer (atmospheric haze effect)
+            if (layer < numLayers - 1) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo((firstPt.x + offsetX) * w, firstPt.y * h);
+                for (let i = 1; i < points.length; i++) {
+                    const prev = points[i - 1];
+                    const curr = points[i];
+                    const cpx = ((prev.x + curr.x) / 2 + offsetX) * w;
+                    const cpy = ((prev.y + curr.y) / 2) * h;
+                    ctx.quadraticCurveTo(
+                        (prev.x + offsetX) * w, prev.y * h,
+                        cpx, cpy
+                    );
+                }
+                ctx.lineTo((lastPt.x + offsetX) * w, lastPt.y * h);
+                ctx.strokeStyle = `rgba(100,140,180,${(0.08 - layer * 0.015).toFixed(3)})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.restore();
+            }
+
             // --- White snow caps on peaks ---
-            // Find local peaks (lower y = higher on screen) and draw small white triangles
             for (let i = 1; i < points.length - 1; i++) {
                 const prev = points[i - 1];
                 const curr = points[i];
@@ -391,20 +528,65 @@ export default class SkihoppRenderer {
                 if (curr.y < prev.y && curr.y < next.y) {
                     const peakX = (curr.x + offsetX) * w;
                     const peakY = curr.y * h;
-                    // Snow cap size: small triangles, slightly larger for foreground layers
-                    const capH = 5 + layer * 2;
-                    const capW = capH * 1.5;
-                    // Front layers are more opaque
-                    const alpha = 0.5 + layer * 0.15;
+                    // Snow cap size scales with layer (foreground layers are bigger)
+                    const capH = 4 + layer * 2.5;
+                    const capW = capH * 1.6;
+                    const alpha = 0.35 + layer * 0.12;
 
                     ctx.beginPath();
                     ctx.moveTo(peakX, peakY);
                     ctx.lineTo(peakX - capW / 2, peakY + capH);
                     ctx.lineTo(peakX + capW / 2, peakY + capH);
                     ctx.closePath();
-                    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+                    ctx.fillStyle = `rgba(220,230,255,${alpha.toFixed(2)})`;
                     ctx.fill();
                 }
+            }
+
+            // --- Pine tree silhouettes on nearest layer ---
+            if (pines && pines.length > 0) {
+                ctx.save();
+                ctx.fillStyle = '#1e2e48';
+                for (const pine of pines) {
+                    // Find the ridge Y at this t position by interpolating between points
+                    const totalSpan = lastPt.x - firstPt.x;
+                    const treeWorldX = firstPt.x + pine.t * totalSpan;
+                    // Find surrounding points for interpolation
+                    let ridgeY = lastPt.y;
+                    for (let i = 1; i < points.length; i++) {
+                        if (points[i].x >= treeWorldX) {
+                            const p0 = points[i - 1];
+                            const p1 = points[i];
+                            const seg = (treeWorldX - p0.x) / (p1.x - p0.x || 1);
+                            ridgeY = p0.y + (p1.y - p0.y) * seg;
+                            break;
+                        }
+                    }
+
+                    const tx = (treeWorldX + offsetX) * w;
+                    const ty = ridgeY * h;
+                    const th = pine.h;
+                    const tw = pine.w;
+
+                    // Simple triangular pine tree silhouette (two stacked triangles)
+                    ctx.beginPath();
+                    // Lower wider triangle
+                    ctx.moveTo(tx, ty - th * 0.3);
+                    ctx.lineTo(tx - tw, ty);
+                    ctx.lineTo(tx + tw, ty);
+                    ctx.closePath();
+                    ctx.fill();
+                    // Upper narrower triangle
+                    ctx.beginPath();
+                    ctx.moveTo(tx, ty - th);
+                    ctx.lineTo(tx - tw * 0.65, ty - th * 0.25);
+                    ctx.lineTo(tx + tw * 0.65, ty - th * 0.25);
+                    ctx.closePath();
+                    ctx.fill();
+                    // Small trunk
+                    ctx.fillRect(tx - 0.8, ty, 1.6, 2);
+                }
+                ctx.restore();
             }
         }
     }
@@ -416,7 +598,6 @@ export default class SkihoppRenderer {
     _drawSnowGround(ctx, w, h) {
         const profile = this.hill.getProfile();
         const r = this.renderer;
-        const ppm = r.ppm;
 
         // --- Main snow ground fill with gradient ---
         ctx.beginPath();
@@ -435,62 +616,56 @@ export default class SkihoppRenderer {
         // Gradient from bluish-white at surface to deeper blue below
         const surfaceY = Math.min(firstScreen.y, lastScreen.y);
         const groundGrad = ctx.createLinearGradient(0, surfaceY, 0, h + 50);
-        groundGrad.addColorStop(0, '#dce8f8');
-        groundGrad.addColorStop(0.1, '#d0e0f2');
-        groundGrad.addColorStop(0.3, '#c0d4ea');
+        groundGrad.addColorStop(0, '#e4eef8');
+        groundGrad.addColorStop(0.05, '#dce8f5');
+        groundGrad.addColorStop(0.15, '#d0e0f2');
+        groundGrad.addColorStop(0.35, '#c0d4ea');
         groundGrad.addColorStop(0.6, '#a0b8d8');
         groundGrad.addColorStop(1, '#7090b8');
         ctx.fillStyle = groundGrad;
         ctx.fill();
 
-        // --- Snow texture: subtle blue shadow ellipses ---
+        // --- Subtle blue shadow patches for depth ---
         const rng = seededRandom(2024);
+        const xRange = profile[profile.length - 1].x - profile[0].x;
+        const xStart = profile[0].x;
         ctx.save();
-        ctx.globalAlpha = 0.08;
-        for (let i = 0; i < 30; i++) {
-            const wx = profile[0].x + rng() * (profile[profile.length - 1].x - profile[0].x);
+        for (let i = 0; i < 40; i++) {
+            const wx = xStart + rng() * xRange;
             const wy = this.hill.getHeightAtDistance(wx);
-            const sp1 = r.worldToScreen(wx, wy + 1 + rng() * 8);
-            const sp2 = r.worldToScreen(wx + 3 + rng() * 12, wy + 2 + rng() * 10);
+            const offY = 1 + rng() * 10;
+            const sp1 = r.worldToScreen(wx, wy + offY);
+            const radX = 8 + rng() * 30;
+            const radY = 3 + rng() * 8;
+            if (sp1.x < -60 || sp1.x > w + 60 || sp1.y < -20 || sp1.y > h + 60) continue;
+            // Vary the shadow color slightly
+            const blueTint = Math.floor(80 + rng() * 40);
+            ctx.globalAlpha = 0.04 + rng() * 0.06;
             ctx.beginPath();
-            ctx.ellipse(sp1.x, sp1.y, Math.abs(sp2.x - sp1.x) * 0.6, Math.abs(sp2.y - sp1.y) * 0.3 + 4, rng() * 0.3, 0, Math.PI * 2);
-            ctx.fillStyle = '#6080b0';
+            ctx.ellipse(sp1.x, sp1.y, radX, radY, rng() * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = `rgb(70,${blueTint},170)`;
             ctx.fill();
         }
         ctx.restore();
 
-        // --- Snow texture: small sparkle dots (crystalline glints) ---
-        const rng2 = seededRandom(4040);
-        const t = this._time || 0;
-        ctx.save();
-        for (let i = 0; i < 50; i++) {
-            const wx = profile[0].x + rng2() * (profile[profile.length - 1].x - profile[0].x);
-            const wy = this.hill.getHeightAtDistance(wx) + 1 + rng2() * 12;
-            const sp = r.worldToScreen(wx, wy);
-            if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) continue;
-            const sparkle = 0.3 + 0.7 * Math.abs(Math.sin(t * (1.5 + rng2() * 2) + rng2() * 6.28));
-            ctx.globalAlpha = 0.15 * sparkle;
-            ctx.beginPath();
-            ctx.arc(sp.x, sp.y, 1 + rng2() * 1.5, 0, Math.PI * 2);
-            ctx.fillStyle = '#ffffff';
-            ctx.fill();
-        }
-        ctx.restore();
-
-        // --- Snow drift ridges (subtle wavy highlight lines) ---
+        // --- Snow drift ridges (wavy highlight lines along the ground) ---
         const rng3 = seededRandom(6060);
         ctx.save();
-        ctx.globalAlpha = 0.06;
-        ctx.strokeStyle = '#e0ecff';
-        ctx.lineWidth = 1;
-        for (let ridge = 0; ridge < 8; ridge++) {
-            const baseWx = profile[0].x + rng3() * (profile[profile.length - 1].x - profile[0].x);
-            const baseWy = this.hill.getHeightAtDistance(baseWx) + 3 + rng3() * 15;
+        ctx.lineCap = 'round';
+        for (let ridge = 0; ridge < 14; ridge++) {
+            const baseWx = xStart + rng3() * xRange;
+            const baseWy = this.hill.getHeightAtDistance(baseWx) + 2 + rng3() * 16;
+            const ridgeLen = 6 + rng3() * 25;
+            const segments = 12;
+            // Alternate between brighter white and soft blue-white
+            const bright = rng3() < 0.5;
+            ctx.globalAlpha = bright ? 0.1 : 0.06;
+            ctx.strokeStyle = bright ? '#f0f6ff' : '#d8e8f8';
+            ctx.lineWidth = 0.8 + rng3() * 0.8;
             ctx.beginPath();
-            const ridgeLen = 8 + rng3() * 20;
-            for (let j = 0; j <= 10; j++) {
-                const rx = baseWx + (j / 10) * ridgeLen;
-                const ry = baseWy + Math.sin(j * 0.8 + rng3() * 6) * 0.5;
+            for (let j = 0; j <= segments; j++) {
+                const rx = baseWx + (j / segments) * ridgeLen;
+                const ry = baseWy + Math.sin(j * 0.7 + rng3() * 6.28) * 0.6;
                 const sp = r.worldToScreen(rx, ry);
                 if (j === 0) ctx.moveTo(sp.x, sp.y);
                 else ctx.lineTo(sp.x, sp.y);
@@ -499,11 +674,148 @@ export default class SkihoppRenderer {
         }
         ctx.restore();
 
-        // --- Pine trees along the sides of the hill ---
+        // --- Pine trees at varying distances along the ground ---
+        this._drawSnowGroundTrees(ctx, w, h);
+
+        // --- Sparkle dots that twinkle over time ---
+        const rng2 = seededRandom(4040);
+        const t = this._time || 0;
+        ctx.save();
+        for (let i = 0; i < 70; i++) {
+            const wx = xStart + rng2() * xRange;
+            const wy = this.hill.getHeightAtDistance(wx) + 1 + rng2() * 14;
+            const sp = r.worldToScreen(wx, wy);
+            if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) continue;
+            // Each sparkle has its own frequency and phase so they twinkle independently
+            const freq = 1.2 + rng2() * 2.5;
+            const phase = rng2() * 6.28;
+            // Sine produces smooth on/off; threshold creates discrete appear/disappear
+            const raw = Math.sin(t * freq + phase);
+            // Only visible when raw > 0.3, creating a twinkling effect
+            if (raw < 0.3) continue;
+            const intensity = (raw - 0.3) / 0.7; // 0..1
+            ctx.globalAlpha = 0.25 * intensity * intensity;
+            ctx.beginPath();
+            const dotR = 0.8 + rng2() * 1.0;
+            ctx.arc(sp.x, sp.y, dotR, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            // Add a tiny cross-star on the brightest sparkles
+            if (intensity > 0.7) {
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 0.4;
+                ctx.globalAlpha = 0.15 * intensity;
+                const cr = dotR * 2.5;
+                ctx.beginPath();
+                ctx.moveTo(sp.x - cr, sp.y);
+                ctx.lineTo(sp.x + cr, sp.y);
+                ctx.moveTo(sp.x, sp.y - cr);
+                ctx.lineTo(sp.x, sp.y + cr);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+
+        // --- Original pine trees along the hill sides ---
         this._drawPineTrees(ctx, w, h);
 
         // --- Crowd areas near the outrun ---
         this._drawCrowdArea(ctx, w, h);
+    }
+
+    /** Draw 10-15 recognizable pine trees at varying distances along the snowy ground. */
+    _drawSnowGroundTrees(ctx, w, h) {
+        const r = this.renderer;
+        const rng = seededRandom(8888);
+        const profile = this.hill.getProfile();
+        const xStart = profile[0].x;
+        const xRange = profile[profile.length - 1].x - xStart;
+
+        const trees = [];
+        const treeCount = 12;
+        for (let i = 0; i < treeCount; i++) {
+            const wx = xStart + rng() * xRange;
+            const wy = this.hill.getHeightAtDistance(wx);
+            // Place trees behind the hill surface (larger offsetY = further behind)
+            const distance = rng(); // 0 = far, 1 = near
+            const offsetY = 6 + (1 - distance) * 20 + rng() * 5;
+            const treeH = 2.5 + distance * 4 + rng() * 2; // far trees smaller
+            trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng() });
+        }
+
+        // Sort: far trees first (drawn behind near trees)
+        trees.sort((a, b) => a.distance - b.distance);
+
+        for (const tree of trees) {
+            const base = r.worldToScreen(tree.wx, tree.wy);
+            const top = r.worldToScreen(tree.wx, tree.wy - tree.h);
+            const treeHPx = base.y - top.y;
+            if (treeHPx < 3 || base.y < -50 || base.y > h + 100) continue;
+            if (base.x < -100 || base.x > w + 100) continue;
+
+            const treeW = treeHPx * 0.5;
+            // Far trees are slightly lighter/more muted (atmospheric perspective)
+            const dist = tree.distance;
+
+            // --- Brown trunk ---
+            const trunkW = treeW * 0.12;
+            const trunkH = treeHPx * 0.18;
+            ctx.fillStyle = dist < 0.3 ? '#4a3520' : '#3a2510';
+            ctx.fillRect(base.x - trunkW, base.y - trunkH, trunkW * 2, trunkH);
+
+            // --- Three triangular foliage layers (dark green body) ---
+            const greenR = Math.floor(10 + (1 - dist) * 15);
+            const greenG = Math.floor(50 + (1 - dist) * 30 + tree.seed * 15);
+            const greenB = Math.floor(18 + (1 - dist) * 10);
+            const layers = [
+                { yOff: 0.0, wScale: 1.0, brighten: 0 },
+                { yOff: 0.28, wScale: 0.75, brighten: 8 },
+                { yOff: 0.52, wScale: 0.5, brighten: 16 },
+            ];
+            for (const layer of layers) {
+                const ly = base.y - treeHPx * (0.18 + layer.yOff * 0.82);
+                const lh = treeHPx * 0.42;
+                const lw = treeW * layer.wScale;
+                const gR = Math.min(255, greenR + layer.brighten);
+                const gG = Math.min(255, greenG + layer.brighten);
+                const gB = Math.min(255, greenB + layer.brighten);
+                ctx.fillStyle = `rgb(${gR},${gG},${gB})`;
+                ctx.beginPath();
+                ctx.moveTo(base.x, ly - lh);
+                ctx.lineTo(base.x - lw / 2, ly);
+                ctx.lineTo(base.x + lw / 2, ly);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // --- White snow on top of each foliage layer ---
+            ctx.save();
+            ctx.fillStyle = 'rgba(225, 238, 255, 0.7)';
+            // Snow cap on the tip
+            const capW = treeW * 0.22;
+            const capY = base.y - treeHPx * 0.95;
+            ctx.beginPath();
+            ctx.moveTo(base.x, top.y - 1);
+            ctx.lineTo(base.x - capW, capY + treeHPx * 0.08);
+            ctx.lineTo(base.x + capW, capY + treeHPx * 0.08);
+            ctx.closePath();
+            ctx.fill();
+
+            // Snow patches on lower layers (wider, subtle)
+            for (const layer of [layers[0], layers[1]]) {
+                const ly = base.y - treeHPx * (0.18 + layer.yOff * 0.82);
+                const lw = treeW * layer.wScale;
+                const snowW = lw * 0.45;
+                ctx.globalAlpha = 0.4;
+                ctx.beginPath();
+                ctx.moveTo(base.x - snowW * 0.3, ly - treeHPx * 0.35);
+                ctx.lineTo(base.x - snowW * 0.6, ly - treeHPx * 0.22);
+                ctx.lineTo(base.x + snowW * 0.1, ly - treeHPx * 0.28);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        }
     }
 
     /** Draw simple pine trees (triangular) along the sides of the hill. */
@@ -1049,19 +1361,19 @@ export default class SkihoppRenderer {
         const phase = js.phase;
         const bodyAngle = (js.bodyAngle || 0) * Math.PI / 180;
 
-        // --- Motion blur trail during FLIGHT (3 fading afterimages) ---
+        // --- Motion trail during FLIGHT (last 4 positions, fading afterimages) ---
         if (phase === GameState.FLIGHT || phase === 'FLIGHT') {
             if (!this._jumperTrail) this._jumperTrail = [];
             this._jumperTrail.push({ x: js.x, y: js.y, angle: bodyAngle });
-            if (this._jumperTrail.length > 4) this._jumperTrail.shift();
+            if (this._jumperTrail.length > 5) this._jumperTrail.shift();
 
-            const trailCount = Math.min(3, this._jumperTrail.length - 1);
+            const trailAlphas = [0.05, 0.1, 0.15, 0.2];
+            const trailCount = Math.min(4, this._jumperTrail.length - 1);
             for (let i = 0; i < trailCount; i++) {
                 const t = this._jumperTrail[i];
                 const tsp = r.worldToScreen(t.x, t.y);
-                const alpha = (i + 1) / (trailCount + 2) * 0.3;
                 ctx.save();
-                ctx.globalAlpha = alpha;
+                ctx.globalAlpha = trailAlphas[i] || 0.05;
                 ctx.translate(tsp.x, tsp.y);
                 this._drawJumperFlight(ctx, scale, t.angle);
                 ctx.restore();
@@ -1077,8 +1389,6 @@ export default class SkihoppRenderer {
         if (phase === GameState.INRUN || phase === 'INRUN') {
             this._drawJumperInrun(ctx, scale, bodyAngle);
         } else if (phase === GameState.TAKEOFF || phase === 'TAKEOFF') {
-            // During takeoff, draw the inrun pose with the current body angle
-            // (smooth transition from crouch to launch)
             this._drawJumperInrun(ctx, scale, bodyAngle);
         } else if (phase === GameState.FLIGHT || phase === 'FLIGHT') {
             this._drawJumperFlight(ctx, scale, bodyAngle);
@@ -1093,68 +1403,250 @@ export default class SkihoppRenderer {
 
 
     /**
-     * Rounded red helmet with goggles strip (side view).
+     * Aerodynamic helmet with dark visor/goggles (side view).
      * Origin = centre of head, facing right.
+     * Glossy dark red with highlight, oval shape wider at back.
      */
     _drawHelmet(ctx, s) {
-        const hr = 0.14 * s;
+        const hr = 0.15 * s;
 
-        // Helmet shell
-        ctx.fillStyle = '#cc2222';
+        // Helmet shell -- aerodynamic oval, wider at back
+        const grad = ctx.createRadialGradient(
+            -hr * 0.15, -hr * 0.25, hr * 0.1,
+            0, 0, hr * 1.3
+        );
+        grad.addColorStop(0, '#ff4444');
+        grad.addColorStop(0.35, '#cc1111');
+        grad.addColorStop(0.7, '#991111');
+        grad.addColorStop(1, '#660a0a');
+        ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.ellipse(0, 0, hr, hr * 1.05, 0, 0, Math.PI * 2);
+        ctx.ellipse(-hr * 0.08, 0, hr * 1.15, hr * 1.0, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Highlight
-        ctx.fillStyle = 'rgba(255,120,120,0.35)';
+        // Glossy highlight arc on top
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = '#ff8888';
         ctx.beginPath();
-        ctx.ellipse(-hr * 0.2, -hr * 0.3, hr * 0.4, hr * 0.3, -0.3, 0, Math.PI * 2);
+        ctx.ellipse(-hr * 0.25, -hr * 0.4, hr * 0.5, hr * 0.22, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Secondary highlight (small bright spot)
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = '#ffbbbb';
+        ctx.beginPath();
+        ctx.ellipse(-hr * 0.35, -hr * 0.3, hr * 0.18, hr * 0.12, -0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Visor/goggles strip -- dark band across front
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath();
+        ctx.ellipse(hr * 0.35, hr * 0.05, hr * 0.6, hr * 0.22, 0.05, 0, Math.PI * 2);
         ctx.fill();
 
-        // Goggles strip
-        ctx.fillStyle = '#222222';
+        // Goggles frame edge
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = Math.max(0.5, 0.015 * s);
         ctx.beginPath();
-        ctx.ellipse(hr * 0.25, hr * 0.05, hr * 0.55, hr * 0.18, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.ellipse(hr * 0.35, hr * 0.05, hr * 0.6, hr * 0.22, 0.05, 0, Math.PI * 2);
+        ctx.stroke();
 
-        // Lens reflection
-        ctx.fillStyle = 'rgba(100,180,255,0.4)';
+        // Visor blue reflection -- curved highlight
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        const visorGrad = ctx.createLinearGradient(
+            hr * 0.1, -hr * 0.1, hr * 0.7, hr * 0.15
+        );
+        visorGrad.addColorStop(0, 'rgba(80,160,255,0.0)');
+        visorGrad.addColorStop(0.3, 'rgba(100,190,255,0.7)');
+        visorGrad.addColorStop(0.6, 'rgba(140,210,255,0.5)');
+        visorGrad.addColorStop(1, 'rgba(80,160,255,0.0)');
+        ctx.fillStyle = visorGrad;
         ctx.beginPath();
-        ctx.ellipse(hr * 0.35, -hr * 0.02, hr * 0.22, hr * 0.10, 0.1, 0, Math.PI * 2);
+        ctx.ellipse(hr * 0.4, -hr * 0.01, hr * 0.35, hr * 0.10, 0.1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Chin guard (small dark area below visor)
+        ctx.fillStyle = '#880808';
+        ctx.beginPath();
+        ctx.ellipse(hr * 0.3, hr * 0.35, hr * 0.25, hr * 0.12, 0.1, 0, Math.PI);
         ctx.fill();
     }
 
     /**
-     * Dark gray ski with curved-up tip (2.4m long).
+     * Detailed ski with curved-up tip, dark gray base, colored stripe, and binding.
+     * 2.4m long, thin profile.
      * Drawn from startX along positive X for the given length.
      */
     _drawSki(ctx, s, startX, length) {
         const thickness = 0.05 * s;
-        const tipLen = 0.2 * s;
-        const tipCurve = 0.12 * s;
+        const tipLen = 0.25 * s;
+        const tipCurve = 0.14 * s;
 
-        ctx.fillStyle = '#3a3a3a';
-        ctx.strokeStyle = '#2a2a2a';
-        ctx.lineWidth = Math.max(1, 0.02 * s);
-
+        // Main ski body -- dark gray
+        ctx.fillStyle = '#333333';
         ctx.beginPath();
         ctx.moveTo(startX, thickness / 2);
         ctx.lineTo(startX + length - tipLen, thickness / 2);
         ctx.quadraticCurveTo(
-            startX + length, thickness / 2,
+            startX + length - tipLen * 0.3, thickness / 2,
             startX + length, -tipCurve
         );
         ctx.quadraticCurveTo(
-            startX + length - tipLen * 0.3, -tipCurve * 0.3,
+            startX + length - tipLen * 0.5, -tipCurve * 0.2,
             startX + length - tipLen, -thickness / 2
         );
         ctx.lineTo(startX, -thickness / 2);
         ctx.closePath();
         ctx.fill();
+
+        // Outline
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = Math.max(0.5, 0.015 * s);
+        ctx.stroke();
+
+        // Bright colored stripe down the center (yellow)
+        ctx.strokeStyle = '#ffcc00';
+        ctx.lineWidth = Math.max(1, 0.025 * s);
+        ctx.beginPath();
+        ctx.moveTo(startX + 0.02 * s, 0);
+        ctx.lineTo(startX + length - tipLen * 1.1, 0);
+        ctx.stroke();
+
+        // Secondary thin red accent stripe
+        ctx.strokeStyle = '#dd2200';
+        ctx.lineWidth = Math.max(0.5, 0.012 * s);
+        ctx.beginPath();
+        ctx.moveTo(startX + 0.02 * s, thickness * 0.3);
+        ctx.lineTo(startX + length - tipLen * 1.2, thickness * 0.3);
+        ctx.stroke();
+
+        // Binding -- small rectangle near the foot position
+        const bindX = startX + length * 0.3;
+        const bindW = 0.12 * s;
+        const bindH = thickness * 1.8;
+        ctx.fillStyle = '#555555';
+        ctx.fillRect(bindX - bindW / 2, -bindH / 2, bindW, bindH);
+        // Binding top clip
+        ctx.fillStyle = '#777777';
+        ctx.fillRect(bindX - bindW * 0.35, -bindH / 2 - thickness * 0.3, bindW * 0.7, thickness * 0.4);
+        // Binding heel piece
+        ctx.fillStyle = '#444444';
+        ctx.fillRect(bindX + bindW * 0.3, -bindH * 0.35, bindW * 0.3, bindH * 0.7);
+    }
+
+    /** Draw a limb segment with rounded ends. */
+    _drawLimb(ctx, x1, y1, x2, y2, width, color) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
         ctx.stroke();
     }
 
-    /** INRUN: deep crouch, arms tucked behind back, head down. */
+    /** Draw a detailed boot at position, rotated to leg angle. */
+    _drawBoot(ctx, s, x, y, angle) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        const bw = 0.16 * s;
+        const bh = 0.09 * s;
+        // Boot body -- dark gray/black
+        ctx.fillStyle = '#222222';
+        ctx.beginPath();
+        ctx.moveTo(-bw * 0.3, -bh / 2);
+        ctx.lineTo(bw * 0.7, -bh / 2);
+        ctx.lineTo(bw * 0.7, bh * 0.1);
+        ctx.lineTo(bw * 0.5, bh / 2);
+        ctx.lineTo(-bw * 0.3, bh / 2);
+        ctx.closePath();
+        ctx.fill();
+        // Boot sole
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(-bw * 0.3, bh * 0.25, bw, bh * 0.25);
+        // Boot buckle detail
+        ctx.fillStyle = '#555555';
+        ctx.fillRect(bw * 0.1, -bh * 0.35, bw * 0.15, bh * 0.15);
+        ctx.restore();
+    }
+
+    /** Draw a glove at position (darker blue). */
+    _drawGlove(ctx, s, x, y) {
+        ctx.fillStyle = '#0d2266';
+        ctx.beginPath();
+        ctx.ellipse(x, y, 0.05 * s, 0.035 * s, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#1a3388';
+        ctx.beginPath();
+        ctx.ellipse(x, y, 0.035 * s, 0.04 * s, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** Draw torso with suit details: rich blue main, lighter side panel stripes, bib number. */
+    _drawTorso(ctx, s, hipX, hipY, shoulderX, shoulderY) {
+        const dx = shoulderX - hipX;
+        const dy = shoulderY - hipY;
+        const torsoAngle = Math.atan2(dy, dx);
+        const torsoW = Math.max(3, 0.20 * s);
+
+        // Main body suit -- rich blue
+        ctx.strokeStyle = '#1a40aa';
+        ctx.lineWidth = torsoW;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(shoulderX, shoulderY);
+        ctx.stroke();
+
+        // Side panel stripes (lighter blue, offset to both sides)
+        const nx = -Math.sin(torsoAngle);
+        const ny = Math.cos(torsoAngle);
+        const stripeOff = torsoW * 0.35;
+        ctx.strokeStyle = '#3366cc';
+        ctx.lineWidth = Math.max(1.5, 0.06 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX + nx * stripeOff, hipY + ny * stripeOff);
+        ctx.lineTo(shoulderX + nx * stripeOff, shoulderY + ny * stripeOff);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(hipX - nx * stripeOff, hipY - ny * stripeOff);
+        ctx.lineTo(shoulderX - nx * stripeOff, shoulderY - ny * stripeOff);
+        ctx.stroke();
+
+        // Subtle highlight line along center
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = Math.max(1, 0.03 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX + dx * 0.1, hipY + dy * 0.1);
+        ctx.lineTo(hipX + dx * 0.9, hipY + dy * 0.9);
+        ctx.stroke();
+
+        // Bib / number on chest area
+        const bibX = hipX + dx * 0.55;
+        const bibY = hipY + dy * 0.55;
+        ctx.save();
+        ctx.translate(bibX, bibY);
+        ctx.rotate(torsoAngle);
+        const bibW = 0.14 * s;
+        const bibH = 0.10 * s;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillRect(-bibW / 2, -bibH / 2, bibW, bibH);
+        ctx.fillStyle = '#111111';
+        ctx.font = `bold ${Math.max(5, 0.07 * s)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('7', 0, 0);
+        ctx.restore();
+    }
+
+    /** INRUN: DEEP crouch, knees bent, body folded forward, arms tucked behind lower back, chin tucked. */
     _drawJumperInrun(ctx, s, angle) {
         ctx.rotate(angle);
 
@@ -1163,123 +1655,137 @@ export default class SkihoppRenderer {
         this._drawSki(ctx, s, -1.2 * s, 2.4 * s);
         ctx.restore();
 
-        // Articulated crouch: feet at origin
-        const kneeX = -0.05 * s;
-        const kneeY = -0.40 * s;
-        const hipX = 0.05 * s;
-        const hipY = -0.55 * s;
-
-        // Lower leg (shin)
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.12 * s);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(kneeX, kneeY);
-        ctx.stroke();
+        // Deep crouch articulation: feet at origin, very compact
+        const footX = 0;
+        const footY = 0;
+        const kneeX = 0.10 * s;       // knee pushed forward (deep bend)
+        const kneeY = -0.32 * s;
+        const hipX = -0.05 * s;       // hip low and back
+        const hipY = -0.38 * s;
 
         // Boot
-        ctx.fillStyle = '#222';
-        ctx.fillRect(-0.08 * s, -0.06 * s, 0.18 * s, 0.06 * s);
+        this._drawBoot(ctx, s, footX, footY - 0.02 * s, 0);
 
-        // Upper leg (thigh)
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.13 * s);
-        ctx.beginPath();
-        ctx.moveTo(kneeX, kneeY);
-        ctx.lineTo(hipX, hipY);
-        ctx.stroke();
+        // Lower leg (shin) -- deep angle
+        this._drawLimb(ctx, footX, footY - 0.02 * s, kneeX, kneeY,
+            Math.max(2.5, 0.13 * s), '#1a40aa');
 
-        // Torso (leaning forward aggressively)
-        const shoulderX = hipX + 0.50 * s;
-        const shoulderY = hipY - 0.15 * s;
-        ctx.strokeStyle = '#2050bb';
-        ctx.lineWidth = Math.max(3, 0.18 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(shoulderX, shoulderY);
-        ctx.stroke();
+        // Upper leg (thigh) -- folded tight
+        this._drawLimb(ctx, kneeX, kneeY, hipX, hipY,
+            Math.max(2.5, 0.14 * s), '#1a40aa');
 
-        // Suit detail stripe
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = Math.max(1, 0.04 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX + 0.05 * s, hipY - 0.02 * s);
-        ctx.lineTo(shoulderX - 0.05 * s, shoulderY + 0.02 * s);
-        ctx.stroke();
+        // Torso -- folded forward aggressively, nearly parallel to thighs
+        const shoulderX = hipX + 0.52 * s;
+        const shoulderY = hipY - 0.08 * s;
+        this._drawTorso(ctx, s, hipX, hipY, shoulderX, shoulderY);
 
-        // Arms tucked behind back
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(1.5, 0.08 * s);
-        ctx.beginPath();
-        ctx.moveTo(shoulderX - 0.10 * s, shoulderY + 0.05 * s);
-        ctx.lineTo(hipX + 0.10 * s, hipY + 0.10 * s);
-        ctx.lineTo(hipX - 0.15 * s, hipY + 0.15 * s);
-        ctx.stroke();
+        // Arms tucked behind lower back (two segments per arm)
+        const elbowX = shoulderX - 0.15 * s;
+        const elbowY = shoulderY + 0.12 * s;
+        const handX = hipX - 0.05 * s;
+        const handY = hipY + 0.14 * s;
+        this._drawLimb(ctx, shoulderX - 0.08 * s, shoulderY + 0.06 * s, elbowX, elbowY,
+            Math.max(1.5, 0.08 * s), '#1a40aa');
+        this._drawLimb(ctx, elbowX, elbowY, handX, handY,
+            Math.max(1.5, 0.07 * s), '#1a40aa');
+        this._drawGlove(ctx, s, handX, handY);
 
-        // Head (tilted down)
+        // Second arm (slightly offset for depth)
+        const elbow2X = elbowX + 0.02 * s;
+        const elbow2Y = elbowY - 0.03 * s;
+        const hand2X = handX + 0.03 * s;
+        const hand2Y = handY - 0.02 * s;
+        this._drawLimb(ctx, shoulderX - 0.06 * s, shoulderY + 0.04 * s, elbow2X, elbow2Y,
+            Math.max(1.5, 0.07 * s), '#1a40aa');
+        this._drawLimb(ctx, elbow2X, elbow2Y, hand2X, hand2Y,
+            Math.max(1.5, 0.06 * s), '#1a40aa');
+        this._drawGlove(ctx, s, hand2X, hand2Y);
+
+        // Head (tilted down, chin tucked)
         ctx.save();
-        ctx.translate(shoulderX + 0.18 * s, shoulderY - 0.03 * s);
-        ctx.rotate(0.25);
+        ctx.translate(shoulderX + 0.16 * s, shoulderY + 0.02 * s);
+        ctx.rotate(0.4);
         this._drawHelmet(ctx, s);
         ctx.restore();
     }
 
-    /** FLIGHT: body horizontal at bodyAngle, arms at sides, V-skis (25 deg each). */
+    /** FLIGHT: body nearly horizontal, stretched forward, slight back arch, arms at sides, V-style skis 25 deg. */
     _drawJumperFlight(ctx, s, angle) {
         ctx.rotate(angle);
 
-        // Body horizontal. Head left (negative X), feet right (positive X).
         const hipX = 0;
         const hipY = 0;
 
-        // Torso
-        const torsoLen = 0.55 * s;
+        // Torso -- stretched forward with slight arch (quadratic curve)
+        const torsoLen = 0.58 * s;
         const shoulderX = hipX - torsoLen;
-        const shoulderY = hipY - 0.03 * s;
-        ctx.strokeStyle = '#2050bb';
-        ctx.lineWidth = Math.max(3, 0.18 * s);
+        const shoulderY = hipY - 0.06 * s;
+        const midTorsoX = hipX - torsoLen * 0.5;
+        const midTorsoY = hipY - 0.10 * s;
+        const torsoW = Math.max(3, 0.20 * s);
+
+        // Main body suit with arch
+        ctx.strokeStyle = '#1a40aa';
+        ctx.lineWidth = torsoW;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(hipX, hipY);
-        ctx.lineTo(shoulderX, shoulderY);
+        ctx.quadraticCurveTo(midTorsoX, midTorsoY, shoulderX, shoulderY);
         ctx.stroke();
 
-        // Suit stripe
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = Math.max(1, 0.04 * s);
+        // Side panel stripes along the arch
+        const stripeOff = torsoW * 0.35;
+        ctx.strokeStyle = '#3366cc';
+        ctx.lineWidth = Math.max(1.5, 0.06 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY + stripeOff);
+        ctx.quadraticCurveTo(midTorsoX, midTorsoY + stripeOff, shoulderX, shoulderY + stripeOff);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY - stripeOff);
+        ctx.quadraticCurveTo(midTorsoX, midTorsoY - stripeOff, shoulderX, shoulderY - stripeOff);
+        ctx.stroke();
+
+        // Center highlight
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+        ctx.lineWidth = Math.max(1, 0.03 * s);
         ctx.beginPath();
         ctx.moveTo(hipX - 0.06 * s, hipY);
-        ctx.lineTo(shoulderX + 0.06 * s, shoulderY);
+        ctx.quadraticCurveTo(midTorsoX, midTorsoY - 0.01 * s, shoulderX + 0.06 * s, shoulderY);
         ctx.stroke();
 
-        // Legs (extending back from hip)
-        const kneeX = hipX + 0.42 * s;
-        const kneeY = hipY + 0.10 * s;
-        const footX = kneeX + 0.38 * s;
-        const footY = kneeY + 0.05 * s;
-
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.12 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(kneeX, kneeY);
-        ctx.stroke();
-        ctx.lineWidth = Math.max(2, 0.10 * s);
-        ctx.beginPath();
-        ctx.moveTo(kneeX, kneeY);
-        ctx.lineTo(footX, footY);
-        ctx.stroke();
-
-        // Boot
-        ctx.fillStyle = '#222';
+        // Bib on chest
+        const bibAngle = Math.atan2(shoulderY - hipY, shoulderX - hipX);
         ctx.save();
-        ctx.translate(footX, footY);
-        ctx.rotate(Math.atan2(footY - kneeY, footX - kneeX));
-        ctx.fillRect(-0.04 * s, -0.05 * s, 0.14 * s, 0.07 * s);
+        ctx.translate(midTorsoX, midTorsoY);
+        ctx.rotate(bibAngle);
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        const bibW = 0.12 * s;
+        const bibH = 0.08 * s;
+        ctx.fillRect(-bibW / 2, -bibH / 2, bibW, bibH);
+        ctx.fillStyle = '#111';
+        ctx.font = `bold ${Math.max(4, 0.06 * s)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('7', 0, 0);
         ctx.restore();
 
-        // V-style skis (25 deg spread each)
+        // Legs (extending back from hip, nearly straight for flight)
+        const kneeX = hipX + 0.40 * s;
+        const kneeY = hipY + 0.04 * s;
+        const footX = kneeX + 0.40 * s;
+        const footY = kneeY + 0.02 * s;
+
+        this._drawLimb(ctx, hipX, hipY, kneeX, kneeY,
+            Math.max(2.5, 0.13 * s), '#1a40aa');
+        this._drawLimb(ctx, kneeX, kneeY, footX, footY,
+            Math.max(2, 0.11 * s), '#1a40aa');
+
+        // Boots
+        const legAngle = Math.atan2(footY - kneeY, footX - kneeX);
+        this._drawBoot(ctx, s, footX, footY, legAngle);
+
+        // V-style skis (25 deg spread each, tips slightly upward)
         const vAngle = 25 * Math.PI / 180;
         ctx.save();
         ctx.translate(footX, footY);
@@ -1293,82 +1799,35 @@ export default class SkihoppRenderer {
         ctx.restore();
         ctx.restore();
 
-        // Arms at sides
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(1.5, 0.08 * s);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(shoulderX + 0.05 * s, shoulderY + 0.05 * s);
-        ctx.lineTo(shoulderX + 0.30 * s, shoulderY + 0.20 * s);
-        ctx.lineTo(hipX - 0.05 * s, hipY + 0.18 * s);
-        ctx.stroke();
+        // Arms pressed tight along the sides (two arms for depth)
+        const armW = Math.max(1.5, 0.07 * s);
+        this._drawLimb(ctx, shoulderX + 0.08 * s, shoulderY + 0.10 * s,
+            hipX - 0.10 * s, hipY + 0.12 * s, armW, '#1a40aa');
+        this._drawGlove(ctx, s, hipX - 0.10 * s, hipY + 0.12 * s);
+        this._drawLimb(ctx, shoulderX + 0.10 * s, shoulderY + 0.08 * s,
+            hipX - 0.06 * s, hipY + 0.10 * s, Math.max(1.5, 0.08 * s), '#152e80');
+        this._drawGlove(ctx, s, hipX - 0.06 * s, hipY + 0.10 * s);
 
-        // Glove
-        ctx.fillStyle = '#222';
-        ctx.beginPath();
-        ctx.arc(hipX - 0.05 * s, hipY + 0.18 * s, 0.04 * s, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Head
+        // Head -- stretched forward, nose-down
         ctx.save();
-        ctx.translate(shoulderX - 0.18 * s, shoulderY + 0.01 * s);
-        ctx.rotate(0.1);
+        ctx.translate(shoulderX - 0.16 * s, shoulderY + 0.02 * s);
+        ctx.rotate(0.15);
         this._drawHelmet(ctx, s);
         ctx.restore();
     }
 
-    /** LANDING: telemark -- one leg forward, one back, arms spread wide. */
+    /** LANDING: telemark -- front foot forward, back foot behind, arms spread wide, body upright. */
     _drawJumperLanding(ctx, s, angle) {
         ctx.rotate(angle);
 
-        // Upright. Origin at ground contact. ~1.8m tall.
         const hipX = 0;
-        const hipY = -0.90 * s;
+        const hipY = -0.85 * s;
 
-        // Front leg (forward, knee slightly bent)
-        const frontFootX = 0.40 * s;
-        const frontFootY = 0;
-        const frontKneeX = 0.20 * s;
-        const frontKneeY = -0.45 * s;
-
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.12 * s);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(frontKneeX, frontKneeY);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(frontKneeX, frontKneeY);
-        ctx.lineTo(frontFootX, frontFootY);
-        ctx.stroke();
-        ctx.fillStyle = '#222';
-        ctx.fillRect(frontFootX - 0.06 * s, -0.06 * s, 0.16 * s, 0.06 * s);
-
-        // Back leg (behind, deeper knee bend -- telemark)
-        const backFootX = -0.35 * s;
-        const backFootY = -0.10 * s;
-        const backKneeX = -0.15 * s;
-        const backKneeY = -0.50 * s;
-
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.12 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(backKneeX, backKneeY);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(backKneeX, backKneeY);
-        ctx.lineTo(backFootX, backFootY);
-        ctx.stroke();
-        ctx.fillStyle = '#222';
-        ctx.fillRect(backFootX - 0.06 * s, backFootY - 0.04 * s, 0.16 * s, 0.06 * s);
-
-        // Front ski
-        ctx.save();
-        ctx.translate(frontFootX, frontFootY);
-        this._drawSki(ctx, s, -0.6 * s, 2.4 * s);
-        ctx.restore();
+        // --- Back leg (behind, deeper knee bend -- telemark) drawn first (behind) ---
+        const backFootX = -0.38 * s;
+        const backFootY = -0.12 * s;
+        const backKneeX = -0.12 * s;
+        const backKneeY = -0.52 * s;
 
         // Back ski
         ctx.save();
@@ -1376,54 +1835,63 @@ export default class SkihoppRenderer {
         this._drawSki(ctx, s, -0.6 * s, 2.4 * s);
         ctx.restore();
 
-        // Torso (mostly upright, slight forward lean)
-        const shoulderX = hipX + 0.05 * s;
-        const shoulderY = hipY - 0.55 * s;
-        ctx.strokeStyle = '#2050bb';
-        ctx.lineWidth = Math.max(3, 0.18 * s);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(shoulderX, shoulderY);
-        ctx.stroke();
+        // Back thigh + shin
+        this._drawLimb(ctx, hipX, hipY, backKneeX, backKneeY,
+            Math.max(2.5, 0.12 * s), '#152e80');
+        this._drawLimb(ctx, backKneeX, backKneeY, backFootX, backFootY,
+            Math.max(2, 0.11 * s), '#152e80');
+        const backLegAngle = Math.atan2(backFootY - backKneeY, backFootX - backKneeX);
+        this._drawBoot(ctx, s, backFootX, backFootY, backLegAngle);
 
-        // Suit stripe
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = Math.max(1, 0.04 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY + 0.05 * s);
-        ctx.lineTo(shoulderX, shoulderY + 0.05 * s);
-        ctx.stroke();
+        // --- Front leg (forward, knee slightly bent) ---
+        const frontFootX = 0.45 * s;
+        const frontFootY = 0;
+        const frontKneeX = 0.25 * s;
+        const frontKneeY = -0.42 * s;
 
-        // Arms spread wide
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2, 0.09 * s);
-        ctx.lineCap = 'round';
-        // Forward-up arm
-        ctx.beginPath();
-        ctx.moveTo(shoulderX, shoulderY);
-        ctx.lineTo(shoulderX + 0.30 * s, shoulderY - 0.10 * s);
-        ctx.lineTo(shoulderX + 0.55 * s, shoulderY - 0.25 * s);
-        ctx.stroke();
-        // Backward-up arm
-        ctx.beginPath();
-        ctx.moveTo(shoulderX, shoulderY);
-        ctx.lineTo(shoulderX - 0.30 * s, shoulderY - 0.08 * s);
-        ctx.lineTo(shoulderX - 0.55 * s, shoulderY - 0.22 * s);
-        ctx.stroke();
-
-        // Gloves
-        ctx.fillStyle = '#222';
-        ctx.beginPath();
-        ctx.arc(shoulderX + 0.55 * s, shoulderY - 0.25 * s, 0.04 * s, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(shoulderX - 0.55 * s, shoulderY - 0.22 * s, 0.04 * s, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Head (upright)
+        // Front ski
         ctx.save();
-        ctx.translate(shoulderX + 0.02 * s, shoulderY - 0.20 * s);
+        ctx.translate(frontFootX, frontFootY);
+        this._drawSki(ctx, s, -0.6 * s, 2.4 * s);
+        ctx.restore();
+
+        // Front thigh + shin
+        this._drawLimb(ctx, hipX, hipY, frontKneeX, frontKneeY,
+            Math.max(2.5, 0.13 * s), '#1a40aa');
+        this._drawLimb(ctx, frontKneeX, frontKneeY, frontFootX, frontFootY,
+            Math.max(2, 0.12 * s), '#1a40aa');
+        const frontLegAngle = Math.atan2(frontFootY - frontKneeY, frontFootX - frontKneeX);
+        this._drawBoot(ctx, s, frontFootX, frontFootY, frontLegAngle);
+
+        // Torso (mostly upright, slight forward lean)
+        const shoulderX = hipX + 0.08 * s;
+        const shoulderY = hipY - 0.52 * s;
+        this._drawTorso(ctx, s, hipX, hipY, shoulderX, shoulderY);
+
+        // --- Arms spread wide and slightly up for balance ---
+        const armW = Math.max(2, 0.09 * s);
+        // Forward-up arm (upper arm + forearm)
+        const fElbowX = shoulderX + 0.25 * s;
+        const fElbowY = shoulderY - 0.06 * s;
+        const fHandX = shoulderX + 0.52 * s;
+        const fHandY = shoulderY - 0.20 * s;
+        this._drawLimb(ctx, shoulderX, shoulderY, fElbowX, fElbowY, armW, '#1a40aa');
+        this._drawLimb(ctx, fElbowX, fElbowY, fHandX, fHandY, armW, '#1a40aa');
+        this._drawGlove(ctx, s, fHandX, fHandY);
+
+        // Backward-up arm (upper arm + forearm)
+        const bElbowX = shoulderX - 0.25 * s;
+        const bElbowY = shoulderY - 0.04 * s;
+        const bHandX = shoulderX - 0.52 * s;
+        const bHandY = shoulderY - 0.18 * s;
+        this._drawLimb(ctx, shoulderX, shoulderY, bElbowX, bElbowY, armW, '#1a40aa');
+        this._drawLimb(ctx, bElbowX, bElbowY, bHandX, bHandY, armW, '#1a40aa');
+        this._drawGlove(ctx, s, bHandX, bHandY);
+
+        // Head (upright, looking forward)
+        ctx.save();
+        ctx.translate(shoulderX + 0.03 * s, shoulderY - 0.18 * s);
+        ctx.rotate(0.05);
         this._drawHelmet(ctx, s);
         ctx.restore();
     }
@@ -1562,17 +2030,49 @@ export default class SkihoppRenderer {
     // ------------------------------------------------------------------
 
     _drawSnowParticles(ctx, w, h) {
-        const now = Date.now() * 0.001;
+        const t = this._time || 0;
+        const wind = this._wind || { speed: 0, direction: 0 };
+        // Wind influence on horizontal drift: direction in radians, speed in m/s
+        // Normalize to a gentle screen-space factor
+        const windDriftX = Math.cos(wind.direction || 0) * (wind.speed || 0) * 0.012;
 
+        ctx.save();
         for (const p of this._snowParticles) {
-            // Animate position (wrapping)
-            const px = ((p.x + p.speedX * now) % 1 + 1) % 1;
-            const py = ((p.y + p.speedY * now) % 1 + 1) % 1;
+            // Horizontal: base drift + wind (wind affects all, but more for larger particles)
+            const windFactor = 0.5 + p.depth * 0.5;
+            const driftX = p.baseDriftX + windDriftX * windFactor;
+            // Add a gentle wobble
+            const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
 
-            ctx.beginPath();
-            ctx.arc(px * w, py * h, p.r, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,255,255,${p.alpha})`;
-            ctx.fill();
+            // Animate position with wrapping
+            const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
+            const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
+
+            const sx = px * w;
+            const sy = py * h;
+
+            ctx.globalAlpha = p.alpha;
+
+            if (p.isFlake) {
+                // Draw a 6-armed snowflake star
+                const armLen = p.r * 1.2;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 0.6;
+                ctx.beginPath();
+                for (let a = 0; a < 6; a++) {
+                    const angle = (a / 6) * Math.PI * 2;
+                    ctx.moveTo(sx, sy);
+                    ctx.lineTo(sx + Math.cos(angle) * armLen, sy + Math.sin(angle) * armLen);
+                }
+                ctx.stroke();
+            } else {
+                // Simple circular snowflake
+                ctx.beginPath();
+                ctx.arc(sx, sy, p.r, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+            }
         }
+        ctx.restore();
     }
 }

@@ -616,6 +616,68 @@ export default class Scoreboard {
         return truncated + '…';
     }
 
+    /**
+     * Draw a small horizontal flag stripe for a country code.
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {number} cx - centre X
+     * @param {number} cy - centre Y
+     * @param {string} countryCode - 3-letter country code
+     */
+    _renderFlagStripe(ctx, cx, cy, countryCode) {
+        const flagW = 22;
+        const flagH = 12;
+        const fx = cx - flagW / 2;
+        const fy = cy - flagH / 2;
+
+        const stripes = Scoreboard.FLAGS[countryCode];
+
+        ctx.save();
+
+        // Border
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(fx, fy, flagW, flagH);
+
+        if (stripes) {
+            let offsetY = 0;
+            for (const [color, fraction] of stripes) {
+                const h = flagH * fraction;
+                ctx.fillStyle = color;
+                ctx.fillRect(fx, fy + offsetY, flagW, h);
+                offsetY += h;
+            }
+
+            // Special overlays for certain flags
+            if (countryCode === 'JPN') {
+                ctx.beginPath();
+                ctx.arc(fx + flagW / 2, fy + flagH / 2, flagH * 0.28, 0, Math.PI * 2);
+                ctx.fillStyle = '#BC002D';
+                ctx.fill();
+            } else if (countryCode === 'NOR') {
+                const cxOff = flagW * 0.33;
+                const cyOff = flagH * 0.5;
+                const cw = flagW * 0.1;
+                const ch = flagH * 0.18;
+                ctx.fillStyle = '#FFFFFF';
+                ctx.fillRect(fx + cxOff - cw, fy, cw * 2, flagH);
+                ctx.fillRect(fx, fy + cyOff - ch, flagW, ch * 2);
+                ctx.fillStyle = '#002868';
+                ctx.fillRect(fx + cxOff - cw * 0.5, fy, cw, flagH);
+                ctx.fillRect(fx, fy + cyOff - ch * 0.5, flagW, ch);
+            }
+        } else {
+            ctx.fillStyle = '#555555';
+            ctx.fillRect(fx, fy, flagW, flagH);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 7px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(countryCode || '?', cx, cy);
+        }
+
+        ctx.restore();
+    }
+
     _roundRect(ctx, x, y, w, h, r) {
         ctx.beginPath();
         ctx.moveTo(x + r, y);

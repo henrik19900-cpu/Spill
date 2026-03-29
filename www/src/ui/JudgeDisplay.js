@@ -60,7 +60,13 @@ export default class JudgeDisplay {
             ...judgeData,
         };
 
+        // Reset particle burst flag at the start of a new score animation
+        if (d.animationProgress < 0.05) {
+            this._particlesBurst = false;
+        }
+
         this._renderBackground(ctx, width, height);
+        this._renderTitle(ctx, width, height, d);
         this._renderDistance(ctx, width, height, d);
         this._renderJudgeCards(ctx, width, height, d);
         this._renderBreakdown(ctx, width, height, d);
@@ -103,7 +109,7 @@ export default class JudgeDisplay {
     // -------------------------------------------------------------------
 
     _renderTitle(ctx, width, height, d) {
-        const y = height * 0.07;
+        const y = height * 0.025;
 
         ctx.save();
         // Title with subtle glow
@@ -151,6 +157,45 @@ export default class JudgeDisplay {
         ctx.lineTo(width / 2 - 3, lineY);
         ctx.closePath();
         ctx.fill();
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
+    // Distance display (large "132.5 m" text sliding in from top)
+    // -------------------------------------------------------------------
+
+    _renderDistance(ctx, width, height, d) {
+        // Show distance in the first 40% of the animation, then keep it visible but smaller
+        const slideProgress = Math.min(1, d.animationProgress / 0.20);
+        if (slideProgress <= 0) return;
+
+        const eased = this._easeOutCubic(slideProgress);
+
+        ctx.save();
+
+        // Slide in from above
+        const targetY = height * 0.06;
+        const startY = -60;
+        const y = startY + (targetY - startY) * eased;
+
+        ctx.globalAlpha = Math.min(1, slideProgress * 2);
+
+        // Distance number
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#ffffff';
+        const fontSize = Math.min(width * 0.12, 48);
+        ctx.font = `800 ${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${d.distance.toFixed(1)} m`, width / 2, y);
+
+        // Hill name subtitle
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = `400 ${Math.min(width * 0.035, 14)}px sans-serif`;
+        ctx.fillText(d.hillName || '', width / 2, y + fontSize * 0.55 + 4);
+
         ctx.restore();
     }
 
@@ -585,17 +630,28 @@ export default class JudgeDisplay {
         ctx.fillText(d.totalPoints.toFixed(1), width / 2, y - 5);
         ctx.restore();
 
+        // Rating label below the score (e.g. "Fantastisk!", "Bra hopp!")
+        if (d.rating) {
+            const ratingColors = {
+                S: '#FFD700',  // gold
+                A: '#7BFFB0',  // green
+                B: '#7BC8FF',  // blue
+                C: '#FFA888',  // orange
+            };
+            const ratingColor = ratingColors[d.ratingTier] || '#ffffff';
+            ctx.fillStyle = ratingColor;
+            ctx.font = `700 ${Math.min(width * 0.05, 20)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(d.rating, width / 2, y + textSize + 2);
+        }
+
         ctx.restore();
 
-        // Trigger particle burst once
+        // Trigger particle burst once per score display
         if (totalProgress >= 0.9 && !this._particlesBurst) {
             this._particlesBurst = true;
             this._spawnParticles(width / 2, y, width);
-        }
-
-        // Reset particle burst flag when animation resets
-        if (totalProgress <= 0) {
-            this._particlesBurst = false;
         }
 
         // Tap to continue hint

@@ -349,6 +349,8 @@ export default class SkihoppGame {
                     phase: state,
                     takeoffQuality: jumperState.takeoffQuality,
                     landingQuality: jumperState.landingQuality,
+                    kPoint: this.hill.kPoint,
+                    feedback: this.game.feedback || {},
                 });
                 break;
             }
@@ -360,11 +362,8 @@ export default class SkihoppGame {
                     direction: this.wind.getDirection(),
                 });
 
-                // Semi-transparent dim overlay
-                ctx.save();
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-                ctx.fillRect(0, 0, width, height);
-                ctx.restore();
+                // JudgeDisplay._renderBackground provides its own dim overlay,
+                // so no additional dimming is needed here.
 
                 // Judge display with animation
                 if (this._scoreResult) {
@@ -386,11 +385,14 @@ export default class SkihoppGame {
                 }
                 break;
 
-            case GameState.RESULTS:
+            case GameState.RESULTS: {
+                // Find the index of the latest jump (tagged with _latest)
+                const latestIdx = this._jumpResults.findIndex(j => j._latest);
                 this.scoreboard.render(ctx, width, height, {
                     jumps: this._jumpResults,
-                    currentJumper: this._jumpResults.length - 1,
+                    currentJumper: latestIdx >= 0 ? latestIdx : this._jumpResults.length - 1,
                 });
+            }
                 break;
 
             default:
@@ -483,12 +485,16 @@ export default class SkihoppGame {
                 this._safeAudioCall('stopWind');
 
                 // Add this jump to the results list
+                // Mark all previous jumps as not-latest
+                for (const j of this._jumpResults) { j._latest = false; }
+
                 this._jumpResults.push({
                     name: 'Spiller',
                     country: 'NOR',
                     distance: jumperState.landingDistance,
                     totalPoints: this._scoreResult ? this._scoreResult.totalPoints : 0,
                     rank: this._jumpResults.length + 1,
+                    _latest: true,
                 });
 
                 // Re-sort by total points descending and update ranks
@@ -574,8 +580,10 @@ export default class SkihoppGame {
         if (state === GameState.FLIGHT) {
             const jumperState = this.jumper.getState();
             const kPoint = this.hill.kPoint || 120;
-            // Volume ramps from 0.2 to 1.0 as distance approaches (and exceeds) K-point
-            const intensity = Math.min(1.0, 0.2 + 0.8 * (jumperState.distance / kPoint));
+            // Volume ramps from 0.2 to 1.0 as horizontal distance approaches (and exceeds) K-point
+            // Use jumperState.x (horizontal position from takeoff) since .distance tracks inrun remaining
+            const flightDistance = Math.max(0, jumperState.x);
+            const intensity = Math.min(1.0, 0.2 + 0.8 * (flightDistance / kPoint));
             this._safeAudioCall('playCrowdAmbience', intensity);
         }
     }

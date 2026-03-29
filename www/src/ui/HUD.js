@@ -248,6 +248,26 @@ export default class HUD {
         ctx.font = 'bold 20px sans-serif';
         ctx.fillText(' m', x + numW, y + 2);
 
+        // K-point reference indicator
+        if (d.kPoint && this._displayedDistance > 0) {
+            const diff = this._displayedDistance - d.kPoint;
+            const kText = diff >= 0 ? `K +${diff.toFixed(1)}` : `K ${diff.toFixed(1)}`;
+            const kColor = diff >= 0 ? '#44ff88' : '#ff6644';
+            ctx.fillStyle = kColor;
+            ctx.font = 'bold 16px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(kText, x, y + 24);
+        }
+
+        // Speed in flight
+        if (d.speed > 0) {
+            const speedKmh = Math.round(d.speed * 3.6);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`${speedKmh} km/h`, x, y + 42);
+        }
+
         ctx.restore();
     }
 
@@ -435,6 +455,21 @@ export default class HUD {
     _renderLanding(ctx, width, height, d) {
         // Show frozen distance (top-left, same position as flight)
         this._renderFlightDistance(ctx, width, height, d);
+
+        // "TAP!" prompt if landing quality not yet set (player hasn't tapped)
+        if (d.landingQuality === 0 && this._landingFlashTimer < 0.3) {
+            const pulse = 0.6 + 0.4 * Math.sin(this._time * 15);
+            ctx.save();
+            ctx.globalAlpha = pulse;
+            ctx.fillStyle = '#44ff88';
+            ctx.font = 'bold 48px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = '#44ff88';
+            ctx.shadowBlur = 20;
+            ctx.fillText('TAP!', width / 2, height * 0.5);
+            ctx.restore();
+        }
 
         // Brief landing quality flash (visible for ~2 seconds)
         if (this._landingFlashTimer < 2.0) {
