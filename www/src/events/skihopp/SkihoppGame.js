@@ -349,6 +349,8 @@ export default class SkihoppGame {
                     phase: state,
                     takeoffQuality: jumperState.takeoffQuality,
                     landingQuality: jumperState.landingQuality,
+                    kPoint: this.hill.kPoint,
+                    feedback: this.game.feedback || {},
                 });
                 break;
             }
