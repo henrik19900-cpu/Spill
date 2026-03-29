@@ -6,13 +6,14 @@
  *   MENU -> READY -> INRUN -> TAKEOFF -> FLIGHT -> LANDING -> SCORE -> RESULTS
  *
  * Control scheme (realistic):
- *   INRUN   : HOLD screen to maintain tuck position (better aerodynamics).
- *             Releasing = worse aero = slightly slower. No tapping.
- *   TAKEOFF : Tap within ~200ms window. Perfect = quality 1.0.
- *             Auto-launch if missed = quality 0.3.
+ *   INRUN   : HOLD screen to maintain tuck position (bonus speed).
+ *             Releasing = mild penalty, still 80% of max speed. No tapping.
+ *   TAKEOFF : Tap within timing window (difficulty-scaled). Perfect = quality 1.0.
+ *             Auto-launch if missed = quality 0.4 (decent jump for casuals).
  *   FLIGHT  : Slide finger up/down to control body angle (smooth with inertia).
- *             Optimal angle ~35 degrees.
- *   LANDING : Tap within 300ms window for telemark landing.
+ *             Starts at 33° (near optimal). Auto-drifts toward optimal if untouched.
+ *   LANDING : Tap within 400ms window for telemark landing (difficulty-scaled).
+ *             Any tap within 1s counts as attempted. Missing penalty is mild.
  *   SCORE   : 1.5s delay before tap to continue.
  *
  * Visual feedback system:
@@ -733,6 +734,12 @@ export default class SkihoppControls {
     const js = this._jumperState;
     if (!js) return;
 
+    // Track whether player is actively touching during flight
+    const isTouching = this._input && this._input.isTouching;
+    if (isTouching) {
+      this._flightTouched = true;
+    }
+
     // If device tilt is available, map beta to target angle
     if (this._input) {
       const tilt = this._input.getTilt();
@@ -742,6 +749,24 @@ export default class SkihoppControls {
         const mapped = BODY_ANGLE_MIN +
           ((tilt.beta + 20) / 60) * (BODY_ANGLE_MAX - BODY_ANGLE_MIN);
         js.targetAngle = clamp(mapped, BODY_ANGLE_MIN, BODY_ANGLE_MAX);
+        this._flightTouched = true;
+      }
+    }
+
+    // Auto-assist: if player isn't touching, slowly drift toward optimal angle
+    if (!isTouching && !this._flightTouched) {
+      // Player hasn't touched at all during flight - drift toward optimal
+      const optDiff = BODY_ANGLE_OPTIMAL - js.targetAngle;
+      if (Math.abs(optDiff) > 0.5) {
+        js.targetAngle += Math.sign(optDiff) * ANGLE_AUTO_DRIFT * dt;
+        js.targetAngle = clamp(js.targetAngle, BODY_ANGLE_MIN, BODY_ANGLE_MAX);
+      }
+    } else if (!isTouching && this._flightTouched) {
+      // Player touched earlier but released - gentle drift toward optimal
+      const optDiff = BODY_ANGLE_OPTIMAL - js.targetAngle;
+      if (Math.abs(optDiff) > 1.0) {
+        js.targetAngle += Math.sign(optDiff) * ANGLE_AUTO_DRIFT * 0.5 * dt;
+        js.targetAngle = clamp(js.targetAngle, BODY_ANGLE_MIN, BODY_ANGLE_MAX);
       }
     }
 
@@ -757,7 +782,7 @@ export default class SkihoppControls {
       this._angleVelocity = 0;
     }
 
-    // Smooth interpolation (eased, not linear)
+    // Smooth interpolation (eased, not linear) with higher inertia for smoother feel
     const diff = js.targetAngle - js.bodyAngle;
     const maxChange = this._angleChangeRate * dt;
 

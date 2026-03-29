@@ -362,6 +362,7 @@ export default class SkihoppGame {
      * @param {number} dt - fixed timestep in seconds
      */
     update(dt) {
+        if (!this.game) return;
         const state = this.game.getState();
 
         // Slowmotion support via game feedback
@@ -406,18 +407,21 @@ export default class SkihoppGame {
         }
 
         // Edge-approaching warning during late INRUN
-        if (state === GameState.INRUN) {
-            const jumperState = this.jumper.getState();
-            const tableDistance = jumperState.distance !== undefined ? jumperState.distance : 0;
-            // Activate warning when close to takeoff edge (last 15% of inrun)
-            const inrunLen = this.hill.inrunLength || 98;
-            if (tableDistance <= inrunLen * 0.15 && tableDistance > 0) {
-                if (!this._edgeWarningActive) {
-                    this._edgeWarningActive = true;
-                    this._edgeWarningTime = 0;
-                    this._safeAudioCall('playRisingTone');
+        if (state === GameState.INRUN && this.jumper && this.hill) {
+            try {
+                const js = this.jumper.getState();
+                const tableDistance = js.distance !== undefined ? js.distance : 0;
+                const inrunLen = this.hill.inrunLength || 98;
+                if (tableDistance <= inrunLen * 0.15 && tableDistance > 0) {
+                    if (!this._edgeWarningActive) {
+                        this._edgeWarningActive = true;
+                        this._edgeWarningTime = 0;
+                        this._safeAudioCall('playRisingTone');
+                    }
+                    this._edgeWarningTime += dt;
                 }
-                this._edgeWarningTime += dt;
+            } catch (e) {
+                console.error('[SkihoppGame] Edge warning error:', e);
             }
         }
 
@@ -887,8 +891,21 @@ export default class SkihoppGame {
                 break;
 
             case GameState.TAKEOFF:
+                // Clear edge warning state
+                this._edgeWarningActive = false;
+                this._edgeWarningTime = 0;
                 // Swoosh sound at the table edge
                 this._safeAudioCall('playSwoosh');
+                break;
+
+            case GameState.FLIGHT:
+                // Perfect takeoff flash (quality > 0.9)
+                if (jumperState.takeoffQuality > 0.9) {
+                    this._perfectFlashAlpha = 1.0;
+                    this._perfectFlashTime = 0;
+                    this._showPerfektText = true;
+                    this._safeAudioCall('playPerfectTakeoff');
+                }
                 break;
 
             case GameState.LANDING:
@@ -987,6 +1004,9 @@ export default class SkihoppGame {
                 this._safeAudioCall('playCrowdCheer',
                     this._scoreResult.totalPoints > 120 ? 1.0 : 0.5
                 );
+                // Smooth fade transition from SCORE -> RESULTS
+                this._scoreToResultsFade = 1.0;
+
                 break;
 
             case GameState.RESULTS:
@@ -1026,6 +1046,11 @@ export default class SkihoppGame {
                 break;
 
             case GameState.MENU:
+                // Button click feedback when returning to menu
+                if (prevState === GameState.RESULTS || prevState === GameState.SCORE) {
+                    this._safeAudioCall('playButtonClick');
+                }
+
                 // Full reset when returning to menu
                 this.jumper.reset(this.hill);
                 this.physics.reset();
