@@ -407,18 +407,21 @@ export default class SkihoppGame {
         }
 
         // Edge-approaching warning during late INRUN
-        if (state === GameState.INRUN) {
-            const jumperState = this.jumper.getState();
-            const tableDistance = jumperState.distance !== undefined ? jumperState.distance : 0;
-            // Activate warning when close to takeoff edge (last 15% of inrun)
-            const inrunLen = this.hill.inrunLength || 98;
-            if (tableDistance <= inrunLen * 0.15 && tableDistance > 0) {
-                if (!this._edgeWarningActive) {
-                    this._edgeWarningActive = true;
-                    this._edgeWarningTime = 0;
-                    this._safeAudioCall('playRisingTone');
+        if (state === GameState.INRUN && this.jumper && this.hill) {
+            try {
+                const js = this.jumper.getState();
+                const tableDistance = js.distance !== undefined ? js.distance : 0;
+                const inrunLen = this.hill.inrunLength || 98;
+                if (tableDistance <= inrunLen * 0.15 && tableDistance > 0) {
+                    if (!this._edgeWarningActive) {
+                        this._edgeWarningActive = true;
+                        this._edgeWarningTime = 0;
+                        this._safeAudioCall('playRisingTone');
+                    }
+                    this._edgeWarningTime += dt;
                 }
-                this._edgeWarningTime += dt;
+            } catch (e) {
+                console.error('[SkihoppGame] Edge warning error:', e);
             }
         }
 
@@ -1001,6 +1004,9 @@ export default class SkihoppGame {
                 this._safeAudioCall('playCrowdCheer',
                     this._scoreResult.totalPoints > 120 ? 1.0 : 0.5
                 );
+                // Smooth fade transition from SCORE -> RESULTS
+                this._scoreToResultsFade = 1.0;
+
                 break;
 
             case GameState.RESULTS:

@@ -6,13 +6,14 @@
  *   MENU -> READY -> INRUN -> TAKEOFF -> FLIGHT -> LANDING -> SCORE -> RESULTS
  *
  * Control scheme (realistic):
- *   INRUN   : HOLD screen to maintain tuck position (better aerodynamics).
- *             Releasing = worse aero = slightly slower. No tapping.
- *   TAKEOFF : Tap within ~200ms window. Perfect = quality 1.0.
- *             Auto-launch if missed = quality 0.3.
+ *   INRUN   : HOLD screen to maintain tuck position (bonus speed).
+ *             Releasing = mild penalty, still 80% of max speed. No tapping.
+ *   TAKEOFF : Tap within timing window (difficulty-scaled). Perfect = quality 1.0.
+ *             Auto-launch if missed = quality 0.4 (decent jump for casuals).
  *   FLIGHT  : Slide finger up/down to control body angle (smooth with inertia).
- *             Optimal angle ~35 degrees.
- *   LANDING : Tap within 300ms window for telemark landing.
+ *             Starts at 33° (near optimal). Auto-drifts toward optimal if untouched.
+ *   LANDING : Tap within 400ms window for telemark landing (difficulty-scaled).
+ *             Any tap within 1s counts as attempted. Missing penalty is mild.
  *   SCORE   : 1.5s delay before tap to continue.
  *
  * Visual feedback system:

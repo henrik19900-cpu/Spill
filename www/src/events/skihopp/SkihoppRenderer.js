@@ -2323,6 +2323,8 @@ export default class SkihoppRenderer {
             particles.length = writeIdx;
         };
 
+        // Single save/restore for both particle systems
+        ctx.save();
         // Takeoff particles: white
         processParticles(this._takeoffParticles, (a) =>
             `rgba(255,255,255,${a.toFixed(2)})`
@@ -2332,13 +2334,14 @@ export default class SkihoppRenderer {
         processParticles(this._landingParticles, (a) =>
             `rgba(220,235,255,${a.toFixed(2)})`
         );
+        ctx.restore();
     }
 
     /**
      * Draw semi-transparent wind streaks during flight.
      */
     _drawWindStreaks(ctx, w, h, wind) {
-        if (!wind || wind.speed < 0.1) return;
+        if (!wind || wind.speed < 0.5) return;
 
         // Initialize wind streaks if needed
         if (this._windStreaks.length === 0) {
@@ -2397,10 +2400,8 @@ export default class SkihoppRenderer {
         grad.addColorStop(0.8, 'rgba(0,0,0,0.12)');
         grad.addColorStop(1, 'rgba(0,0,0,0.3)');
 
-        ctx.save();
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
-        ctx.restore();
     }
 
     // ------------------------------------------------------------------
