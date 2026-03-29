@@ -322,7 +322,8 @@ export default class SkihoppControls {
   }
 
   _handleReadyTap() {
-    this.game.setState(GameState.INRUN);
+    // Do nothing — let the 3-2-1 countdown in SkihoppGame.update() finish naturally.
+    // Tapping during the countdown should not skip it.
   }
 
   /**
@@ -339,13 +340,10 @@ export default class SkihoppControls {
 
     if (js.isTucked) {
       js.tuckDuration += dt;
-      // Tuck = better aerodynamics = gain speed
-      js.speed += TUCK_AERO_BONUS * dt;
-    } else {
-      // Not tucked = worse aerodynamics = slight drag
-      js.speed -= RELEASE_AERO_PENALTY * dt;
-      js.speed = Math.max(js.speed, 0);
+      // Tuck state is read by SkihoppPhysics._updateInrun() to adjust drag.
+      // Do NOT modify js.speed here — physics handles the speed calculation.
     }
+    // Not tucked = worse aerodynamics — also handled by physics via isTucked flag.
 
     // Visual feedback: glow indicator for tuck state
     const fb = this.game.feedback;

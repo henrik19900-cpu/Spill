@@ -157,7 +157,28 @@ export default class SkihoppPhysics {
      * Reset the jumper to the top of the inrun, ready for a new jump.
      */
     reset() {
-        Object.assign(this.jumper, createJumperState());
+        // Only reset physics-owned fields. Do NOT blindly overwrite the shared
+        // Jumper state — other subsystems (Controls, Renderer) have their own
+        // fields on the same object that must be preserved.
+        const j = this.jumper;
+        j.x = 0;
+        j.y = 0;
+        j.vx = 0;
+        j.vy = 0;
+        j.speed = 0;
+        j.bodyAngle = 35;
+        j.distance = 0;
+        j.phase = GameState.INRUN;
+        j.takeoffQuality = 0;
+        j.landingDistance = 0;
+        j.landingQuality = 0;
+        j.vibration = 0;
+        j.impactForce = 0;
+        j.turbulenceX = 0;
+        j.turbulenceY = 0;
+        j.wind = 0;
+        j.flightTime = 0;
+
         this._takeoffTimer = 0;
         this._inrunTime = 0;
         this._resetInrun();
@@ -192,7 +213,9 @@ export default class SkihoppPhysics {
         const gravityPull = GRAVITY * Math.sin(slopeAngle);
 
         // Friction: linear (ski friction) + quadratic (air drag) for natural speed curve
-        const airDragCoeff = 0.005;  // small air drag on inrun
+        // Tuck position reduces air drag significantly
+        const isTucked = j.isTucked || false;
+        const airDragCoeff = isTucked ? 0.003 : 0.007;  // tucked = better aero
         const totalDrag = friction * GRAVITY * Math.cos(slopeAngle) + airDragCoeff * j.speed * j.speed;
 
         const a = gravityPull - totalDrag;
