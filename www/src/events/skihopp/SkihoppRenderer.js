@@ -460,44 +460,64 @@ export default class SkihoppRenderer {
     // ------------------------------------------------------------------
 
     _drawMountains(ctx, w, h) {
-        const parallaxFactors = [0.1, 0.2, 0.3];
+        const parallaxFactors = [0.08, 0.16, 0.28, 0.42];
         const cameraX = this.renderer.cameraX;
+        const numLayers = this._mountains.length;
 
-        // --- Warm amber glow at horizon line ---
-        const glowTop = h * 0.35;
-        const glowBottom = h * 0.65;
-        const glowGrad = ctx.createLinearGradient(0, glowTop, 0, glowBottom);
-        glowGrad.addColorStop(0, 'rgba(255,190,90,0)');
-        glowGrad.addColorStop(0.3, 'rgba(255,170,70,0.10)');
-        glowGrad.addColorStop(0.5, 'rgba(255,155,55,0.12)');
-        glowGrad.addColorStop(0.7, 'rgba(255,140,40,0.07)');
-        glowGrad.addColorStop(1, 'rgba(255,120,30,0)');
-        ctx.fillStyle = glowGrad;
-        ctx.fillRect(0, glowTop, w, glowBottom - glowTop);
-
-        for (let layer = 0; layer < 3; layer++) {
-            const { points, color } = this._mountains[layer];
+        for (let layer = 0; layer < numLayers; layer++) {
+            const { points, color, pines } = this._mountains[layer];
             const offsetX = -cameraX * parallaxFactors[layer] * 0.01;
 
-            // Draw the mountain silhouette
+            // Draw the mountain silhouette using smooth quadratic curves
             ctx.beginPath();
             const firstPt = points[0];
             ctx.moveTo((firstPt.x + offsetX) * w, firstPt.y * h);
 
             for (let i = 1; i < points.length; i++) {
-                const pt = points[i];
-                ctx.lineTo((pt.x + offsetX) * w, pt.y * h);
+                const prev = points[i - 1];
+                const curr = points[i];
+                // Smooth curve through midpoints for a natural silhouette
+                const cpx = ((prev.x + curr.x) / 2 + offsetX) * w;
+                const cpy = ((prev.y + curr.y) / 2) * h;
+                ctx.quadraticCurveTo(
+                    (prev.x + offsetX) * w, prev.y * h,
+                    cpx, cpy
+                );
             }
+            // Final segment to last point
+            const lastPt = points[points.length - 1];
+            ctx.lineTo((lastPt.x + offsetX) * w, lastPt.y * h);
 
             // Close along the bottom
-            ctx.lineTo((points[points.length - 1].x + offsetX) * w, h);
-            ctx.lineTo((points[0].x + offsetX) * w, h);
+            ctx.lineTo((lastPt.x + offsetX) * w, h);
+            ctx.lineTo((firstPt.x + offsetX) * w, h);
             ctx.closePath();
             ctx.fillStyle = color;
             ctx.fill();
 
+            // Subtle edge highlight on top of each layer (atmospheric haze effect)
+            if (layer < numLayers - 1) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo((firstPt.x + offsetX) * w, firstPt.y * h);
+                for (let i = 1; i < points.length; i++) {
+                    const prev = points[i - 1];
+                    const curr = points[i];
+                    const cpx = ((prev.x + curr.x) / 2 + offsetX) * w;
+                    const cpy = ((prev.y + curr.y) / 2) * h;
+                    ctx.quadraticCurveTo(
+                        (prev.x + offsetX) * w, prev.y * h,
+                        cpx, cpy
+                    );
+                }
+                ctx.lineTo((lastPt.x + offsetX) * w, lastPt.y * h);
+                ctx.strokeStyle = `rgba(100,140,180,${(0.08 - layer * 0.015).toFixed(3)})`;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.restore();
+            }
+
             // --- White snow caps on peaks ---
-            // Find local peaks (lower y = higher on screen) and draw small white triangles
             for (let i = 1; i < points.length - 1; i++) {
                 const prev = points[i - 1];
                 const curr = points[i];
@@ -507,20 +527,65 @@ export default class SkihoppRenderer {
                 if (curr.y < prev.y && curr.y < next.y) {
                     const peakX = (curr.x + offsetX) * w;
                     const peakY = curr.y * h;
-                    // Snow cap size: small triangles, slightly larger for foreground layers
-                    const capH = 5 + layer * 2;
-                    const capW = capH * 1.5;
-                    // Front layers are more opaque
-                    const alpha = 0.5 + layer * 0.15;
+                    // Snow cap size scales with layer (foreground layers are bigger)
+                    const capH = 4 + layer * 2.5;
+                    const capW = capH * 1.6;
+                    const alpha = 0.35 + layer * 0.12;
 
                     ctx.beginPath();
                     ctx.moveTo(peakX, peakY);
                     ctx.lineTo(peakX - capW / 2, peakY + capH);
                     ctx.lineTo(peakX + capW / 2, peakY + capH);
                     ctx.closePath();
-                    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+                    ctx.fillStyle = `rgba(220,230,255,${alpha.toFixed(2)})`;
                     ctx.fill();
                 }
+            }
+
+            // --- Pine tree silhouettes on nearest layer ---
+            if (pines && pines.length > 0) {
+                ctx.save();
+                ctx.fillStyle = '#1e2e48';
+                for (const pine of pines) {
+                    // Find the ridge Y at this t position by interpolating between points
+                    const totalSpan = lastPt.x - firstPt.x;
+                    const treeWorldX = firstPt.x + pine.t * totalSpan;
+                    // Find surrounding points for interpolation
+                    let ridgeY = lastPt.y;
+                    for (let i = 1; i < points.length; i++) {
+                        if (points[i].x >= treeWorldX) {
+                            const p0 = points[i - 1];
+                            const p1 = points[i];
+                            const seg = (treeWorldX - p0.x) / (p1.x - p0.x || 1);
+                            ridgeY = p0.y + (p1.y - p0.y) * seg;
+                            break;
+                        }
+                    }
+
+                    const tx = (treeWorldX + offsetX) * w;
+                    const ty = ridgeY * h;
+                    const th = pine.h;
+                    const tw = pine.w;
+
+                    // Simple triangular pine tree silhouette (two stacked triangles)
+                    ctx.beginPath();
+                    // Lower wider triangle
+                    ctx.moveTo(tx, ty - th * 0.3);
+                    ctx.lineTo(tx - tw, ty);
+                    ctx.lineTo(tx + tw, ty);
+                    ctx.closePath();
+                    ctx.fill();
+                    // Upper narrower triangle
+                    ctx.beginPath();
+                    ctx.moveTo(tx, ty - th);
+                    ctx.lineTo(tx - tw * 0.65, ty - th * 0.25);
+                    ctx.lineTo(tx + tw * 0.65, ty - th * 0.25);
+                    ctx.closePath();
+                    ctx.fill();
+                    // Small trunk
+                    ctx.fillRect(tx - 0.8, ty, 1.6, 2);
+                }
+                ctx.restore();
             }
         }
     }
