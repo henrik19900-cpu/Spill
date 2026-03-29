@@ -2299,28 +2299,28 @@ export default class SkihoppRenderer {
 
         // Helper to update and draw a particle array
         const processParticles = (particles, colorFn) => {
-            for (let i = particles.length - 1; i >= 0; i--) {
+            // Compact dead particles using swap-and-pop (O(1) per removal)
+            let writeIdx = 0;
+            for (let i = 0; i < particles.length; i++) {
                 const p = particles[i];
                 p.life -= dt / p.maxLife;
-                if (p.life <= 0) {
-                    particles.splice(i, 1);
-                    continue;
-                }
+                if (p.life <= 0) continue;
                 p.vy += gravity * dt;
                 p.x += p.vx * dt;
                 p.y += p.vy * dt;
+                if (writeIdx !== i) particles[writeIdx] = p;
+                writeIdx++;
 
                 const sp = r.worldToScreen(p.x, p.y);
                 const alpha = Math.max(0, p.life);
 
-                ctx.save();
                 ctx.globalAlpha = alpha;
                 ctx.fillStyle = colorFn(alpha);
                 ctx.beginPath();
                 ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.restore();
             }
+            particles.length = writeIdx;
         };
 
         // Takeoff particles: white

@@ -362,6 +362,7 @@ export default class SkihoppGame {
      * @param {number} dt - fixed timestep in seconds
      */
     update(dt) {
+        if (!this.game) return;
         const state = this.game.getState();
 
         // Slowmotion support via game feedback
@@ -887,8 +888,21 @@ export default class SkihoppGame {
                 break;
 
             case GameState.TAKEOFF:
+                // Clear edge warning state
+                this._edgeWarningActive = false;
+                this._edgeWarningTime = 0;
                 // Swoosh sound at the table edge
                 this._safeAudioCall('playSwoosh');
+                break;
+
+            case GameState.FLIGHT:
+                // Perfect takeoff flash (quality > 0.9)
+                if (jumperState.takeoffQuality > 0.9) {
+                    this._perfectFlashAlpha = 1.0;
+                    this._perfectFlashTime = 0;
+                    this._showPerfektText = true;
+                    this._safeAudioCall('playPerfectTakeoff');
+                }
                 break;
 
             case GameState.LANDING:
