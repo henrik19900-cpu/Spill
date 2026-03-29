@@ -64,6 +64,8 @@ export class Game {
 
     // Error tracking – avoid spamming console with the same error
     this._lastLoopError = '';
+    this._consecutiveLoopErrors = 0;
+    this._errorScreenActive = false;
 
     // Set up canvas sizing immediately
     this._setupCanvas();
@@ -272,6 +274,13 @@ export class Game {
   _loop(timestamp) {
     if (!this.running) return;
 
+    // If we hit too many consecutive errors, stop the loop and show error screen
+    if (this._errorScreenActive) {
+      this._renderErrorScreen();
+      this._rafId = requestAnimationFrame(this._loop.bind(this));
+      return;
+    }
+
     try {
       // Delta in seconds, clamped to avoid huge jumps (e.g. after tab switch)
       let frameTime = (timestamp - this.lastTimestamp) / 1000;
@@ -300,13 +309,23 @@ export class Game {
       // Render once per frame
       this.render();
 
+      // Successful frame – reset consecutive error counter
+      this._consecutiveLoopErrors = 0;
+
     } catch (err) {
-      // Log the error but do NOT kill the loop.  Deduplicate consecutive
-      // identical errors to avoid flooding the console.
+      this._consecutiveLoopErrors++;
+
+      // Log the error but deduplicate consecutive identical errors
       const msg = err && err.message ? err.message : String(err);
       if (msg !== this._lastLoopError) {
         console.error('[Game] Error in game loop:', err);
         this._lastLoopError = msg;
+      }
+
+      // If 3+ consecutive errors, stop trying and show error screen
+      if (this._consecutiveLoopErrors >= 3) {
+        console.error('[Game] 3 consecutive loop errors – showing error screen.');
+        this._errorScreenActive = true;
       }
     }
 
@@ -318,45 +337,67 @@ export class Game {
   // -----------------------------------------------------------------------
   update(dt) {
     // Update registered modules that expose an update method
-    for (const mod of Object.values(this._modules)) {
+    for (const [name, mod] of Object.entries(this._modules)) {
       if (typeof mod.update === 'function') {
-        mod.update(dt);
+        try {
+          mod.update(dt);
+        } catch (err) {
+          console.error(`[Game] Module "${name}" update error:`, err);
+        }
       }
     }
 
     // Delegate to current scene
     if (this.currentScene && typeof this.currentScene.update === 'function') {
-      this.currentScene.update(dt);
+      try {
+        this.currentScene.update(dt);
+      } catch (err) {
+        console.error('[Game] Scene update error:', err);
+      }
     }
   }
 
   render() {
     const { ctx, width, height } = this;
 
-    // Clear
-    ctx.clearRect(0, 0, width, height);
+    try {
+      // Clear
+      ctx.clearRect(0, 0, width, height);
 
-    if (this._state === GameState.LOADING) {
-      this._renderLoading();
-      return;
-    }
+      if (this._state === GameState.LOADING) {
+        this._renderLoading();
+        return;
+      }
 
-    // Delegate to current scene
-    if (this.currentScene && typeof this.currentScene.render === 'function') {
-      this.currentScene.render(ctx, width, height);
-    }
+      // Delegate to current scene
+      if (this.currentScene && typeof this.currentScene.render === 'function') {
+        this.currentScene.render(ctx, width, height);
+      }
 
-    // Debug FPS overlay
-    if (this.debug) {
-      ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(4, 4, 64, 22);
-      ctx.fillStyle = '#0f0';
-      ctx.font = '13px monospace';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(`FPS: ${this._fpsDisplay}`, 10, 8);
-      ctx.restore();
+      // Debug FPS overlay
+      if (this.debug) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(4, 4, 64, 22);
+        ctx.fillStyle = '#0f0';
+        ctx.font = '13px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(`FPS: ${this._fpsDisplay}`, 10, 8);
+        ctx.restore();
+      }
+    } catch (err) {
+      console.error('[Game] render() error:', err);
+      // Attempt to show an inline error so the screen is never blank
+      try {
+        this._renderErrorScreen();
+      } catch (_ignored) {
+        // Last resort: at least fill the canvas with a color
+        try {
+          ctx.fillStyle = '#1a1a2e';
+          ctx.fillRect(0, 0, width, height);
+        } catch (_e) { /* nothing more we can do */ }
+      }
     }
   }
 
@@ -454,11 +495,93 @@ export class Game {
   }
 
   // -----------------------------------------------------------------------
+  // Error screen – shown when the game loop or render fails repeatedly
+  // -----------------------------------------------------------------------
+  _renderErrorScreen() {
+    const { ctx, width, height } = this;
+    const cx = width / 2;
+    const cy = height / 2;
+
+    ctx.save();
+    ctx.clearRect(0, 0, width, height);
+
+    // Dark background
+    const grad = ctx.createLinearGradient(0, 0, 0, height);
+    grad.addColorStop(0, '#0b1a3b');
+    grad.addColorStop(1, '#1a1a2e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    // Error icon (warning triangle)
+    ctx.font = '48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffcc00';
+    ctx.fillText('\u26A0', cx, cy - 60);
+
+    // Error message
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('Noe gikk galt', cx, cy - 10);
+
+    ctx.fillStyle = '#aabbcc';
+    ctx.font = '15px sans-serif';
+    ctx.fillText('En feil oppstod under kj\u00F8ring.', cx, cy + 20);
+
+    // Retry button
+    const btnW = 180;
+    const btnH = 44;
+    const btnX = cx - btnW / 2;
+    const btnY = cy + 50;
+
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnW, btnH, 8);
+    ctx.fillStyle = '#3a7bd5';
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px sans-serif';
+    ctx.fillText('Pr\u00F8v igjen', cx, btnY + btnH / 2);
+
+    ctx.restore();
+
+    // Attach click handler once for retry
+    if (!this._errorRetryBound) {
+      this._errorRetryBound = true;
+      this._errorRetryHandler = (e) => {
+        const rect = this.canvas.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const clickY = e.clientY - rect.top;
+        if (clickX >= btnX && clickX <= btnX + btnW &&
+            clickY >= btnY && clickY <= btnY + btnH) {
+          this._errorScreenActive = false;
+          this._consecutiveLoopErrors = 0;
+          this._lastLoopError = '';
+          this._errorRetryBound = false;
+          this.canvas.removeEventListener('click', this._errorRetryHandler);
+          // Attempt to re-init the game
+          this._init().catch((err) => {
+            console.error('[Game] Re-init failed:', err);
+            this._errorScreenActive = true;
+          });
+        }
+      };
+      this.canvas.addEventListener('click', this._errorRetryHandler);
+    }
+  }
+
+  // -----------------------------------------------------------------------
   // Cleanup
   // -----------------------------------------------------------------------
   destroy() {
     this.stop();
     window.removeEventListener('resize', this._onResize);
+
+    // Clean up error retry handler if active
+    if (this._errorRetryBound && this._errorRetryHandler) {
+      this.canvas.removeEventListener('click', this._errorRetryHandler);
+      this._errorRetryBound = false;
+    }
 
     if (this.currentScene && typeof this.currentScene.destroy === 'function') {
       this.currentScene.destroy();
