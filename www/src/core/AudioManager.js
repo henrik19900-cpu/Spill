@@ -34,6 +34,11 @@ export default class AudioManager {
     this._crowdGain = null;
     this._crowdFilter = null;
 
+    /** Inrun slide node chain */
+    this._slideSource = null;
+    this._slideGain = null;
+    this._slideFilter = null;
+
     /** Menu ambience node chain */
     this._menuOsc = null;
     this._menuLfo = null;
@@ -490,6 +495,219 @@ export default class AudioManager {
     }
   }
 
+  /**
+   * Continuous ski sliding sound on the inrun track.
+   * Intensity scales with speed (0-1 normalised).
+   * Call repeatedly to update; pass speed <= 0 to stop.
+   *
+   * @param {number} speed – 0-1 normalised slide intensity
+   */
+  playInrunSlide(speed) {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+
+      speed = Math.max(0, Math.min(1, speed));
+
+      // If already playing, update parameters
+      if (this._slideSource) {
+        if (speed <= 0) {
+          this.stopInrunSlide();
+          return;
+        }
+        this._slideGain.gain.linearRampToValueAtTime(speed * 0.15, this.ctx.currentTime + 0.05);
+        if (this._slideFilter) {
+          // Higher speed = brighter, more aggressive sliding
+          this._slideFilter.frequency.linearRampToValueAtTime(
+            200 + speed * 1800,
+            this.ctx.currentTime + 0.05,
+          );
+        }
+        return;
+      }
+
+      if (speed <= 0) return;
+
+      // Create noise source (looped)
+      const noiseBuf = this._createNoise(2);
+      const source = this.ctx.createBufferSource();
+      source.buffer = noiseBuf;
+      source.loop = true;
+
+      // Highpass to remove low rumble, keeping the icy scrape character
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 400;
+      hp.Q.value = 0.5;
+
+      // Bandpass to shape the sliding tone
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 200 + speed * 1800;
+      bp.Q.value = 0.8;
+
+      const gain = this.ctx.createGain();
+      gain.gain.value = speed * 0.15;
+
+      this._chain(source, hp, bp, gain, this._masterGain);
+
+      source.start();
+
+      this._slideSource = source;
+      this._slideGain = gain;
+      this._slideFilter = bp;
+    } catch (e) {
+      console.warn('AudioManager.playInrunSlide error:', e);
+    }
+  }
+
+  /**
+   * Stop the continuous inrun slide sound with a short fade-out.
+   */
+  stopInrunSlide() {
+    try {
+      if (!this._slideSource || !this.ctx) return;
+      const now = this.ctx.currentTime;
+      this._slideGain.gain.linearRampToValueAtTime(0, now + 0.1);
+      this._slideSource.stop(now + 0.15);
+      this._slideSource = null;
+      this._slideGain = null;
+      this._slideFilter = null;
+    } catch (e) {
+      console.warn('AudioManager.stopInrunSlide error:', e);
+      this._slideSource = null;
+      this._slideGain = null;
+      this._slideFilter = null;
+    }
+  }
+
+  /**
+   * Short UI click sound for button / menu interactions.
+   */
+  playButtonClick() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Quick sine pop
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1400, now);
+      osc.frequency.exponentialRampToValueAtTime(1000, now + 0.04);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+
+      this._chain(osc, gain, this._masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.07);
+    } catch (e) {
+      console.warn('AudioManager.playButtonClick error:', e);
+    }
+  }
+
+  /**
+   * Triumphant ascending arpeggio for new personal records.
+   * C5 → E5 → G5 → B5 → C6 with bright harmonics.
+   */
+  playNewRecord() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      const notes = [
+        { freq: 523.25, start: 0.0,  dur: 0.12 },  // C5
+        { freq: 659.25, start: 0.10, dur: 0.12 },  // E5
+        { freq: 783.99, start: 0.20, dur: 0.12 },  // G5
+        { freq: 987.77, start: 0.30, dur: 0.12 },  // B5
+        { freq: 1046.5, start: 0.40, dur: 0.40 },  // C6 (held)
+      ];
+
+      notes.forEach(note => {
+        const osc = this.ctx.createOscillator();
+        osc.type = 'triangle';
+        osc.frequency.value = note.freq;
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.001, now + note.start);
+        gain.gain.linearRampToValueAtTime(0.3, now + note.start + 0.015);
+        gain.gain.setValueAtTime(0.3, now + note.start + note.dur * 0.5);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + note.start + note.dur);
+
+        this._chain(osc, gain, this._masterGain);
+        osc.start(now + note.start);
+        osc.stop(now + note.start + note.dur + 0.01);
+
+        // Bright shimmer layer (octave + fifth above)
+        const osc2 = this.ctx.createOscillator();
+        osc2.type = 'sine';
+        osc2.frequency.value = note.freq * 3; // 3rd harmonic
+
+        const gain2 = this.ctx.createGain();
+        gain2.gain.setValueAtTime(0.001, now + note.start);
+        gain2.gain.linearRampToValueAtTime(0.08, now + note.start + 0.015);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + note.start + note.dur);
+
+        this._chain(osc2, gain2, this._masterGain);
+        osc2.start(now + note.start);
+        osc2.stop(now + note.start + note.dur + 0.01);
+      });
+    } catch (e) {
+      console.warn('AudioManager.playNewRecord error:', e);
+    }
+  }
+
+  /**
+   * Two-note chime for achievement unlocks (G5 → C6).
+   */
+  playAchievement() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      const chimeNotes = [
+        { freq: 783.99, start: 0.0,  dur: 0.20 },  // G5
+        { freq: 1046.5, start: 0.15, dur: 0.35 },  // C6
+      ];
+
+      chimeNotes.forEach(note => {
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = note.freq;
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.001, now + note.start);
+        gain.gain.linearRampToValueAtTime(0.35, now + note.start + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + note.start + note.dur);
+
+        this._chain(osc, gain, this._masterGain);
+        osc.start(now + note.start);
+        osc.stop(now + note.start + note.dur + 0.01);
+
+        // Harmonic overtone for bell-like quality
+        const osc2 = this.ctx.createOscillator();
+        osc2.type = 'sine';
+        osc2.frequency.value = note.freq * 2.5;
+
+        const gain2 = this.ctx.createGain();
+        gain2.gain.setValueAtTime(0.001, now + note.start);
+        gain2.gain.linearRampToValueAtTime(0.1, now + note.start + 0.01);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + note.start + note.dur * 0.7);
+
+        this._chain(osc2, gain2, this._masterGain);
+        osc2.start(now + note.start);
+        osc2.stop(now + note.start + note.dur + 0.01);
+      });
+    } catch (e) {
+      console.warn('AudioManager.playAchievement error:', e);
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Continuous ambience methods
   // -----------------------------------------------------------------------
@@ -676,6 +894,14 @@ export default class AudioManager {
       this._windSource = null;
       this._windGain = null;
       this._windFilter = null;
+    }
+
+    // Stop inrun slide if playing
+    if (this._slideSource) {
+      try { this._slideSource.stop(); } catch (_) { /* already stopped */ }
+      this._slideSource = null;
+      this._slideGain = null;
+      this._slideFilter = null;
     }
 
     // Stop crowd ambience if playing

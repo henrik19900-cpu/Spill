@@ -251,8 +251,7 @@ export default class SkihoppControls {
         break;
 
       case GameState.RESULTS:
-        // Tap to jump again quickly (skip menu)
-        this.game.setState(GameState.READY);
+        this._handleResultsTap(x, y);
         break;
 
       default:
@@ -318,14 +317,111 @@ export default class SkihoppControls {
   // -----------------------------------------------------------------------
 
   _handleMenuTap(x, y) {
-    // Delegate to MenuScreen to check which button was tapped
     const scene = this.game.currentScene;
-    if (scene && scene.menuScreen) {
-      const buttonId = scene.menuScreen.handleTap(x, y);
-      if (buttonId === 'single' || buttonId === 'competition') {
-        this.game.setState(GameState.READY);
+    if (!scene) {
+      this.game.setState(GameState.READY);
+      return;
+    }
+
+    // If we're in a sub-screen, delegate tap to that sub-screen
+    if (scene._menuSubScreen) {
+      let result = null;
+
+      if (scene._menuSubScreen === 'hills' && scene.hillSelectScreen) {
+        result = scene.hillSelectScreen.handleTap(x, y);
+        if (result === 'back') {
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
+        // A hill key was returned (e.g. 'K90', 'K120', 'K185')
+        if (result && result !== 'back') {
+          scene.selectHill(result);
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
+      } else if (scene._menuSubScreen === 'stats' && scene.statsScreen) {
+        result = scene.statsScreen.handleTap(x, y);
+        if (result === 'back') {
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
+      } else if (scene._menuSubScreen === 'settings' && scene.settingsScreen) {
+        result = scene.settingsScreen.handleTap(x, y);
+        if (result === 'back') {
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
+        if (result === 'save') {
+          // Apply settings
+          const settings = scene.settingsScreen.getSettings();
+          if (scene._audio && typeof scene._audio.setVolume === 'function') {
+            scene._audio.setVolume(settings.volume / 100);
+          }
+          // Store settings on game config for other systems to read
+          if (scene.game && scene.game.config) {
+            scene.game.config.haptic = settings.haptic;
+            scene.game.config.difficulty = settings.difficulty;
+            scene.game.config.controlType = settings.controlType;
+          }
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
       }
-      // Other buttons (settings, etc.) are handled by MenuScreen or ignored
+      return;
+    }
+
+    // Main menu: delegate tap to MenuScreen
+    if (scene.menuScreen) {
+      const buttonId = scene.menuScreen.handleTap(x, y);
+      switch (buttonId) {
+        case 'jump':
+          this.game.setState(GameState.READY);
+          break;
+        case 'hills':
+          // Lazily create HillSelectScreen if needed
+          if (!scene.hillSelectScreen) {
+            try {
+              const HillSelectScreen = (await import('../../ui/HillSelectScreen.js')).default;
+              scene.hillSelectScreen = new HillSelectScreen(scene.progression);
+            } catch (e) {
+              // HillSelectScreen already imported at module level in some builds
+            }
+          }
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = 'hills';
+          break;
+        case 'stats':
+          if (!scene.statsScreen) {
+            try {
+              const StatsScreen = (await import('../../ui/StatsScreen.js')).default;
+              scene.statsScreen = new StatsScreen();
+            } catch (e) {
+              // StatsScreen already imported at module level in some builds
+            }
+          }
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = 'stats';
+          break;
+        case 'settings':
+          if (!scene.settingsScreen) {
+            try {
+              const SettingsScreen = (await import('../../ui/SettingsScreen.js')).default;
+              scene.settingsScreen = new SettingsScreen();
+            } catch (e) {
+              // SettingsScreen already imported at module level in some builds
+            }
+          }
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = 'settings';
+          break;
+        default:
+          break;
+      }
     } else {
       // Fallback: no menu screen, just start
       this.game.setState(GameState.READY);
@@ -484,6 +580,24 @@ export default class SkihoppControls {
     if (elapsed < SCORE_READ_DELAY_MS) return;
 
     this.game.setState(GameState.RESULTS);
+  }
+
+  _handleResultsTap(x, y) {
+    // Check scoreboard buttons first
+    const scene = this.game.currentScene;
+    if (scene && scene.scoreboard) {
+      const action = scene.scoreboard.handleTap(x, y);
+      if (action === 'again') {
+        this.game.setState(GameState.READY);
+        return;
+      }
+      if (action === 'menu') {
+        this.game.setState(GameState.MENU);
+        return;
+      }
+    }
+    // Tap anywhere else = quick restart (one more try!)
+    this.game.setState(GameState.READY);
   }
 
   // -----------------------------------------------------------------------

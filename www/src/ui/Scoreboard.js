@@ -19,8 +19,9 @@ export default class Scoreboard {
         /** Callback for "Hopp igjen" button tap. Set externally. */
         this.onPlayAgain = null;
 
-        /** Cached button hit area for tap detection. */
+        /** Cached button hit areas for tap detection. */
         this._buttonRect = null;
+        this._menuButtonRect = null;
     }
 
     // -------------------------------------------------------------------
@@ -171,7 +172,7 @@ export default class Scoreboard {
         const rowHeight = 52;
         const headerHeight = 34;
         const padX = 10;
-        const buttonSpace = 110; // room for buttons at bottom
+        const buttonSpace = 120; // room for buttons at bottom
 
         // Clamp scroll offset
         const maxScroll = Math.max(0, jumps.length * rowHeight + headerHeight - (height - tableTop - buttonSpace));
@@ -482,62 +483,115 @@ export default class Scoreboard {
     // -------------------------------------------------------------------
 
     _renderPlayAgainButton(ctx, width, height) {
-        const btnW = Math.min(width * 0.55, 220);
-        const btnH = 48;
-        const btnX = (width - btnW) / 2;
-        const btnY = height - 70;
+        const padX = 14;
+
+        // --- "Hopp igjen" button: full width, large, prominent ---
+        const btnW = width - padX * 2;
+        const btnH = 60;
+        const btnX = padX;
+        const btnY = height - btnH - 12;
 
         // Store for hit testing
         this._buttonRect = { x: btnX, y: btnY, w: btnW, h: btnH };
 
         ctx.save();
 
-        // Button shadow
-        ctx.shadowColor = 'rgba(0,150,255,0.4)';
-        ctx.shadowBlur = 16;
+        // Pulsing glow effect to draw attention
+        const pulse = 0.7 + Math.sin(this._time * 3) * 0.3;
 
-        // Button gradient
+        // Button shadow (strong glow)
+        ctx.shadowColor = `rgba(0,200,100,${0.5 * pulse})`;
+        ctx.shadowBlur = 20;
+
+        // Button gradient (green - action color)
         const grad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
-        grad.addColorStop(0, '#2196F3');
-        grad.addColorStop(1, '#1565C0');
+        grad.addColorStop(0, '#43A047');
+        grad.addColorStop(1, '#2E7D32');
         ctx.fillStyle = grad;
-        this._roundRect(ctx, btnX, btnY, btnW, btnH, btnH / 2);
+        this._roundRect(ctx, btnX, btnY, btnW, btnH, 12);
         ctx.fill();
 
         // Top highlight
         ctx.shadowBlur = 0;
-        const highGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH * 0.5);
-        highGrad.addColorStop(0, 'rgba(255,255,255,0.2)');
+        const highGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH * 0.45);
+        highGrad.addColorStop(0, 'rgba(255,255,255,0.25)');
         highGrad.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = highGrad;
-        this._roundRect(ctx, btnX, btnY, btnW, btnH * 0.5, btnH / 2);
+        this._roundRect(ctx, btnX, btnY, btnW, btnH * 0.45, 12);
         ctx.fill();
 
-        // Button text
+        // Button text - large and bold
         ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${Math.min(width * 0.045, 18)}px sans-serif`;
+        const fontSize = Math.max(Math.min(width * 0.065, 26), 20);
+        ctx.font = `bold ${fontSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Ski emoji/icon: small "ski" symbol
-        const label = 'Hopp igjen';
-        ctx.fillText(label, width / 2 + 8, btnY + btnH / 2);
+        const label = 'HOPP IGJEN';
+        const centerX = btnX + btnW / 2;
+        const centerY = btnY + btnH / 2;
+        ctx.fillText(label, centerX + 10, centerY);
 
-        // Small arrow/ski icon to the left of text
+        // Ski jump arrow icon to the left of text
         const textW = ctx.measureText(label).width;
-        const iconX = width / 2 - textW / 2 - 6;
-        const iconY = btnY + btnH / 2;
-        // Draw a small ski jump arrow
+        const iconX = centerX - textW / 2 - 8;
+        const iconY = centerY;
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
         ctx.beginPath();
-        ctx.moveTo(iconX - 6, iconY + 4);
-        ctx.lineTo(iconX, iconY - 4);
-        ctx.lineTo(iconX + 6, iconY - 2);
+        ctx.moveTo(iconX - 8, iconY + 5);
+        ctx.lineTo(iconX, iconY - 5);
+        ctx.lineTo(iconX + 8, iconY - 3);
         ctx.stroke();
 
         ctx.restore();
+
+        // --- "Tilbake til meny" small text link above main button ---
+        const menuBtnH = 32;
+        const menuBtnY = btnY - menuBtnH - 6;
+        const menuBtnW = width - padX * 2;
+        const menuBtnX = padX;
+
+        this._menuButtonRect = { x: menuBtnX, y: menuBtnY, w: menuBtnW, h: menuBtnH };
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        this._roundRect(ctx, menuBtnX, menuBtnY, menuBtnW, menuBtnH, 8);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.font = `${Math.max(Math.min(width * 0.035, 14), 12)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Tilbake til meny', menuBtnX + menuBtnW / 2, menuBtnY + menuBtnH / 2);
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
+    // Tap handling - returns 'again', 'menu', or null
+    // -------------------------------------------------------------------
+
+    /**
+     * Test a tap coordinate against button rects.
+     * @param {number} x
+     * @param {number} y
+     * @returns {'again'|'menu'|null}
+     */
+    handleTap(x, y) {
+        if (this._buttonRect) {
+            const b = this._buttonRect;
+            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+                return 'again';
+            }
+        }
+        if (this._menuButtonRect) {
+            const b = this._menuButtonRect;
+            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+                return 'menu';
+            }
+        }
+        return null;
     }
 
     // -------------------------------------------------------------------

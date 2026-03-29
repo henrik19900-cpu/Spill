@@ -110,9 +110,60 @@ export default class SkihoppGame {
         // Fade transition overlay
         this._fadeAlpha = 0;
 
+        // Camera pan transition (MENU -> READY)
+        this._cameraPanProgress = 0;   // 0 = overview, 1 = inrun top
+        this._cameraPanActive = false;
+
+        // Countdown animation state
+        this._lastCountdownNumber = null;
+        this._countdownScaleAnim = 0;  // 0..1 progress of scale-up-then-fade
+
+        // "HOP!" screen flash
+        this._hopFlashAlpha = 0;
+
+        // Edge-approaching warning (INRUN -> TAKEOFF)
+        this._edgeWarningActive = false;
+        this._edgeWarningTime = 0;
+
+        // Landing hold: show distance before transitioning
+        this._landingHoldTime = 0;
+        this._landingDistanceShown = false;
+
+        // SCORE -> RESULTS fade transition
+        this._scoreToResultsFade = 0;
+
+        // "Hopp igjen" camera smooth reset
+        this._resetCameraPanProgress = 0;
+        this._resetCameraPanActive = false;
+
+        // Perfect takeoff flash
+        this._perfectFlashAlpha = 0;
+        this._perfectFlashTime = 0;
+        this._showPerfektText = false;
+
         // Progression results from last jump
         this._newUnlocks = [];
         this._newAchievements = [];
+
+        // Achievement notification queue & popup state
+        this._achievementQueue = [];
+        this._achievementPopup = {
+            active: false,
+            achievement: null,
+            timer: 0,
+            duration: 2.5,
+            slideIn: 0.3,
+            slideOut: 0.3,
+        };
+
+        // New record notification state
+        this._newRecordPopup = {
+            active: false,
+            distance: 0,
+            timer: 0,
+            duration: 3.0,
+            pulsePhase: 0,
+        };
 
         // Optional UI screens for sub-menus
         this.hillSelectScreen = null;
@@ -267,6 +318,57 @@ export default class SkihoppGame {
             this._fadeAlpha = Math.max(0, this._fadeAlpha - dt * 3);
         }
 
+        // Camera pan transition (MENU -> READY smooth pan)
+        if (this._cameraPanActive) {
+            this._cameraPanProgress = Math.min(1, this._cameraPanProgress + dt * 0.8);
+            if (this._cameraPanProgress >= 1) {
+                this._cameraPanActive = false;
+            }
+        }
+
+        // "Hopp igjen" camera smooth reset
+        if (this._resetCameraPanActive) {
+            this._resetCameraPanProgress = Math.min(1, this._resetCameraPanProgress + dt * 1.2);
+            if (this._resetCameraPanProgress >= 1) {
+                this._resetCameraPanActive = false;
+            }
+        }
+
+        // HOP! screen flash decay
+        if (this._hopFlashAlpha > 0) {
+            this._hopFlashAlpha = Math.max(0, this._hopFlashAlpha - dt * 4);
+        }
+
+        // Perfect takeoff flash decay
+        if (this._perfectFlashAlpha > 0) {
+            this._perfectFlashTime += dt;
+            this._perfectFlashAlpha = Math.max(0, this._perfectFlashAlpha - dt * 2);
+            if (this._perfectFlashTime >= 0.5) {
+                this._showPerfektText = false;
+            }
+        }
+
+        // Edge-approaching warning during late INRUN
+        if (state === GameState.INRUN) {
+            const jumperState = this.jumper.getState();
+            const tableDistance = jumperState.distance !== undefined ? jumperState.distance : 0;
+            // Activate warning when close to takeoff edge (last 15% of inrun)
+            const inrunLen = this.hill.inrunLength || 98;
+            if (tableDistance <= inrunLen * 0.15 && tableDistance > 0) {
+                if (!this._edgeWarningActive) {
+                    this._edgeWarningActive = true;
+                    this._edgeWarningTime = 0;
+                    this._safeAudioCall('playRisingTone');
+                }
+                this._edgeWarningTime += dt;
+            }
+        }
+
+        // SCORE -> RESULTS fade transition
+        if (this._scoreToResultsFade > 0 && state === GameState.RESULTS) {
+            this._scoreToResultsFade = Math.max(0, this._scoreToResultsFade - dt * 2);
+        }
+
         // Wind updates continuously (even on menu for ambient feel)
         this.wind.update(dt);
 
@@ -285,6 +387,25 @@ export default class SkihoppGame {
         // Countdown timer during READY state
         if (state === GameState.READY) {
             this._countdownTimer += dt;
+
+            // Track which countdown number we're on for scale animation
+            const remaining = COUNTDOWN_DURATION - this._countdownTimer;
+            let currentNumber;
+            if (remaining > 2) currentNumber = 3;
+            else if (remaining > 1) currentNumber = 2;
+            else if (remaining > 0) currentNumber = 1;
+            else currentNumber = 0; // HOP!
+
+            if (currentNumber !== this._lastCountdownNumber) {
+                this._lastCountdownNumber = currentNumber;
+                this._countdownScaleAnim = 0;
+                // Trigger HOP! flash when countdown reaches 0
+                if (currentNumber === 0) {
+                    this._hopFlashAlpha = 0.6;
+                }
+            }
+            this._countdownScaleAnim = Math.min(1, this._countdownScaleAnim + dt * 2.5);
+
             if (this._countdownTimer >= COUNTDOWN_DURATION) {
                 this.game.setState(GameState.INRUN);
             }
@@ -338,6 +459,31 @@ export default class SkihoppGame {
         // Score animation progress
         if (state === GameState.SCORE) {
             this._scoreAnimationTime += dt;
+        }
+
+        // Achievement popup processing
+        if (this._achievementPopup.active) {
+            this._achievementPopup.timer += dt;
+            if (this._achievementPopup.timer >= this._achievementPopup.duration) {
+                this._achievementPopup.active = false;
+                this._achievementPopup.achievement = null;
+                this._achievementPopup.timer = 0;
+            }
+        } else if (this._achievementQueue.length > 0) {
+            // Pop next achievement from queue and start showing it
+            const next = this._achievementQueue.shift();
+            this._achievementPopup.active = true;
+            this._achievementPopup.achievement = next;
+            this._achievementPopup.timer = 0;
+        }
+
+        // New record popup processing
+        if (this._newRecordPopup.active) {
+            this._newRecordPopup.timer += dt;
+            this._newRecordPopup.pulsePhase += dt;
+            if (this._newRecordPopup.timer >= this._newRecordPopup.duration) {
+                this._newRecordPopup.active = false;
+            }
         }
 
         // Audio: wind sound proportional to speed
@@ -396,25 +542,48 @@ export default class SkihoppGame {
                     break;
                 }
 
-                // Draw countdown overlay
+                // Draw countdown overlay with scale-up-then-fade animation
                 {
                     const remaining = COUNTDOWN_DURATION - this._countdownTimer;
                     let countdownText;
+                    let isHop = false;
                     if (remaining > 2) countdownText = '3...';
                     else if (remaining > 1) countdownText = '2...';
                     else if (remaining > 0) countdownText = '1...';
-                    else countdownText = 'HOP!';
+                    else { countdownText = 'HOP!'; isHop = true; }
+
+                    // Scale: 1.0 -> 1.5 over the animation, then fade out
+                    const t = this._countdownScaleAnim;
+                    const scale = 1.0 + 0.5 * t;
+                    // Fade: fully visible for first 60%, then fade out
+                    const fadeAlpha = t < 0.6 ? 1.0 : Math.max(0, 1.0 - (t - 0.6) / 0.4);
 
                     ctx.save();
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
                     ctx.fillRect(0, 0, width, height);
-                    ctx.fillStyle = '#ffffff';
-                    ctx.font = 'bold 72px sans-serif';
+
+                    // HOP! screen flash (green-white)
+                    if (this._hopFlashAlpha > 0) {
+                        ctx.fillStyle = `rgba(100, 255, 100, ${this._hopFlashAlpha})`;
+                        ctx.fillRect(0, 0, width, height);
+                    }
+
+                    ctx.translate(width / 2, height / 2);
+                    ctx.scale(scale, scale);
+                    ctx.globalAlpha = fadeAlpha;
+
+                    if (isHop) {
+                        ctx.fillStyle = '#00ff44';
+                        ctx.font = 'bold 84px sans-serif';
+                    } else {
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = 'bold 72px sans-serif';
+                    }
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-                    ctx.shadowBlur = 8;
-                    ctx.fillText(countdownText, width / 2, height / 2);
+                    ctx.shadowColor = isHop ? 'rgba(0, 80, 0, 0.8)' : 'rgba(0, 0, 0, 0.6)';
+                    ctx.shadowBlur = isHop ? 16 : 8;
+                    ctx.fillText(countdownText, 0, 0);
                     ctx.restore();
                 }
                 break;
@@ -509,6 +678,10 @@ export default class SkihoppGame {
             ctx.fillRect(0, 0, width, height);
             ctx.restore();
         }
+
+        // Achievement and record popups (drawn on top of everything)
+        this._renderAchievementPopup(ctx, width, height);
+        this._renderNewRecordPopup(ctx, width, height);
     }
 
     // ------------------------------------------------------------------
@@ -619,6 +792,29 @@ export default class SkihoppGame {
                     });
                     this._newUnlocks = newUnlocks;
                     this._newAchievements = newAchievements;
+
+                    // Queue new achievements for popup notifications
+                    if (this._newAchievements && this._newAchievements.length > 0) {
+                        for (const a of this._newAchievements) {
+                            this._achievementQueue.push(a);
+                        }
+                    }
+                }
+
+                // Check for new distance record and trigger record popup
+                {
+                    const prevBest = this._bestDistance;
+                    // _bestDistance was already updated in LANDING, so check if
+                    // the current landing distance matches the new best
+                    if (jumperState.landingDistance >= prevBest && jumperState.landingDistance > 0) {
+                        this._newRecordPopup = {
+                            active: true,
+                            distance: jumperState.landingDistance,
+                            timer: 0,
+                            duration: 3.0,
+                            pulsePhase: 0,
+                        };
+                    }
                 }
 
                 // Audio effects for score reveal

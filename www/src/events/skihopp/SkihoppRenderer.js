@@ -56,6 +56,12 @@ export default class SkihoppRenderer {
         this._windStreaks = [];
         this._prevGameState = null;
 
+        // Game juice effect state
+        this._takeoffFlash = null;          // { x, y, startTime }
+        this._celebrationParticles = [];    // golden sparkle particles
+        this._milestoneFlashes = [];        // { distance, startTime }
+        this._passedMilestones = new Set(); // track which milestones already triggered
+
         this._initialized = false;
         this._time = 0;
     }
@@ -241,12 +247,22 @@ export default class SkihoppRenderer {
         if (this._prevGameState !== gameState) {
             if (gameState === GameState.FLIGHT && this._prevGameState === GameState.TAKEOFF) {
                 this._spawnTakeoffParticles();
+                this._triggerTakeoffFlash(jumperState.x, jumperState.y);
+                this._passedMilestones.clear();
             }
             if (gameState === GameState.LANDING && this._prevGameState === GameState.FLIGHT) {
                 const impactForce = Math.abs(jumperState.vy || 0) * 2;
                 this._spawnLandingParticles(jumperState.x, jumperState.y, impactForce);
+                if ((jumperState.landingQuality || 0) > 0.8) {
+                    this._spawnCelebrationParticles(jumperState.x, jumperState.y);
+                }
             }
             this._prevGameState = gameState;
+        }
+
+        // --- Track distance milestones during flight ---
+        if (gameState === GameState.FLIGHT) {
+            this._checkDistanceMilestones(jumperState);
         }
 
         // --- Draw layers back-to-front ---
@@ -255,8 +271,18 @@ export default class SkihoppRenderer {
         this._drawSnowGround(ctx, width, height);
         this._drawHillSurface(ctx, width, height);
         this._drawSpectators(ctx);
+        this._drawCrowdWaveEffect(ctx, jumperState, gameState);
         this._drawJumperShadow(ctx, jumperState);
+
+        // Speed lines behind jumper during inrun
+        if (gameState === GameState.INRUN) {
+            this._drawSpeedLines(ctx, jumperState);
+        }
+
         this._drawJumper(ctx, jumperState);
+        this._drawTakeoffFlash(ctx);
+        this._drawCelebrationParticles(ctx, 1 / 60);
+        this._drawMilestoneFlashes(ctx, jumperState, gameState);
         this._drawEffectParticles(ctx, 1 / 60);
         this._drawSnowParticles(ctx, width, height);
 
