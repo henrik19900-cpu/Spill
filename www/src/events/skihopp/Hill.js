@@ -526,6 +526,39 @@ export default class Hill {
     }
 
     /**
+     * Returns the cumulative surface distance along the landing slope at a
+     * given horizontal x-coordinate. Used to convert horizontal landing
+     * position to the official "distance" measurement (surface distance
+     * from takeoff).
+     * @param {number} xPos - horizontal distance from takeoff
+     * @returns {number} surface distance in meters
+     */
+    getSurfaceDistanceAtX(xPos) {
+        const points = [...this._landingPoints, ...this._outrunPoints];
+        let cumDist = 0;
+
+        for (let i = 1; i < points.length; i++) {
+            const p0 = points[i - 1];
+            const p1 = points[i];
+
+            if ((p0.x <= xPos && p1.x >= xPos) ||
+                (p0.x >= xPos && p1.x <= xPos)) {
+                const segDx = p1.x - p0.x;
+                const segDy = p1.y - p0.y;
+                const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
+                const t = Math.abs(segDx) > 1e-9 ? (xPos - p0.x) / segDx : 0;
+                return cumDist + t * segLen;
+            }
+
+            const dx = p1.x - p0.x;
+            const dy = p1.y - p0.y;
+            cumDist += Math.sqrt(dx * dx + dy * dy);
+        }
+
+        return cumDist;
+    }
+
+    /**
      * Returns the total surface length of the inrun (from start to table edge).
      */
     getInrunSurfaceLength() {

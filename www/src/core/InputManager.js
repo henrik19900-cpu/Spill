@@ -284,10 +284,12 @@ export default class InputManager {
     this._keysDown.add(e.code);
 
     if (e.code === 'Space') {
-      // Simulate tap
+      // Simulate tap at screen centre (so menu buttons can be hit)
       this.isTouching = true;
       this.touchStartTime = performance.now();
-      this._fireTap(0, 0);
+      const cx = (this.game.width || 390) / 2;
+      const cy = (this.game.height || 844) / 2;
+      this._fireTap(cx, cy);
     } else if (e.code === 'ArrowUp') {
       this.swipeDirection = 'up';
       this._fireSwipe('up', SWIPE_MIN_DISTANCE, 1.0);

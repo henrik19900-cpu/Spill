@@ -248,8 +248,9 @@ export default class SkihoppRenderer {
                 targetY = jumperState.y - 2;
                 // Tight zoom on the jumper during inrun
                 targetZoom = 2.5;
-                followSpeed = 2;
-                zoomSpeed = 2;
+                // Fast follow so camera catches up quickly at inrun start
+                followSpeed = 5;
+                zoomSpeed = 3;
                 break;
             }
             case GameState.TAKEOFF: {
@@ -1075,12 +1076,16 @@ export default class SkihoppRenderer {
 
         if (phase === GameState.INRUN || phase === 'INRUN') {
             this._drawJumperInrun(ctx, scale, bodyAngle);
+        } else if (phase === GameState.TAKEOFF || phase === 'TAKEOFF') {
+            // During takeoff, draw the inrun pose with the current body angle
+            // (smooth transition from crouch to launch)
+            this._drawJumperInrun(ctx, scale, bodyAngle);
         } else if (phase === GameState.FLIGHT || phase === 'FLIGHT') {
             this._drawJumperFlight(ctx, scale, bodyAngle);
         } else if (phase === GameState.LANDING || phase === 'LANDING') {
             this._drawJumperLanding(ctx, scale, bodyAngle);
         } else {
-            this._drawJumperInrun(ctx, scale, 0);
+            this._drawJumperInrun(ctx, scale, bodyAngle);
         }
 
         ctx.restore();

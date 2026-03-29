@@ -184,9 +184,9 @@ export default class SkihoppGame {
         this.scoreboard = new Scoreboard();
 
         // ----------------------------------------------------------
-        // 10. Set initial state
+        // 10. Initial state is set by Game._init() after scene loads
         // ----------------------------------------------------------
-        game.setState(GameState.MENU);
+        // (Game._init() calls setState(MENU) after _loadDefaultScene completes)
     }
 
     // ------------------------------------------------------------------
@@ -305,7 +305,7 @@ export default class SkihoppGame {
             case GameState.INRUN:
             case GameState.TAKEOFF:
             case GameState.FLIGHT:
-            case GameState.LANDING:
+            case GameState.LANDING: {
                 // Render the 3D scene
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
                     speed: this.wind.getSpeed(),
@@ -313,9 +313,19 @@ export default class SkihoppGame {
                 });
 
                 // Overlay the HUD
+                // During flight/landing, show surface distance from takeoff
+                // During inrun, distance is remaining-to-table (not useful for display)
+                let displayDistance = 0;
+                if (state === GameState.FLIGHT || state === GameState.TAKEOFF) {
+                    displayDistance = this.hill.getSurfaceDistanceAtX
+                        ? this.hill.getSurfaceDistanceAtX(Math.max(0, jumperState.x))
+                        : jumperState.x;
+                } else if (state === GameState.LANDING) {
+                    displayDistance = jumperState.landingDistance;
+                }
                 this.hud.render(ctx, width, height, {
                     speed: jumperState.speed,
-                    distance: jumperState.distance,
+                    distance: displayDistance,
                     bodyAngle: jumperState.bodyAngle,
                     windSpeed: this.wind.getSpeed(),
                     windDirection: this.wind.getDirection(),
@@ -324,6 +334,7 @@ export default class SkihoppGame {
                     landingQuality: jumperState.landingQuality,
                 });
                 break;
+            }
 
             case GameState.SCORE:
                 // Frozen scene behind the score overlay
