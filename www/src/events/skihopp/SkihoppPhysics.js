@@ -295,19 +295,36 @@ export default class SkihoppPhysics {
     }
 
     // ------------------------------------------------------------------
-    // FLIGHT — Realistic but fun aerodynamics with turbulence
+    // FLIGHT — Realistic aerodynamic model based on real ski jumping
     // ------------------------------------------------------------------
+    //
+    // Real ski jumping aerodynamics:
+    //   - Jumper + skis act as an airfoil; V-style maximizes lift
+    //   - Lift: L = 0.5 * rho * v² * CL * A  (perpendicular to airflow)
+    //   - Drag: D = 0.5 * rho * v² * CD * A  (opposing airflow)
+    //   - CL depends on angle of attack (body angle vs velocity direction)
+    //   - Optimal AoA ≈ 30-40° gives CL ≈ 1.0-1.2
+    //   - Poor AoA gives CL ≈ 0.3-0.5
+    //   - CD ranges 0.5-0.8 depending on body position
+    //   - Flight time ≈ 3-5 seconds, max height above hill ≈ 3-6m
+    //   - K120 good jump: 125-135m, great jump: 135-145m
 
     _updateFlight(dt) {
         const j = this.jumper;
         const cfg = this.cfgFlight;
 
-        // --- Configurable parameters ---
-        const liftCoeff    = cfg.liftCoefficient  || 0.52;
-        const dragCoeff    = cfg.dragCoefficient   || 0.11;
-        const optimalAngle = degToRad(cfg.optimalAngle || 35);
-        const windEffect   = cfg.windEffect        || 0.5;
-        const turbStrength = cfg.turbulenceStrength || 0.35;
+        // --- Physical constants ---
+        const rho          = cfg.airDensity         || 1.1;   // kg/m³ (mountain altitude)
+        const frontalArea  = cfg.frontalArea        || 0.55;  // m² (body + skis in flight)
+        const jumperMass   = cfg.jumperMass         || 75;    // kg (jumper + equipment)
+        const optimalAoA   = degToRad(cfg.optimalAngle || 35); // optimal angle of attack
+        const turbStrength = cfg.turbulenceStrength || 0.3;
+
+        // Aerodynamic coefficients at optimal angle of attack
+        const CL_max       = cfg.maxLiftCoeff       || 1.15;  // lift coefficient at optimal AoA
+        const CL_min       = cfg.minLiftCoeff       || 0.30;  // lift coefficient at worst AoA
+        const CD_base      = cfg.baseDragCoeff      || 0.55;  // drag coefficient at optimal
+        const CD_stall     = cfg.stallDragCoeff     || 0.90;  // drag coefficient at bad angles
 
         // Advance flight clock
         j.flightTime += dt;
@@ -324,69 +341,89 @@ export default class SkihoppPhysics {
 
         const velDir = vel.normalize();
 
-        // Velocity direction angle (radians)
+        // Velocity direction angle (radians, measured from +x axis)
         const velAngle = Math.atan2(j.vy, j.vx);
 
         // Body angle in radians
         const bodyRad = degToRad(j.bodyAngle);
 
-        // Angle of attack: body orientation minus velocity direction
+        // Angle of attack: difference between body orientation and velocity direction
+        // Positive AoA = body pitched up relative to flight path (generating lift)
         const aoa = bodyRad - velAngle;
 
-        // ---- Forces ----
+        // Dynamic pressure: q = 0.5 * rho * v²
+        const q = 0.5 * rho * speed * speed;
 
-        // 1. Gravity
+        // ---- Aerodynamic coefficients from angle of attack ----
+
+        // Lift coefficient: peaks near optimal AoA with a broad Gaussian envelope.
+        // At very low AoA (<5°), minimal lift. At very high AoA (>60°), stall.
+        const aoaDiff = aoa - optimalAoA;
+        const sigma = optimalAoA * 0.65; // width of the lift sweet spot (~22°)
+        const liftEfficiency = Math.exp(-(aoaDiff * aoaDiff) / (2 * sigma * sigma));
+        const CL = CL_min + (CL_max - CL_min) * liftEfficiency;
+
+        // Drag coefficient: minimum at optimal angle, increases when off-angle
+        // Stalling (too high AoA) creates much more drag than being too flat
+        const aoaAbs = Math.abs(aoaDiff);
+        const dragPenalty = clamp(aoaAbs / degToRad(30), 0, 1); // normalized 0-1
+        const CD = CD_base + (CD_stall - CD_base) * dragPenalty * dragPenalty;
+
+        // ---- Forces (acceleration = force / mass) ----
+
+        // 1. Gravity (always straight down in our coordinate system)
         let ax = 0;
         let ay = GRAVITY;
 
-        // 2. Drag — opposes velocity, v^2 scaling
-        //    Drag penalty grows with AoA deviation from optimal (stall at extremes)
-        const aoaAbs = Math.abs(aoa);
-        const dragAngleFactor = 1.0 + 0.8 * aoaAbs + 0.3 * aoaAbs * aoaAbs;
-        const dragMagnitude = dragCoeff * speed * speed * dragAngleFactor;
-        ax -= velDir.x * dragMagnitude;
-        ay -= velDir.y * dragMagnitude;
+        // 2. Drag — opposes velocity
+        const dragForce = q * CD * frontalArea;
+        const dragAccel = dragForce / jumperMass;
+        ax -= velDir.x * dragAccel;
+        ay -= velDir.y * dragAccel;
 
-        // 3. Lift — perpendicular to velocity, depends on AoA proximity to optimal
-        //    Lift direction: 90 degrees CCW of velocity (points "up" relative to flight path)
+        // 3. Lift — perpendicular to velocity, pointing "up" relative to flight path
+        //    In our coord system: rotate velocity 90° CCW to get lift direction
         const liftDir = new Vec2(-velDir.y, velDir.x);
 
-        // Lift effectiveness curve: Gaussian-like around optimal AoA
-        // Small angle changes near optimal have visible but not catastrophic effects
-        const aoaDiff = aoa - optimalAngle;
-        const sigma = optimalAngle * 0.7; // width of the lift "sweet spot"
-        const liftEfficiency = Math.exp(-(aoaDiff * aoaDiff) / (2 * sigma * sigma));
+        const liftForce = q * CL * frontalArea;
+        const liftAccel = liftForce / jumperMass;
 
-        // V-style bonus: when near optimal angle, lift is significantly higher
-        // This makes the optimal ~35 degree angle give noticeably more distance
-        const vStyleBonus = liftEfficiency > 0.8 ? 1.0 + 0.25 * (liftEfficiency - 0.8) / 0.2 : 1.0;
-
-        const liftMagnitude = liftCoeff * speed * speed * liftEfficiency * vStyleBonus;
-
-        // Ensure lift pushes upward (negative y in our coordinate system)
+        // Ensure lift pushes upward (away from ground, i.e. negative y)
         const liftSign = liftDir.y <= 0 ? 1 : -1;
-        ax += liftDir.x * liftMagnitude * liftSign;
-        ay += liftDir.y * liftMagnitude * liftSign;
+        ax += liftDir.x * liftAccel * liftSign;
+        ay += liftDir.y * liftAccel * liftSign;
 
-        // 4. Wind — headwind (positive) gives extra lift and slower horizontal,
-        //           tailwind (negative) reduces lift and pushes along
+        // 4. Wind — headwind (positive) increases effective airspeed
+        //    Real effect: 1 m/s headwind ≈ 5-8m more distance
+        //    Modeled as increased dynamic pressure on the aerodynamic surfaces
         const wind = j.wind || 0;
-        // Headwind: increases effective airspeed -> more lift, more drag
-        // We model this as a direct horizontal force plus a lift modifier
-        const windForce = wind * windEffect;
-        ax -= windForce;  // headwind slows horizontal movement
-        // Headwind also boosts lift (positive wind = higher, longer jumps)
-        const windLiftBoost = wind * 0.15 * speed;
-        ay -= windLiftBoost; // upward force from headwind
+        if (Math.abs(wind) > 0.01) {
+            // Wind modifies the effective airspeed for aerodynamic forces
+            // Headwind adds to airspeed, tailwind subtracts
+            const effectiveSpeed = speed + wind; // wind > 0 = headwind
+            const qWind = 0.5 * rho * effectiveSpeed * effectiveSpeed;
+            const qDelta = qWind - q; // additional dynamic pressure from wind
 
-        // 5. Turbulence — small random perturbations the player must counteract
-        //    Intensity builds over flight time (more turbulence further from hill)
-        const turbRamp = clamp(j.flightTime / 1.5, 0, 1); // ramps up over 1.5 seconds
+            // Extra lift and drag from wind-modified pressure
+            const windLiftExtra = (qDelta * CL * frontalArea) / jumperMass;
+            const windDragExtra = (qDelta * CD * frontalArea) / jumperMass;
+
+            // Apply extra lift (upward)
+            ax += liftDir.x * windLiftExtra * liftSign;
+            ay += liftDir.y * windLiftExtra * liftSign;
+
+            // Apply extra drag (opposing velocity)
+            ax -= velDir.x * windDragExtra;
+            ay -= velDir.y * windDragExtra;
+        }
+
+        // 5. Turbulence — small random perturbations
+        //    Builds over flight time (more turbulence further from hill)
+        const turbRamp = clamp(j.flightTime / 1.5, 0, 1);
         const turbX = turbulenceNoise(j.flightTime, 0) * turbStrength * turbRamp;
-        const turbY = turbulenceNoise(j.flightTime, 42.0) * turbStrength * turbRamp * 0.6;
+        const turbY = turbulenceNoise(j.flightTime, 42.0) * turbStrength * turbRamp * 0.5;
         ax += turbX;
         ay += turbY;
-        // Expose turbulence for the renderer
         j.turbulenceX = turbX;
         j.turbulenceY = turbY;
 

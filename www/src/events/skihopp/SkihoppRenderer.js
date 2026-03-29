@@ -928,20 +928,122 @@ export default class SkihoppRenderer {
 
     _drawSpectators(ctx) {
         const r = this.renderer;
+        const t = this._time || 0;
 
         for (const spec of this._spectators) {
             const sp = r.worldToScreen(spec.x, spec.y);
+            const ppm = r.ppm;
+            const h = spec.h * ppm;      // total body height in px
+            const headR = h * 0.15;       // head radius
+            const bodyW = h * 0.2;        // body/torso width
 
-            // Body (small rectangle)
-            ctx.fillStyle = spec.color;
-            const h = spec.h * r.ppm;
-            const w = h * 0.4;
-            ctx.fillRect(sp.x - w / 2, sp.y - h, w, h);
+            // --- Legs (two short lines from base) ---
+            ctx.strokeStyle = spec.bodyColor;
+            ctx.lineWidth = Math.max(1, bodyW * 0.3);
+            ctx.lineCap = 'round';
+            // Left leg
+            ctx.beginPath();
+            ctx.moveTo(sp.x - bodyW * 0.25, sp.y);
+            ctx.lineTo(sp.x - bodyW * 0.4, sp.y + h * 0.05);
+            ctx.stroke();
+            // Right leg
+            ctx.beginPath();
+            ctx.moveTo(sp.x + bodyW * 0.25, sp.y);
+            ctx.lineTo(sp.x + bodyW * 0.4, sp.y + h * 0.05);
+            ctx.stroke();
 
-            // Head (small circle)
+            // --- Torso (vertical line) ---
+            const torsoTop = sp.y - h * 0.6;
+            ctx.strokeStyle = spec.bodyColor;
+            ctx.lineWidth = Math.max(1.5, bodyW * 0.5);
+            ctx.beginPath();
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(sp.x, torsoTop);
+            ctx.stroke();
+
+            // --- Arms ---
+            const armY = torsoTop + h * 0.12;
+            ctx.lineWidth = Math.max(1, bodyW * 0.3);
+
+            if (spec.action === 'wave') {
+                // One arm waves up and down
+                const waveAngle = Math.sin(t * spec.waveSpeed + spec.wavePhase) * 0.6;
+                // Left arm (waving)
+                const waveEndX = sp.x - h * 0.3 * Math.cos(waveAngle - 0.8);
+                const waveEndY = armY - h * 0.3 * Math.sin(waveAngle + 0.8);
+                ctx.beginPath();
+                ctx.moveTo(sp.x, armY);
+                ctx.lineTo(waveEndX, waveEndY);
+                ctx.stroke();
+                // Right arm (static, down)
+                ctx.beginPath();
+                ctx.moveTo(sp.x, armY);
+                ctx.lineTo(sp.x + bodyW * 0.6, armY + h * 0.15);
+                ctx.stroke();
+            } else if (spec.action === 'flag') {
+                // One arm holds a flag up
+                const flagArmX = sp.x + bodyW * 0.15;
+                const flagTopY = torsoTop - h * 0.35;
+                // Arm going up
+                ctx.beginPath();
+                ctx.moveTo(sp.x, armY);
+                ctx.lineTo(flagArmX, flagTopY);
+                ctx.stroke();
+                // Flag pole (thin line extending above)
+                ctx.strokeStyle = '#664422';
+                ctx.lineWidth = Math.max(0.8, bodyW * 0.15);
+                ctx.beginPath();
+                ctx.moveTo(flagArmX, flagTopY);
+                ctx.lineTo(flagArmX, flagTopY - h * 0.25);
+                ctx.stroke();
+                // Flag rectangle
+                const flagW = h * 0.2;
+                const flagH = h * 0.12;
+                const wave = Math.sin(t * 3 + spec.wavePhase) * flagW * 0.08;
+                ctx.fillStyle = spec.flagColor;
+                ctx.beginPath();
+                ctx.moveTo(flagArmX, flagTopY - h * 0.25);
+                ctx.lineTo(flagArmX + flagW + wave, flagTopY - h * 0.25 + flagH * 0.2);
+                ctx.lineTo(flagArmX + flagW - wave, flagTopY - h * 0.25 + flagH);
+                ctx.lineTo(flagArmX, flagTopY - h * 0.25 + flagH * 0.8);
+                ctx.closePath();
+                ctx.fill();
+                // Other arm (static, down)
+                ctx.strokeStyle = spec.bodyColor;
+                ctx.lineWidth = Math.max(1, bodyW * 0.3);
+                ctx.beginPath();
+                ctx.moveTo(sp.x, armY);
+                ctx.lineTo(sp.x - bodyW * 0.6, armY + h * 0.15);
+                ctx.stroke();
+            } else {
+                // Still: both arms relaxed at sides
+                ctx.beginPath();
+                ctx.moveTo(sp.x, armY);
+                ctx.lineTo(sp.x - bodyW * 0.6, armY + h * 0.18);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(sp.x, armY);
+                ctx.lineTo(sp.x + bodyW * 0.6, armY + h * 0.18);
+                ctx.stroke();
+            }
+
+            // --- Head (circle) ---
             ctx.fillStyle = '#ffccaa';
             ctx.beginPath();
-            ctx.arc(sp.x, sp.y - h - w * 0.4, w * 0.4, 0, Math.PI * 2);
+            ctx.arc(sp.x, torsoTop - headR, headR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // --- Colorful hat (small triangle/bobble on top of head) ---
+            ctx.fillStyle = spec.hatColor;
+            ctx.beginPath();
+            ctx.moveTo(sp.x - headR * 0.7, torsoTop - headR * 1.2);
+            ctx.lineTo(sp.x + headR * 0.7, torsoTop - headR * 1.2);
+            ctx.lineTo(sp.x, torsoTop - headR * 2.3);
+            ctx.closePath();
+            ctx.fill();
+            // Bobble on top
+            ctx.beginPath();
+            ctx.arc(sp.x, torsoTop - headR * 2.3, headR * 0.25, 0, Math.PI * 2);
             ctx.fill();
         }
     }
