@@ -56,8 +56,29 @@ export default class SkihoppRenderer {
         this._windStreaks = [];
         this._prevGameState = null;
 
+        // Game juice effect state
+        this._takeoffFlash = null;          // { x, y, startTime }
+        this._celebrationParticles = [];    // golden sparkle particles
+        this._milestoneFlashes = [];        // { distance, startTime }
+        this._passedMilestones = new Set(); // track which milestones already triggered
+
         this._initialized = false;
         this._time = 0;
+
+        // --- Performance caches ---
+        // Reusable point object to avoid per-frame allocations in worldToScreen
+        this._tmpPt = { x: 0, y: 0 };
+        // Cached hill profile screen coords
+        this._cachedProfileScreen = [];
+        this._cachedCameraX = NaN;
+        this._cachedCameraY = NaN;
+        this._cachedZoom = NaN;
+        // Cached aurora color strings (avoid per-frame rgba string building)
+        this._auroraColorCache = null;
+        // Cached snow ground seeded-random results (avoid re-running seeded RNG every frame)
+        this._snowGroundShadows = null;
+        this._snowGroundSparkles = null;
+        this._snowGroundRidges = null;
     }
 
     // ------------------------------------------------------------------
@@ -241,12 +262,22 @@ export default class SkihoppRenderer {
         if (this._prevGameState !== gameState) {
             if (gameState === GameState.FLIGHT && this._prevGameState === GameState.TAKEOFF) {
                 this._spawnTakeoffParticles();
+                this._triggerTakeoffFlash(jumperState.x, jumperState.y);
+                this._passedMilestones.clear();
             }
             if (gameState === GameState.LANDING && this._prevGameState === GameState.FLIGHT) {
                 const impactForce = Math.abs(jumperState.vy || 0) * 2;
                 this._spawnLandingParticles(jumperState.x, jumperState.y, impactForce);
+                if ((jumperState.landingQuality || 0) > 0.8) {
+                    this._spawnCelebrationParticles(jumperState.x, jumperState.y);
+                }
             }
             this._prevGameState = gameState;
+        }
+
+        // --- Track distance milestones during flight ---
+        if (gameState === GameState.FLIGHT) {
+            this._checkDistanceMilestones(jumperState);
         }
 
         // --- Draw layers back-to-front ---
@@ -255,8 +286,18 @@ export default class SkihoppRenderer {
         this._drawSnowGround(ctx, width, height);
         this._drawHillSurface(ctx, width, height);
         this._drawSpectators(ctx);
+        this._drawCrowdWaveEffect(ctx, jumperState, gameState);
         this._drawJumperShadow(ctx, jumperState);
+
+        // Speed lines behind jumper during inrun
+        if (gameState === GameState.INRUN) {
+            this._drawSpeedLines(ctx, jumperState);
+        }
+
         this._drawJumper(ctx, jumperState);
+        this._drawTakeoffFlash(ctx);
+        this._drawCelebrationParticles(ctx, 1 / 60);
+        this._drawMilestoneFlashes(ctx, jumperState, gameState);
         this._drawEffectParticles(ctx, 1 / 60);
         this._drawSnowParticles(ctx, width, height);
 
@@ -380,37 +421,56 @@ export default class SkihoppRenderer {
 
         // Aurora borealis: 5 overlapping sine waves, vivid green/teal/purple
         const t = (this._time || 0);
+
+        // Pre-cache aurora color strings once (avoid per-frame string concatenation)
+        if (!this._auroraColorCache) {
+            const auroraConfigs = [
+                { baseY: 0.10, color: [64, 255, 128],  alpha: 0.10, freqs: [0.007, 0.013, 0.021], speeds: [0.35, 0.6, 0.25] },
+                { baseY: 0.14, color: [64, 255, 221],  alpha: 0.09, freqs: [0.009, 0.017, 0.006], speeds: [0.45, 0.3, 0.55] },
+                { baseY: 0.18, color: [128, 64, 255],  alpha: 0.08, freqs: [0.006, 0.014, 0.023], speeds: [0.5, 0.7, 0.35] },
+                { baseY: 0.13, color: [64, 255, 180],  alpha: 0.11, freqs: [0.011, 0.019, 0.008], speeds: [0.3, 0.5, 0.65] },
+                { baseY: 0.21, color: [100, 80, 255],  alpha: 0.08, freqs: [0.008, 0.016, 0.025], speeds: [0.55, 0.4, 0.3] },
+            ];
+            this._auroraColorCache = auroraConfigs.map(al => {
+                const [r, g, b] = al.color;
+                return {
+                    baseY: al.baseY, freqs: al.freqs, speeds: al.speeds, alpha: al.alpha,
+                    stops: [
+                        `rgba(${r},${g},${b},${(al.alpha * 0.3).toFixed(3)})`,
+                        `rgba(${r},${g},${b},${al.alpha.toFixed(3)})`,
+                        `rgba(${r},${g},${b},${(al.alpha * 0.5).toFixed(3)})`,
+                        `rgba(${r},${g},${b},0)`,
+                    ],
+                };
+            });
+        }
+
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
-        const auroraLayers = [
-            { baseY: 0.10, color: [64, 255, 128],  alpha: 0.10, freqs: [0.007, 0.013, 0.021], speeds: [0.35, 0.6, 0.25] },
-            { baseY: 0.14, color: [64, 255, 221],  alpha: 0.09, freqs: [0.009, 0.017, 0.006], speeds: [0.45, 0.3, 0.55] },
-            { baseY: 0.18, color: [128, 64, 255],  alpha: 0.08, freqs: [0.006, 0.014, 0.023], speeds: [0.5, 0.7, 0.35] },
-            { baseY: 0.13, color: [64, 255, 180],  alpha: 0.11, freqs: [0.011, 0.019, 0.008], speeds: [0.3, 0.5, 0.65] },
-            { baseY: 0.21, color: [100, 80, 255],  alpha: 0.08, freqs: [0.008, 0.016, 0.025], speeds: [0.55, 0.4, 0.3] },
-        ];
+        const auroraLayers = this._auroraColorCache;
+        const h038 = h * 0.38;
         for (let i = 0; i < auroraLayers.length; i++) {
             const al = auroraLayers[i];
             const baseY = h * al.baseY;
             ctx.beginPath();
             ctx.moveTo(0, baseY);
-            for (let x = 0; x <= w; x += 3) {
+            // Step by 4px instead of 3px for ~25% fewer lineTo calls
+            for (let x = 0; x <= w; x += 4) {
                 const wave = Math.sin(x * al.freqs[0] + t * al.speeds[0] + i * 1.8) * 22
                            + Math.sin(x * al.freqs[1] + t * al.speeds[1] + i * 0.7) * 14
                            + Math.sin(x * al.freqs[2] + t * al.speeds[2] + i * 2.5) * 8;
                 ctx.lineTo(x, baseY + wave);
             }
-            ctx.lineTo(w, h * 0.38);
-            ctx.lineTo(0, h * 0.38);
+            ctx.lineTo(w, h038);
+            ctx.lineTo(0, h038);
             ctx.closePath();
 
-            // Vertical gradient fade for each aurora band
-            const aGrad = ctx.createLinearGradient(0, baseY - 25, 0, h * 0.38);
-            const [r, g, b] = al.color;
-            aGrad.addColorStop(0, `rgba(${r},${g},${b},${(al.alpha * 0.3).toFixed(3)})`);
-            aGrad.addColorStop(0.3, `rgba(${r},${g},${b},${al.alpha.toFixed(3)})`);
-            aGrad.addColorStop(0.7, `rgba(${r},${g},${b},${(al.alpha * 0.5).toFixed(3)})`);
-            aGrad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+            // Vertical gradient fade for each aurora band (use cached color strings)
+            const aGrad = ctx.createLinearGradient(0, baseY - 25, 0, h038);
+            aGrad.addColorStop(0, al.stops[0]);
+            aGrad.addColorStop(0.3, al.stops[1]);
+            aGrad.addColorStop(0.7, al.stops[2]);
+            aGrad.addColorStop(1, al.stops[3]);
             ctx.fillStyle = aGrad;
             ctx.fill();
         }
@@ -445,43 +505,53 @@ export default class SkihoppRenderer {
         ctx.restore();
 
         // Twinkling stars with sparkle shapes on bright ones
-        for (const s of this._stars) {
+        // Batch regular (non-sparkle) stars: group by similar alpha to reduce fillStyle changes
+        ctx.save();
+        // First pass: draw all sparkle stars
+        ctx.lineWidth = 0.7;
+        for (let si = 0; si < this._stars.length; si++) {
+            const s = this._stars[si];
+            if (!s.sparkle) continue;
             const twinkle = 0.5 + 0.5 * Math.sin(t * s.twinkleSpeed + s.twinkleOffset);
             const alpha = s.a * (0.2 + 0.8 * twinkle);
             const sx = s.x * w;
             const sy = s.y * h;
 
-            if (s.sparkle) {
-                // Cross/sparkle shape: 4 radiating lines from center
-                const armLen = s.r * 2.5 + twinkle * 2.0;
-                ctx.save();
-                ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
-                ctx.lineWidth = 0.7;
-                ctx.beginPath();
-                ctx.moveTo(sx, sy - armLen);
-                ctx.lineTo(sx, sy + armLen);
-                ctx.moveTo(sx - armLen, sy);
-                ctx.lineTo(sx + armLen, sy);
-                const diagLen = armLen * 0.55;
-                ctx.moveTo(sx - diagLen, sy - diagLen);
-                ctx.lineTo(sx + diagLen, sy + diagLen);
-                ctx.moveTo(sx + diagLen, sy - diagLen);
-                ctx.lineTo(sx - diagLen, sy + diagLen);
-                ctx.stroke();
-                // Bright center dot
-                ctx.beginPath();
-                ctx.arc(sx, sy, s.r * 0.8, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255,255,255,${Math.min(1, alpha * 1.3).toFixed(2)})`;
-                ctx.fill();
-                ctx.restore();
-            } else {
-                // Regular dot star
-                ctx.beginPath();
-                ctx.arc(sx, sy, s.r, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
-                ctx.fill();
-            }
+            // Cross/sparkle shape: 4 radiating lines from center
+            const armLen = s.r * 2.5 + twinkle * 2.0;
+            ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy - armLen);
+            ctx.lineTo(sx, sy + armLen);
+            ctx.moveTo(sx - armLen, sy);
+            ctx.lineTo(sx + armLen, sy);
+            const diagLen = armLen * 0.55;
+            ctx.moveTo(sx - diagLen, sy - diagLen);
+            ctx.lineTo(sx + diagLen, sy + diagLen);
+            ctx.moveTo(sx + diagLen, sy - diagLen);
+            ctx.lineTo(sx - diagLen, sy + diagLen);
+            ctx.stroke();
+            // Bright center dot
+            ctx.beginPath();
+            ctx.arc(sx, sy, s.r * 0.8, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,255,255,${Math.min(1, alpha * 1.3).toFixed(2)})`;
+            ctx.fill();
         }
+
+        // Second pass: draw all regular dot stars
+        for (let si = 0; si < this._stars.length; si++) {
+            const s = this._stars[si];
+            if (s.sparkle) continue;
+            const twinkle = 0.5 + 0.5 * Math.sin(t * s.twinkleSpeed + s.twinkleOffset);
+            const alpha = s.a * (0.2 + 0.8 * twinkle);
+            const sx = s.x * w;
+            const sy = s.y * h;
+            ctx.beginPath();
+            ctx.arc(sx, sy, s.r, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+            ctx.fill();
+        }
+        ctx.restore();
     }
 
     // ------------------------------------------------------------------
@@ -526,7 +596,6 @@ export default class SkihoppRenderer {
 
             // Subtle edge highlight on top of each layer (atmospheric haze effect)
             if (layer < numLayers - 1) {
-                ctx.save();
                 ctx.beginPath();
                 ctx.moveTo((firstPt.x + offsetX) * w, firstPt.y * h);
                 for (let i = 1; i < points.length; i++) {
@@ -543,10 +612,15 @@ export default class SkihoppRenderer {
                 ctx.strokeStyle = `rgba(100,140,180,${(0.08 - layer * 0.015).toFixed(3)})`;
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
-                ctx.restore();
             }
 
             // --- White snow caps on peaks ---
+            // Pre-compute cap dimensions and color for this layer (avoid per-peak work)
+            const capH = 4 + layer * 2.5;
+            const capW = capH * 1.6;
+            const capHalfW = capW / 2;
+            const capColor = `rgba(220,230,255,${(0.35 + layer * 0.12).toFixed(2)})`;
+            ctx.fillStyle = capColor;
             for (let i = 1; i < points.length - 1; i++) {
                 const prev = points[i - 1];
                 const curr = points[i];
@@ -556,30 +630,24 @@ export default class SkihoppRenderer {
                 if (curr.y < prev.y && curr.y < next.y) {
                     const peakX = (curr.x + offsetX) * w;
                     const peakY = curr.y * h;
-                    // Snow cap size scales with layer (foreground layers are bigger)
-                    const capH = 4 + layer * 2.5;
-                    const capW = capH * 1.6;
-                    const alpha = 0.35 + layer * 0.12;
 
                     ctx.beginPath();
                     ctx.moveTo(peakX, peakY);
-                    ctx.lineTo(peakX - capW / 2, peakY + capH);
-                    ctx.lineTo(peakX + capW / 2, peakY + capH);
+                    ctx.lineTo(peakX - capHalfW, peakY + capH);
+                    ctx.lineTo(peakX + capHalfW, peakY + capH);
                     ctx.closePath();
-                    ctx.fillStyle = `rgba(220,230,255,${alpha.toFixed(2)})`;
                     ctx.fill();
                 }
             }
 
             // --- Pine tree silhouettes on nearest layer ---
             if (pines && pines.length > 0) {
-                ctx.save();
                 ctx.fillStyle = '#1e2e48';
+                // Batch all pine triangles into a single path for fewer draw calls
+                ctx.beginPath();
                 for (const pine of pines) {
-                    // Find the ridge Y at this t position by interpolating between points
                     const totalSpan = lastPt.x - firstPt.x;
                     const treeWorldX = firstPt.x + pine.t * totalSpan;
-                    // Find surrounding points for interpolation
                     let ridgeY = lastPt.y;
                     for (let i = 1; i < points.length; i++) {
                         if (points[i].x >= treeWorldX) {
@@ -596,25 +664,36 @@ export default class SkihoppRenderer {
                     const th = pine.h;
                     const tw = pine.w;
 
-                    // Simple triangular pine tree silhouette (two stacked triangles)
-                    ctx.beginPath();
                     // Lower wider triangle
                     ctx.moveTo(tx, ty - th * 0.3);
                     ctx.lineTo(tx - tw, ty);
                     ctx.lineTo(tx + tw, ty);
                     ctx.closePath();
-                    ctx.fill();
                     // Upper narrower triangle
-                    ctx.beginPath();
                     ctx.moveTo(tx, ty - th);
                     ctx.lineTo(tx - tw * 0.65, ty - th * 0.25);
                     ctx.lineTo(tx + tw * 0.65, ty - th * 0.25);
                     ctx.closePath();
-                    ctx.fill();
-                    // Small trunk
+                }
+                ctx.fill();
+                // Batch all trunks
+                for (const pine of pines) {
+                    const totalSpan = lastPt.x - firstPt.x;
+                    const treeWorldX = firstPt.x + pine.t * totalSpan;
+                    let ridgeY = lastPt.y;
+                    for (let i = 1; i < points.length; i++) {
+                        if (points[i].x >= treeWorldX) {
+                            const p0 = points[i - 1];
+                            const p1 = points[i];
+                            const seg = (treeWorldX - p0.x) / (p1.x - p0.x || 1);
+                            ridgeY = p0.y + (p1.y - p0.y) * seg;
+                            break;
+                        }
+                    }
+                    const tx = (treeWorldX + offsetX) * w;
+                    const ty = ridgeY * h;
                     ctx.fillRect(tx - 0.8, ty, 1.6, 2);
                 }
-                ctx.restore();
             }
         }
     }
@@ -623,20 +702,48 @@ export default class SkihoppRenderer {
     // 3. Snow ground (fill below hill surface)
     // ------------------------------------------------------------------
 
+    /**
+     * Get cached profile screen coordinates. Only recomputes when camera changes.
+     */
+    _getProfileScreen() {
+        const r = this.renderer;
+        if (this._cachedCameraX === r.cameraX &&
+            this._cachedCameraY === r.cameraY &&
+            this._cachedZoom === r.zoom) {
+            return this._cachedProfileScreen;
+        }
+        const profile = this.hill.getProfile();
+        // Reuse existing array to avoid allocation
+        if (this._cachedProfileScreen.length !== profile.length) {
+            this._cachedProfileScreen = new Array(profile.length);
+            for (let i = 0; i < profile.length; i++) {
+                this._cachedProfileScreen[i] = { x: 0, y: 0 };
+            }
+        }
+        for (let i = 0; i < profile.length; i++) {
+            const sp = r.worldToScreen(profile[i].x, profile[i].y);
+            this._cachedProfileScreen[i].x = sp.x;
+            this._cachedProfileScreen[i].y = sp.y;
+        }
+        this._cachedCameraX = r.cameraX;
+        this._cachedCameraY = r.cameraY;
+        this._cachedZoom = r.zoom;
+        return this._cachedProfileScreen;
+    }
+
     _drawSnowGround(ctx, w, h) {
         const profile = this.hill.getProfile();
         const r = this.renderer;
+        const profileScreen = this._getProfileScreen();
 
         // --- Main snow ground fill with gradient ---
         ctx.beginPath();
-        let first = true;
-        for (const pt of profile) {
-            const sp = r.worldToScreen(pt.x, pt.y);
-            if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
-            else ctx.lineTo(sp.x, sp.y);
+        ctx.moveTo(profileScreen[0].x, profileScreen[0].y);
+        for (let i = 1; i < profileScreen.length; i++) {
+            ctx.lineTo(profileScreen[i].x, profileScreen[i].y);
         }
-        const lastScreen = r.worldToScreen(profile[profile.length - 1].x, profile[profile.length - 1].y);
-        const firstScreen = r.worldToScreen(profile[0].x, profile[0].y);
+        const lastScreen = profileScreen[profileScreen.length - 1];
+        const firstScreen = profileScreen[0];
         ctx.lineTo(lastScreen.x, h + 50);
         ctx.lineTo(firstScreen.x, h + 50);
         ctx.closePath();
@@ -654,46 +761,74 @@ export default class SkihoppRenderer {
         ctx.fill();
 
         // --- Subtle blue shadow patches for depth ---
-        const rng = seededRandom(2024);
+        // Cache the seeded random results so we don't re-run the RNG every frame
         const xRange = profile[profile.length - 1].x - profile[0].x;
         const xStart = profile[0].x;
+        if (!this._snowGroundShadows) {
+            const rng = seededRandom(2024);
+            this._snowGroundShadows = [];
+            for (let i = 0; i < 40; i++) {
+                const wxNorm = rng();
+                const wyOff = 1 + rng() * 10;
+                this._snowGroundShadows.push({
+                    wxNorm, wyOff,
+                    radX: 8 + rng() * 30,
+                    radY: 3 + rng() * 8,
+                    blueTint: Math.floor(80 + rng() * 40),
+                    alpha: 0.04 + rng() * 0.06,
+                    rot: rng() * 0.4,
+                    color: `rgb(70,${Math.floor(80 + rng() * 40)},170)`,
+                });
+            }
+        }
         ctx.save();
-        for (let i = 0; i < 40; i++) {
-            const wx = xStart + rng() * xRange;
+        for (let i = 0; i < this._snowGroundShadows.length; i++) {
+            const s = this._snowGroundShadows[i];
+            const wx = xStart + s.wxNorm * xRange;
             const wy = this.hill.getHeightAtDistance(wx);
-            const offY = 1 + rng() * 10;
-            const sp1 = r.worldToScreen(wx, wy + offY);
-            const radX = 8 + rng() * 30;
-            const radY = 3 + rng() * 8;
+            const sp1 = r.worldToScreen(wx, wy + s.wyOff);
             if (sp1.x < -60 || sp1.x > w + 60 || sp1.y < -20 || sp1.y > h + 60) continue;
-            // Vary the shadow color slightly
-            const blueTint = Math.floor(80 + rng() * 40);
-            ctx.globalAlpha = 0.04 + rng() * 0.06;
+            ctx.globalAlpha = s.alpha;
             ctx.beginPath();
-            ctx.ellipse(sp1.x, sp1.y, radX, radY, rng() * 0.4, 0, Math.PI * 2);
-            ctx.fillStyle = `rgb(70,${blueTint},170)`;
+            ctx.ellipse(sp1.x, sp1.y, s.radX, s.radY, s.rot, 0, Math.PI * 2);
+            ctx.fillStyle = s.color;
             ctx.fill();
         }
         ctx.restore();
 
         // --- Snow drift ridges (wavy highlight lines along the ground) ---
-        const rng3 = seededRandom(6060);
+        // Cache ridge data to avoid re-running seeded RNG every frame
+        if (!this._snowGroundRidges) {
+            const rng3 = seededRandom(6060);
+            this._snowGroundRidges = [];
+            for (let ridge = 0; ridge < 14; ridge++) {
+                const wxNorm = rng3();
+                const wyOff = 2 + rng3() * 16;
+                const ridgeLen = 6 + rng3() * 25;
+                const bright = rng3() < 0.5;
+                const lineWidth = 0.8 + rng3() * 0.8;
+                const segPhases = [];
+                for (let j = 0; j <= 12; j++) {
+                    segPhases.push(rng3() * 6.28);
+                }
+                this._snowGroundRidges.push({
+                    wxNorm, wyOff, ridgeLen, bright, lineWidth, segPhases,
+                });
+            }
+        }
         ctx.save();
         ctx.lineCap = 'round';
-        for (let ridge = 0; ridge < 14; ridge++) {
-            const baseWx = xStart + rng3() * xRange;
-            const baseWy = this.hill.getHeightAtDistance(baseWx) + 2 + rng3() * 16;
-            const ridgeLen = 6 + rng3() * 25;
-            const segments = 12;
-            // Alternate between brighter white and soft blue-white
-            const bright = rng3() < 0.5;
-            ctx.globalAlpha = bright ? 0.1 : 0.06;
-            ctx.strokeStyle = bright ? '#f0f6ff' : '#d8e8f8';
-            ctx.lineWidth = 0.8 + rng3() * 0.8;
+        for (let ri = 0; ri < this._snowGroundRidges.length; ri++) {
+            const rd = this._snowGroundRidges[ri];
+            const baseWx = xStart + rd.wxNorm * xRange;
+            const baseWy = this.hill.getHeightAtDistance(baseWx) + rd.wyOff;
+            ctx.globalAlpha = rd.bright ? 0.1 : 0.06;
+            ctx.strokeStyle = rd.bright ? '#f0f6ff' : '#d8e8f8';
+            ctx.lineWidth = rd.lineWidth;
             ctx.beginPath();
-            for (let j = 0; j <= segments; j++) {
-                const rx = baseWx + (j / segments) * ridgeLen;
-                const ry = baseWy + Math.sin(j * 0.7 + rng3() * 6.28) * 0.6;
+            for (let j = 0; j <= 12; j++) {
+                const rx = baseWx + (j / 12) * rd.ridgeLen;
+                const ry = baseWy + Math.sin(j * 0.7 + rd.segPhases[j]) * 0.6;
                 const sp = r.worldToScreen(rx, ry);
                 if (j === 0) ctx.moveTo(sp.x, sp.y);
                 else ctx.lineTo(sp.x, sp.y);

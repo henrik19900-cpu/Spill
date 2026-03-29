@@ -45,8 +45,8 @@ export function createJumperState() {
     vx: 0,
     vy: 0,
     speed: 0,
-    bodyAngle: 35,       // degrees, current
-    targetAngle: 35,     // degrees, player-requested
+    bodyAngle: BODY_ANGLE_DEFAULT, // degrees, current (starts near optimal)
+    targetAngle: BODY_ANGLE_DEFAULT, // degrees, player-requested
     distance: 0,         // meters from takeoff
     takeoffQuality: 0,   // 0-1, set during TAKEOFF
     landingDistance: 0,   // meters, recorded at landing
@@ -62,29 +62,40 @@ export function createJumperState() {
 // ---------------------------------------------------------------------------
 
 const TAKEOFF_WINDOW_MS   = 200;   // total window for takeoff tap
-const TAKEOFF_PERFECT_MS  = 80;    // tight perfect window within the 200ms
-const TAKEOFF_AUTO_QUALITY = 0.3;  // quality if player misses the tap entirely
+const TAKEOFF_PERFECT_MS  = 100;   // forgiving perfect window within the 200ms
+const TAKEOFF_AUTO_QUALITY = 0.4;  // quality if player misses the tap entirely (decent jump)
 
-const LANDING_WINDOW_MS   = 300;   // telemark landing window
+const LANDING_WINDOW_MS   = 400;   // telemark landing window (forgiving)
+const LANDING_ATTEMPT_MS  = 1000;  // any tap within 1s of landing counts as attempted
 
 const BODY_ANGLE_MIN      = 10;   // degrees
 const BODY_ANGLE_MAX      = 55;   // degrees
-const BODY_ANGLE_OPTIMAL  = 35;   // degrees
+const BODY_ANGLE_OPTIMAL  = 33;   // degrees (near optimal for casual-friendly default)
+const BODY_ANGLE_DEFAULT  = 33;   // degrees - starting angle in flight
 
 const ANGLE_CHANGE_RATE   = 40;   // degrees per second (via swipe / tilt)
 const SWIPE_ANGLE_STEP    = 5;    // degrees per discrete swipe event
 const DRAG_SENSITIVITY    = 0.12; // degrees per pixel of vertical drag
 
-const ANGLE_INERTIA       = 0.88; // smoothing factor for angle velocity (0-1)
-const ANGLE_VELOCITY_DECAY = 0.92; // how fast inertia velocity decays each tick
+const ANGLE_INERTIA       = 0.92; // smoothing factor for angle velocity (0-1, higher = more inertia)
+const ANGLE_VELOCITY_DECAY = 0.95; // how fast inertia velocity decays each tick (higher = smoother)
+const ANGLE_AUTO_DRIFT    = 3.0;  // degrees/sec drift toward optimal when player isn't touching
 
 // Inrun tuck parameters
 const TUCK_AERO_BONUS     = 1.0;  // speed gain per second while tucked (m/s^2)
-const RELEASE_AERO_PENALTY = 0.4; // speed loss per second when not tucked (m/s^2)
+const RELEASE_AERO_PENALTY = 0.15; // mild speed loss per second when not tucked (m/s^2)
+const UNTUCKED_SPEED_FLOOR = 0.8;  // minimum speed fraction even without tuck (80% of max)
 
 const TELEMARK_PERFECT_BONUS = 1.0;
 const TELEMARK_GOOD_BONUS    = 0.7;
-const NO_TELEMARK_PENALTY    = 0.1;
+const NO_TELEMARK_PENALTY    = 0.3; // mild penalty for missing telemark (was 0.1)
+
+// Difficulty scaling presets
+const DIFFICULTY_PRESETS = {
+  easy:   { takeoffPerfectMs: 150, takeoffWindowMs: 300, landingWindowMs: 500, landingAttemptMs: 1500, autoQuality: 0.5, untuckedFloor: 0.9 },
+  normal: { takeoffPerfectMs: 100, takeoffWindowMs: 200, landingWindowMs: 400, landingAttemptMs: 1000, autoQuality: 0.4, untuckedFloor: 0.8 },
+  hard:   { takeoffPerfectMs: 60,  takeoffWindowMs: 150, landingWindowMs: 200, landingAttemptMs: 500,  autoQuality: 0.25, untuckedFloor: 0.6 },
+};
 
 const SCORE_READ_DELAY_MS = 1500; // minimum time to display score before allowing skip
 
@@ -125,6 +136,12 @@ export default class SkihoppControls {
 
     // Config-driven values (overridden in init if config is available)
     this._angleChangeRate = ANGLE_CHANGE_RATE;
+
+    // Difficulty preset (resolved from game.config.difficulty in init/update)
+    this._difficulty = DIFFICULTY_PRESETS.normal;
+
+    // Track whether player touched during flight (for auto-drift)
+    this._flightTouched = false;
   }
 
   // -----------------------------------------------------------------------
@@ -165,6 +182,10 @@ export default class SkihoppControls {
     if (cfg) {
       this._angleChangeRate = cfg.flight?.angleChangeRate ?? ANGLE_CHANGE_RATE;
     }
+
+    // Apply difficulty preset from settings
+    const diffKey = (game.config && game.config.difficulty) || 'normal';
+    this._difficulty = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
 
     // Register input listeners
     this._unsubs.push(this._input.onTap(this._onTap.bind(this)));
@@ -207,6 +228,12 @@ export default class SkihoppControls {
     if (newState === GameState.FLIGHT) {
       // Reset angle inertia on entering flight
       this._angleVelocity = 0;
+      this._flightTouched = false;
+      // Start at near-optimal angle so untouched flights are decent
+      if (this._jumperState) {
+        this._jumperState.bodyAngle = BODY_ANGLE_DEFAULT;
+        this._jumperState.targetAngle = BODY_ANGLE_DEFAULT;
+      }
     }
 
     if (newState === GameState.SCORE) {
@@ -251,8 +278,7 @@ export default class SkihoppControls {
         break;
 
       case GameState.RESULTS:
-        // Tap to jump again quickly (skip menu)
-        this.game.setState(GameState.READY);
+        this._handleResultsTap(x, y);
         break;
 
       default:
@@ -318,14 +344,92 @@ export default class SkihoppControls {
   // -----------------------------------------------------------------------
 
   _handleMenuTap(x, y) {
-    // Delegate to MenuScreen to check which button was tapped
     const scene = this.game.currentScene;
-    if (scene && scene.menuScreen) {
-      const buttonId = scene.menuScreen.handleTap(x, y);
-      if (buttonId === 'single' || buttonId === 'competition') {
-        this.game.setState(GameState.READY);
+    if (!scene) {
+      this.game.setState(GameState.READY);
+      return;
+    }
+
+    // If we're in a sub-screen, delegate tap to that sub-screen
+    if (scene._menuSubScreen) {
+      let result = null;
+
+      if (scene._menuSubScreen === 'hills' && scene.hillSelectScreen) {
+        result = scene.hillSelectScreen.handleTap(x, y);
+        if (result === 'back') {
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
+        // A hill key was returned (e.g. 'K90', 'K120', 'K185')
+        if (result && result !== 'back') {
+          scene.selectHill(result);
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
+      } else if (scene._menuSubScreen === 'stats' && scene.statsScreen) {
+        result = scene.statsScreen.handleTap(x, y);
+        if (result === 'back') {
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
+      } else if (scene._menuSubScreen === 'settings' && scene.settingsScreen) {
+        result = scene.settingsScreen.handleTap(x, y);
+        if (result === 'back') {
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
+        if (result === 'save') {
+          // Apply settings
+          const settings = scene.settingsScreen.getSettings();
+          if (scene._audio && typeof scene._audio.setVolume === 'function') {
+            scene._audio.setVolume(settings.volume / 100);
+          }
+          // Store settings on game config for other systems to read
+          if (scene.game && scene.game.config) {
+            scene.game.config.haptic = settings.haptic;
+            scene.game.config.difficulty = settings.difficulty;
+            scene.game.config.controlType = settings.controlType;
+          }
+          scene._fadeAlpha = 0.6;
+          scene._menuSubScreen = null;
+          return;
+        }
       }
-      // Other buttons (settings, etc.) are handled by MenuScreen or ignored
+      return;
+    }
+
+    // Main menu: delegate tap to MenuScreen
+    if (scene.menuScreen) {
+      const buttonId = scene.menuScreen.handleTap(x, y);
+      switch (buttonId) {
+        case 'jump':
+          this.game.setState(GameState.READY);
+          break;
+        case 'hills':
+          if (scene.hillSelectScreen) {
+            scene._fadeAlpha = 0.6;
+            scene._menuSubScreen = 'hills';
+          }
+          break;
+        case 'stats':
+          if (scene.statsScreen) {
+            scene._fadeAlpha = 0.6;
+            scene._menuSubScreen = 'stats';
+          }
+          break;
+        case 'settings':
+          if (scene.settingsScreen) {
+            scene._fadeAlpha = 0.6;
+            scene._menuSubScreen = 'settings';
+          }
+          break;
+        default:
+          break;
+      }
     } else {
       // Fallback: no menu screen, just start
       this.game.setState(GameState.READY);
@@ -401,17 +505,22 @@ export default class SkihoppControls {
     const elapsed = now - this._takeoffWindowStart;
     const fb = this.game.feedback;
 
-    // Calculate takeoff quality based on timing within the 200ms window
-    if (elapsed <= TAKEOFF_PERFECT_MS) {
+    // Use difficulty-scaled windows
+    const perfectMs = this._difficulty.takeoffPerfectMs;
+    const windowMs = this._difficulty.takeoffWindowMs;
+    const autoQ = this._difficulty.autoQuality;
+
+    // Calculate takeoff quality based on timing
+    if (elapsed <= perfectMs) {
       js.takeoffQuality = 1.0;
       // Perfect: green flash + strong double-pulse haptic
       if (fb) {
         fb.flash = { color: '#00ff44', alpha: 0.35, duration: 300, startTime: now };
       }
       this._vibrate([0, 50, 30, 50]);
-    } else if (elapsed <= TAKEOFF_WINDOW_MS) {
+    } else if (elapsed <= windowMs) {
       // Good but not perfect: linear interpolation from 1.0 down to 0.5
-      const t = (elapsed - TAKEOFF_PERFECT_MS) / (TAKEOFF_WINDOW_MS - TAKEOFF_PERFECT_MS);
+      const t = (elapsed - perfectMs) / (windowMs - perfectMs);
       js.takeoffQuality = 1.0 - 0.5 * t;
       // Yellow flash + medium haptic
       if (fb) {
@@ -419,9 +528,8 @@ export default class SkihoppControls {
       }
       this._vibrate([0, 35]);
     } else {
-      // Too late - tapped after the window closed (shouldn't normally happen
-      // since auto-launch fires, but handle defensively)
-      js.takeoffQuality = TAKEOFF_AUTO_QUALITY;
+      // Too late - tapped after the window closed
+      js.takeoffQuality = autoQ;
       if (fb) {
         fb.flash = { color: '#ff3333', alpha: 0.2, duration: 150, startTime: now };
       }
@@ -451,23 +559,34 @@ export default class SkihoppControls {
     const elapsed = now - this._landingWindowStart;
     const fb = this.game.feedback;
 
-    // Telemark landing quality (300ms window)
-    if (elapsed <= LANDING_WINDOW_MS * 0.4) {
-      // Perfect telemark - tapped within first 120ms
+    // Use difficulty-scaled landing window
+    const landingMs = this._difficulty.landingWindowMs;
+    const attemptMs = this._difficulty.landingAttemptMs;
+
+    // Telemark landing quality (difficulty-scaled window)
+    if (elapsed <= landingMs * 0.4) {
+      // Perfect telemark - tapped within first portion of window
       js.landingQuality = TELEMARK_PERFECT_BONUS;
       if (fb) {
         fb.flash = { color: '#00ff44', alpha: 0.3, duration: 250, startTime: now };
       }
       // Strong impactful haptic for perfect telemark
       this._vibrate([0, 60, 30, 60]);
-    } else if (elapsed <= LANDING_WINDOW_MS) {
-      // Good telemark - tapped within 120-300ms
-      const t = (elapsed - LANDING_WINDOW_MS * 0.4) / (LANDING_WINDOW_MS * 0.6);
+    } else if (elapsed <= landingMs) {
+      // Good telemark - tapped within the main window
+      const t = (elapsed - landingMs * 0.4) / (landingMs * 0.6);
       js.landingQuality = TELEMARK_GOOD_BONUS + (TELEMARK_PERFECT_BONUS - TELEMARK_GOOD_BONUS) * (1 - t);
       if (fb) {
         fb.flash = { color: '#ffcc00', alpha: 0.25, duration: 200, startTime: now };
       }
       this._vibrate([50, 30, 50]);
+    } else if (elapsed <= attemptMs) {
+      // Late but attempted - any tap within attempt window gets partial credit
+      js.landingQuality = NO_TELEMARK_PENALTY + 0.15; // slightly better than no attempt
+      if (fb) {
+        fb.flash = { color: '#ffaa00', alpha: 0.2, duration: 150, startTime: now };
+      }
+      this._vibrate(25);
     } else {
       // Too late for telemark
       js.landingQuality = NO_TELEMARK_PENALTY;
@@ -484,6 +603,24 @@ export default class SkihoppControls {
     if (elapsed < SCORE_READ_DELAY_MS) return;
 
     this.game.setState(GameState.RESULTS);
+  }
+
+  _handleResultsTap(x, y) {
+    // Check scoreboard buttons first
+    const scene = this.game.currentScene;
+    if (scene && scene.scoreboard) {
+      const action = scene.scoreboard.handleTap(x, y);
+      if (action === 'again') {
+        this.game.setState(GameState.READY);
+        return;
+      }
+      if (action === 'menu') {
+        this.game.setState(GameState.MENU);
+        return;
+      }
+    }
+    // Tap anywhere else = quick restart (one more try!)
+    this.game.setState(GameState.READY);
   }
 
   // -----------------------------------------------------------------------
@@ -523,20 +660,26 @@ export default class SkihoppControls {
       fb.tuckGlow = null;
     }
 
+    // -- Re-read difficulty each frame in case settings changed mid-game --
+    const diffKey = (this.game.config && this.game.config.difficulty) || 'normal';
+    this._difficulty = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
+
     // -- TAKEOFF: ring animation + auto-launch --
     if (state === GameState.TAKEOFF) {
       const elapsed = now - this._takeoffWindowStart;
+      const windowMs = this._difficulty.takeoffWindowMs;
+      const autoQ = this._difficulty.autoQuality;
 
       // Update ring progress for renderer (0 -> 1 over the timing window)
       if (fb) {
         fb.takeoffRing = {
-          progress: clamp(elapsed / TAKEOFF_WINDOW_MS, 0, 1),
+          progress: clamp(elapsed / windowMs, 0, 1),
         };
       }
 
-      if (!this._takeoffTapped && elapsed > TAKEOFF_WINDOW_MS) {
-        // Auto-launch: player missed the tap, set reduced quality
-        js.takeoffQuality = TAKEOFF_AUTO_QUALITY;
+      if (!this._takeoffTapped && elapsed > windowMs) {
+        // Auto-launch: player missed the tap, still give a decent jump
+        js.takeoffQuality = autoQ;
         this._takeoffTapped = true;
         if (fb) {
           fb.takeoffRing = null;
@@ -557,15 +700,16 @@ export default class SkihoppControls {
     // -- LANDING: timing bar + auto-penalty --
     if (state === GameState.LANDING) {
       const elapsed = now - this._landingWindowStart;
+      const landingMs = this._difficulty.landingWindowMs;
 
       // Update landing timing bar for renderer
       if (fb) {
         fb.landingBar = {
-          progress: clamp(elapsed / LANDING_WINDOW_MS, 0, 1),
+          progress: clamp(elapsed / landingMs, 0, 1),
         };
       }
 
-      if (!this._landingTapped && elapsed > LANDING_WINDOW_MS) {
+      if (!this._landingTapped && elapsed > landingMs) {
         js.landingQuality = NO_TELEMARK_PENALTY;
         this._landingTapped = true;
         if (fb) {
