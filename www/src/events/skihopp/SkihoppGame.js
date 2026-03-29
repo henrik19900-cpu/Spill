@@ -25,6 +25,7 @@ import HUD from '../../ui/HUD.js';
 import JudgeDisplay from '../../ui/JudgeDisplay.js';
 import Scoreboard from '../../ui/Scoreboard.js';
 import TutorialScreen from '../../ui/TutorialScreen.js';
+import ReplaySystem from './ReplaySystem.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -90,6 +91,33 @@ export default class SkihoppGame {
 
         // Input unsub handles
         this._unsubs = [];
+
+        // Replay system (optional, loaded dynamically)
+        this.replay = null;
+
+        // Progression system (optional, loaded dynamically)
+        this.progression = null;
+
+        // Current hill key for progression tracking
+        this._currentHillKey = 'K90';
+
+        // Hills data reference (stored after load for hill selection)
+        this._hillsData = null;
+
+        // Menu sub-screen navigation
+        this._menuSubScreen = null;  // null | 'hills' | 'stats' | 'settings'
+
+        // Fade transition overlay
+        this._fadeAlpha = 0;
+
+        // Progression results from last jump
+        this._newUnlocks = [];
+        this._newAchievements = [];
+
+        // Optional UI screens for sub-menus
+        this.hillSelectScreen = null;
+        this.statsScreen = null;
+        this.settingsScreen = null;
     }
 
     // ------------------------------------------------------------------
@@ -189,7 +217,31 @@ export default class SkihoppGame {
         this.tutorialScreen = new TutorialScreen();
 
         // ----------------------------------------------------------
-        // 10. Initial state is set by Game._init() after scene loads
+        // 10. Store hills data for hill selection
+        // ----------------------------------------------------------
+        this._hillsData = hillsData;
+        this._currentHillKey = hillKey;
+
+        // ----------------------------------------------------------
+        // 11. Dynamic imports for optional systems (replay, progression)
+        // ----------------------------------------------------------
+        try {
+            this.replay = new ReplaySystem();
+        } catch (e) {
+            console.warn('[SkihoppGame] ReplaySystem not available.', e.message);
+            this.replay = null;
+        }
+
+        try {
+            const { default: ProgressionManager } = await import('./ProgressionManager.js');
+            this.progression = new ProgressionManager();
+        } catch (e) {
+            console.warn('[SkihoppGame] ProgressionManager not available.', e.message);
+            this.progression = null;
+        }
+
+        // ----------------------------------------------------------
+        // 12. Initial state is set by Game._init() after scene loads
         // ----------------------------------------------------------
         // (Game._init() calls setState(MENU) after _loadDefaultScene completes)
     }
@@ -203,6 +255,17 @@ export default class SkihoppGame {
      */
     update(dt) {
         const state = this.game.getState();
+
+        // Slowmotion support via game feedback
+        const fb = this.game.feedback;
+        if (fb && fb.slowMotion && performance.now() < fb.slowMotion.until) {
+            dt *= fb.slowMotion.factor;
+        }
+
+        // Fade transition: decrease alpha each frame
+        if (this._fadeAlpha > 0) {
+            this._fadeAlpha = Math.max(0, this._fadeAlpha - dt * 3);
+        }
 
         // Wind updates continuously (even on menu for ambient feel)
         this.wind.update(dt);
@@ -243,6 +306,22 @@ export default class SkihoppGame {
             }
         }
 
+        // Replay recording during active phases
+        if (this.replay) {
+            if (state === GameState.INRUN || state === GameState.TAKEOFF ||
+                state === GameState.FLIGHT || state === GameState.LANDING) {
+                this.replay.recordFrame(jumperState, dt);
+            }
+        }
+
+        // Height above ground during flight
+        if (state === GameState.FLIGHT) {
+            if (this.hill && typeof this.hill.getHeightAtDistance === 'function') {
+                const hillY = this.hill.getHeightAtDistance(jumperState.x);
+                jumperState.heightAboveGround = hillY - jumperState.y;
+            }
+        }
+
         // Track flight stability during FLIGHT phase
         if (state === GameState.FLIGHT) {
             this._trackFlightStability(dt);
@@ -280,7 +359,28 @@ export default class SkihoppGame {
 
         switch (state) {
             case GameState.MENU:
-                this.menuScreen.render(ctx, width, height);
+                if (this._menuSubScreen === 'hills') {
+                    if (this.hillSelectScreen) {
+                        this.hillSelectScreen.render(ctx, width, height);
+                    }
+                } else if (this._menuSubScreen === 'stats') {
+                    if (this.statsScreen) {
+                        this.statsScreen.render(ctx, width, height);
+                    }
+                } else if (this._menuSubScreen === 'settings') {
+                    if (this.settingsScreen) {
+                        this.settingsScreen.render(ctx, width, height);
+                    }
+                } else {
+                    const menuData = {
+                        bestDistance: this._bestDistance,
+                        record: this.progression ? this.progression.getRecord() : null,
+                        level: this.progression ? this.progression.getLevel() : 1,
+                        xp: this.progression ? this.progression.getXP() : 0,
+                        currentHill: this._currentHillKey,
+                    };
+                    this.menuScreen.render(ctx, width, height, menuData);
+                }
                 break;
 
             case GameState.READY:
@@ -351,6 +451,8 @@ export default class SkihoppGame {
                     landingQuality: jumperState.landingQuality,
                     kPoint: this.hill.kPoint,
                     feedback: this.game.feedback || {},
+                    heightAboveGround: jumperState.heightAboveGround || 0,
+                    isTucked: jumperState.isTucked || false,
                 });
                 break;
             }
@@ -398,6 +500,15 @@ export default class SkihoppGame {
             default:
                 break;
         }
+
+        // Fade transition overlay
+        if (this._fadeAlpha > 0) {
+            ctx.save();
+            ctx.globalAlpha = this._fadeAlpha;
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, width, height);
+            ctx.restore();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -413,6 +524,9 @@ export default class SkihoppGame {
 
         switch (newState) {
             case GameState.READY:
+                // Fade transition
+                this._fadeAlpha = 1;
+
                 // Reset jumper for a new attempt
                 this.jumper.reset(this.hill);
                 this.physics.reset();
@@ -433,6 +547,14 @@ export default class SkihoppGame {
                 break;
 
             case GameState.INRUN:
+                // Start replay recording
+                if (this.replay && typeof this.replay.startRecording === 'function') {
+                    this.replay.startRecording();
+                }
+
+                // Fade in from state transition
+                this._fadeAlpha = 1;
+
                 // Run has started - play ambient sounds
                 this._safeAudioCall('playWind', this.wind.getSpeed() / 4);
                 break;
@@ -443,6 +565,11 @@ export default class SkihoppGame {
                 break;
 
             case GameState.LANDING:
+                // Stop replay recording
+                if (this.replay && typeof this.replay.stopRecording === 'function') {
+                    this.replay.stopRecording();
+                }
+
                 // Finalise flight stability on jumper state
                 jumperState.flightStability = this._calculateFinalStability();
 
@@ -472,6 +599,27 @@ export default class SkihoppGame {
                 });
 
                 this._scoreAnimationTime = 0;
+
+                // Progression tracking
+                if (this.progression) {
+                    this.progression.addJump(
+                        this._currentHillKey,
+                        jumperState.landingDistance,
+                        this._scoreResult.totalPoints,
+                        jumperState.landingQuality
+                    );
+                    this.progression.addXP(this._scoreResult.totalPoints * 0.5);
+                    const newUnlocks = this.progression.checkUnlocks();
+                    const newAchievements = this.progression.checkAchievements({
+                        distance: jumperState.landingDistance,
+                        totalPoints: this._scoreResult.totalPoints,
+                        hillKey: this._currentHillKey,
+                        landingQuality: jumperState.landingQuality,
+                        flightStability: jumperState.flightStability,
+                    });
+                    this._newUnlocks = newUnlocks;
+                    this._newAchievements = newAchievements;
+                }
 
                 // Audio effects for score reveal
                 this._safeAudioCall('playJudgeReveal');
@@ -603,6 +751,36 @@ export default class SkihoppGame {
     }
 
     // ------------------------------------------------------------------
+    // Hill selection
+    // ------------------------------------------------------------------
+
+    /**
+     * Switch to a different hill by key (e.g. 'K90', 'K120').
+     * Rebuilds the Hill instance and resets physics/jumper accordingly.
+     * @param {string} hillKey
+     */
+    selectHill(hillKey) {
+        if (!this._hillsData || !this._hillsData[hillKey]) {
+            console.warn(`[SkihoppGame] Unknown hill key: ${hillKey}`);
+            return;
+        }
+        this._currentHillKey = hillKey;
+        const hillConfig = this._hillsData[hillKey];
+
+        // Rebuild hill and dependent systems
+        this.hill = new Hill(hillConfig);
+        this.physics = new SkihoppPhysics(this.game, this.hill, this.jumper.getState());
+        this.scoringSystem = new ScoringSystem(hillConfig);
+        if (this.skihoppRenderer && typeof this.skihoppRenderer.setHill === 'function') {
+            this.skihoppRenderer.setHill(this.hill);
+        }
+
+        // Reset jumper on new hill
+        this.jumper.reset(this.hill);
+        this.physics.reset();
+    }
+
+    // ------------------------------------------------------------------
     // Cleanup
     // ------------------------------------------------------------------
 
@@ -637,5 +815,14 @@ export default class SkihoppGame {
         this._jumpResults = [];
         this._bestDistance = 0;
         this._countdownTimer = 0;
+        this.replay = null;
+        this.progression = null;
+        this._hillsData = null;
+        this._fadeAlpha = 0;
+        this._newUnlocks = [];
+        this._newAchievements = [];
+        this.hillSelectScreen = null;
+        this.statsScreen = null;
+        this.settingsScreen = null;
     }
 }

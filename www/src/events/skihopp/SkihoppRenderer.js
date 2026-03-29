@@ -50,6 +50,12 @@ export default class SkihoppRenderer {
         this._spectators = [];
         this._snowParticles = [];
 
+        // Visual polish effect particles
+        this._takeoffParticles = [];
+        this._landingParticles = [];
+        this._windStreaks = [];
+        this._prevGameState = null;
+
         this._initialized = false;
         this._time = 0;
     }
@@ -231,19 +237,41 @@ export default class SkihoppRenderer {
             ctx.translate(shakeX, shakeY);
         }
 
+        // --- Detect state transitions for particle effects ---
+        if (this._prevGameState !== gameState) {
+            if (gameState === GameState.FLIGHT && this._prevGameState === GameState.TAKEOFF) {
+                this._spawnTakeoffParticles();
+            }
+            if (gameState === GameState.LANDING && this._prevGameState === GameState.FLIGHT) {
+                const impactForce = Math.abs(jumperState.vy || 0) * 2;
+                this._spawnLandingParticles(jumperState.x, jumperState.y, impactForce);
+            }
+            this._prevGameState = gameState;
+        }
+
         // --- Draw layers back-to-front ---
         this._drawSky(ctx, width, height);
         this._drawMountains(ctx, width, height);
         this._drawSnowGround(ctx, width, height);
         this._drawHillSurface(ctx, width, height);
         this._drawSpectators(ctx);
+        this._drawJumperShadow(ctx, jumperState);
         this._drawJumper(ctx, jumperState);
+        this._drawEffectParticles(ctx, 1 / 60);
         this._drawSnowParticles(ctx, width, height);
+
+        // Wind streaks during flight
+        if (gameState === GameState.FLIGHT) {
+            this._drawWindStreaks(ctx, width, height, wind);
+        }
 
         // Restore camera shake transform
         if ((jumperState.vibration || 0) > 0.01) {
             ctx.restore();
         }
+
+        // Vignette overlay (drawn last, outside camera shake)
+        this._drawVignette(ctx, width, height);
     }
 
     // ------------------------------------------------------------------
@@ -2023,6 +2051,217 @@ export default class SkihoppRenderer {
             ctx.arc(sp.x, headCenterY - headR * 0.9, headR * 0.55, 0, Math.PI * 2);
             ctx.fill();
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 7. Snow particles
+    // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // Visual polish effects
+    // ------------------------------------------------------------------
+
+    /**
+     * Draw an ellipse shadow on the hill surface below the jumper.
+     * Shadow shrinks with altitude above ground.
+     */
+    _drawJumperShadow(ctx, js) {
+        if (!js) return;
+        const r = this.renderer;
+        const phase = js.phase;
+
+        // Get the hill surface height at the jumper's x position
+        const surfaceY = this.hill.getHeightAtDistance(js.x);
+        const heightAboveGround = Math.max(0, surfaceY - js.y);
+
+        // Shadow position on the hill surface
+        const shadowX = js.x;
+        const shadowY = surfaceY;
+
+        const sp = r.worldToScreen(shadowX, shadowY);
+        const ppm = r.ppm;
+
+        // Scale shadow size inversely with height
+        const scaleFactor = 1 / (1 + heightAboveGround * 0.3);
+
+        // Base shadow size in world units, converted to screen
+        let baseRadiusX = 1.2 * ppm * scaleFactor;
+        let baseRadiusY = 0.3 * ppm * scaleFactor;
+
+        // During INRUN: full size, directly under jumper
+        if (phase === GameState.INRUN || phase === 'INRUN' ||
+            phase === GameState.TAKEOFF || phase === 'TAKEOFF') {
+            baseRadiusX = 1.2 * ppm;
+            baseRadiusY = 0.3 * ppm;
+        }
+
+        // Don't draw if too small
+        if (baseRadiusX < 0.5 || baseRadiusY < 0.1) return;
+
+        // Alpha also fades with height
+        const alpha = 0.15 * scaleFactor;
+        if (alpha < 0.01) return;
+
+        ctx.save();
+        ctx.fillStyle = `rgba(0,0,0,${alpha.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.ellipse(sp.x, sp.y, baseRadiusX, baseRadiusY, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    /**
+     * Spawn white particles at takeoff point (0,0) when entering FLIGHT.
+     */
+    _spawnTakeoffParticles() {
+        const rng = seededRandom(Math.floor(this._time * 1000));
+        for (let i = 0; i < 20; i++) {
+            const angle = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 0.8;
+            const speed = 1.5 + rng() * 3;
+            this._takeoffParticles.push({
+                x: (rng() - 0.5) * 1.0,
+                y: rng() * 0.3,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: 1.0,
+                maxLife: 0.6 + rng() * 0.6,
+                size: 1 + rng() * 2,
+            });
+        }
+    }
+
+    /**
+     * Spawn snow cloud particles at the landing point.
+     */
+    _spawnLandingParticles(x, y, impactForce) {
+        const count = Math.floor(10 + Math.min(30, impactForce * 3));
+        const rng = seededRandom(Math.floor(this._time * 1000) + 7);
+        for (let i = 0; i < count; i++) {
+            const angle = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.2;
+            const speed = 0.8 + rng() * 2.5;
+            this._landingParticles.push({
+                x: x + (rng() - 0.5) * 2,
+                y: y,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: 1.0,
+                maxLife: 0.8 + rng() * 1.0,
+                size: 2 + rng() * 4,
+            });
+        }
+    }
+
+    /**
+     * Update and draw takeoff and landing particle effects.
+     */
+    _drawEffectParticles(ctx, dt) {
+        const r = this.renderer;
+        const gravity = 4.0;
+
+        // Helper to update and draw a particle array
+        const processParticles = (particles, colorFn) => {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.life -= dt / p.maxLife;
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+                p.vy += gravity * dt;
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+
+                const sp = r.worldToScreen(p.x, p.y);
+                const alpha = Math.max(0, p.life);
+
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = colorFn(alpha);
+                ctx.beginPath();
+                ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        };
+
+        // Takeoff particles: white
+        processParticles(this._takeoffParticles, (a) =>
+            `rgba(255,255,255,${a.toFixed(2)})`
+        );
+
+        // Landing particles: slight blue tint for snow
+        processParticles(this._landingParticles, (a) =>
+            `rgba(220,235,255,${a.toFixed(2)})`
+        );
+    }
+
+    /**
+     * Draw semi-transparent wind streaks during flight.
+     */
+    _drawWindStreaks(ctx, w, h, wind) {
+        if (!wind || wind.speed < 0.1) return;
+
+        // Initialize wind streaks if needed
+        if (this._windStreaks.length === 0) {
+            const rng = seededRandom(12345);
+            const count = 5 + Math.floor(rng() * 4); // 5-8 streaks
+            for (let i = 0; i < count; i++) {
+                this._windStreaks.push({
+                    x: rng() * w,
+                    y: rng() * h,
+                    length: 30 + rng() * 60,
+                    alpha: 0.05 + rng() * 0.05,
+                    speed: 0.8 + rng() * 0.4,
+                });
+            }
+        }
+
+        const windDir = wind.direction || 0;
+        const windSpd = wind.speed || 0;
+        const dx = Math.cos(windDir);
+        const dy = Math.sin(windDir);
+
+        ctx.save();
+        ctx.lineCap = 'round';
+        for (const streak of this._windStreaks) {
+            // Move streak position
+            streak.x += dx * windSpd * streak.speed * 2;
+            streak.y += dy * windSpd * streak.speed * 0.5;
+
+            // Wrap around screen
+            streak.x = ((streak.x % w) + w) % w;
+            streak.y = ((streak.y % h) + h) % h;
+
+            ctx.globalAlpha = streak.alpha;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(streak.x, streak.y);
+            ctx.lineTo(streak.x + dx * streak.length, streak.y + dy * streak.length * 0.3);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    /**
+     * Draw a cinematic vignette: radial gradient from transparent center
+     * to dark edges.
+     */
+    _drawVignette(ctx, w, h) {
+        const cx = w / 2;
+        const cy = h / 2;
+        const radius = Math.sqrt(cx * cx + cy * cy);
+
+        const grad = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(0.5, 'rgba(0,0,0,0)');
+        grad.addColorStop(0.8, 'rgba(0,0,0,0.12)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.3)');
+
+        ctx.save();
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
     }
 
     // ------------------------------------------------------------------
