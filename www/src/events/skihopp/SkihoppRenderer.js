@@ -597,7 +597,6 @@ export default class SkihoppRenderer {
     _drawSnowGround(ctx, w, h) {
         const profile = this.hill.getProfile();
         const r = this.renderer;
-        const ppm = r.ppm;
 
         // --- Main snow ground fill with gradient ---
         ctx.beginPath();
@@ -616,62 +615,56 @@ export default class SkihoppRenderer {
         // Gradient from bluish-white at surface to deeper blue below
         const surfaceY = Math.min(firstScreen.y, lastScreen.y);
         const groundGrad = ctx.createLinearGradient(0, surfaceY, 0, h + 50);
-        groundGrad.addColorStop(0, '#dce8f8');
-        groundGrad.addColorStop(0.1, '#d0e0f2');
-        groundGrad.addColorStop(0.3, '#c0d4ea');
+        groundGrad.addColorStop(0, '#e4eef8');
+        groundGrad.addColorStop(0.05, '#dce8f5');
+        groundGrad.addColorStop(0.15, '#d0e0f2');
+        groundGrad.addColorStop(0.35, '#c0d4ea');
         groundGrad.addColorStop(0.6, '#a0b8d8');
         groundGrad.addColorStop(1, '#7090b8');
         ctx.fillStyle = groundGrad;
         ctx.fill();
 
-        // --- Snow texture: subtle blue shadow ellipses ---
+        // --- Subtle blue shadow patches for depth ---
         const rng = seededRandom(2024);
+        const xRange = profile[profile.length - 1].x - profile[0].x;
+        const xStart = profile[0].x;
         ctx.save();
-        ctx.globalAlpha = 0.08;
-        for (let i = 0; i < 30; i++) {
-            const wx = profile[0].x + rng() * (profile[profile.length - 1].x - profile[0].x);
+        for (let i = 0; i < 40; i++) {
+            const wx = xStart + rng() * xRange;
             const wy = this.hill.getHeightAtDistance(wx);
-            const sp1 = r.worldToScreen(wx, wy + 1 + rng() * 8);
-            const sp2 = r.worldToScreen(wx + 3 + rng() * 12, wy + 2 + rng() * 10);
+            const offY = 1 + rng() * 10;
+            const sp1 = r.worldToScreen(wx, wy + offY);
+            const radX = 8 + rng() * 30;
+            const radY = 3 + rng() * 8;
+            if (sp1.x < -60 || sp1.x > w + 60 || sp1.y < -20 || sp1.y > h + 60) continue;
+            // Vary the shadow color slightly
+            const blueTint = Math.floor(80 + rng() * 40);
+            ctx.globalAlpha = 0.04 + rng() * 0.06;
             ctx.beginPath();
-            ctx.ellipse(sp1.x, sp1.y, Math.abs(sp2.x - sp1.x) * 0.6, Math.abs(sp2.y - sp1.y) * 0.3 + 4, rng() * 0.3, 0, Math.PI * 2);
-            ctx.fillStyle = '#6080b0';
+            ctx.ellipse(sp1.x, sp1.y, radX, radY, rng() * 0.4, 0, Math.PI * 2);
+            ctx.fillStyle = `rgb(70,${blueTint},170)`;
             ctx.fill();
         }
         ctx.restore();
 
-        // --- Snow texture: small sparkle dots (crystalline glints) ---
-        const rng2 = seededRandom(4040);
-        const t = this._time || 0;
-        ctx.save();
-        for (let i = 0; i < 50; i++) {
-            const wx = profile[0].x + rng2() * (profile[profile.length - 1].x - profile[0].x);
-            const wy = this.hill.getHeightAtDistance(wx) + 1 + rng2() * 12;
-            const sp = r.worldToScreen(wx, wy);
-            if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) continue;
-            const sparkle = 0.3 + 0.7 * Math.abs(Math.sin(t * (1.5 + rng2() * 2) + rng2() * 6.28));
-            ctx.globalAlpha = 0.15 * sparkle;
-            ctx.beginPath();
-            ctx.arc(sp.x, sp.y, 1 + rng2() * 1.5, 0, Math.PI * 2);
-            ctx.fillStyle = '#ffffff';
-            ctx.fill();
-        }
-        ctx.restore();
-
-        // --- Snow drift ridges (subtle wavy highlight lines) ---
+        // --- Snow drift ridges (wavy highlight lines along the ground) ---
         const rng3 = seededRandom(6060);
         ctx.save();
-        ctx.globalAlpha = 0.06;
-        ctx.strokeStyle = '#e0ecff';
-        ctx.lineWidth = 1;
-        for (let ridge = 0; ridge < 8; ridge++) {
-            const baseWx = profile[0].x + rng3() * (profile[profile.length - 1].x - profile[0].x);
-            const baseWy = this.hill.getHeightAtDistance(baseWx) + 3 + rng3() * 15;
+        ctx.lineCap = 'round';
+        for (let ridge = 0; ridge < 14; ridge++) {
+            const baseWx = xStart + rng3() * xRange;
+            const baseWy = this.hill.getHeightAtDistance(baseWx) + 2 + rng3() * 16;
+            const ridgeLen = 6 + rng3() * 25;
+            const segments = 12;
+            // Alternate between brighter white and soft blue-white
+            const bright = rng3() < 0.5;
+            ctx.globalAlpha = bright ? 0.1 : 0.06;
+            ctx.strokeStyle = bright ? '#f0f6ff' : '#d8e8f8';
+            ctx.lineWidth = 0.8 + rng3() * 0.8;
             ctx.beginPath();
-            const ridgeLen = 8 + rng3() * 20;
-            for (let j = 0; j <= 10; j++) {
-                const rx = baseWx + (j / 10) * ridgeLen;
-                const ry = baseWy + Math.sin(j * 0.8 + rng3() * 6) * 0.5;
+            for (let j = 0; j <= segments; j++) {
+                const rx = baseWx + (j / segments) * ridgeLen;
+                const ry = baseWy + Math.sin(j * 0.7 + rng3() * 6.28) * 0.6;
                 const sp = r.worldToScreen(rx, ry);
                 if (j === 0) ctx.moveTo(sp.x, sp.y);
                 else ctx.lineTo(sp.x, sp.y);
@@ -680,11 +673,148 @@ export default class SkihoppRenderer {
         }
         ctx.restore();
 
-        // --- Pine trees along the sides of the hill ---
+        // --- Pine trees at varying distances along the ground ---
+        this._drawSnowGroundTrees(ctx, w, h);
+
+        // --- Sparkle dots that twinkle over time ---
+        const rng2 = seededRandom(4040);
+        const t = this._time || 0;
+        ctx.save();
+        for (let i = 0; i < 70; i++) {
+            const wx = xStart + rng2() * xRange;
+            const wy = this.hill.getHeightAtDistance(wx) + 1 + rng2() * 14;
+            const sp = r.worldToScreen(wx, wy);
+            if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) continue;
+            // Each sparkle has its own frequency and phase so they twinkle independently
+            const freq = 1.2 + rng2() * 2.5;
+            const phase = rng2() * 6.28;
+            // Sine produces smooth on/off; threshold creates discrete appear/disappear
+            const raw = Math.sin(t * freq + phase);
+            // Only visible when raw > 0.3, creating a twinkling effect
+            if (raw < 0.3) continue;
+            const intensity = (raw - 0.3) / 0.7; // 0..1
+            ctx.globalAlpha = 0.25 * intensity * intensity;
+            ctx.beginPath();
+            const dotR = 0.8 + rng2() * 1.0;
+            ctx.arc(sp.x, sp.y, dotR, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            // Add a tiny cross-star on the brightest sparkles
+            if (intensity > 0.7) {
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 0.4;
+                ctx.globalAlpha = 0.15 * intensity;
+                const cr = dotR * 2.5;
+                ctx.beginPath();
+                ctx.moveTo(sp.x - cr, sp.y);
+                ctx.lineTo(sp.x + cr, sp.y);
+                ctx.moveTo(sp.x, sp.y - cr);
+                ctx.lineTo(sp.x, sp.y + cr);
+                ctx.stroke();
+            }
+        }
+        ctx.restore();
+
+        // --- Original pine trees along the hill sides ---
         this._drawPineTrees(ctx, w, h);
 
         // --- Crowd areas near the outrun ---
         this._drawCrowdArea(ctx, w, h);
+    }
+
+    /** Draw 10-15 recognizable pine trees at varying distances along the snowy ground. */
+    _drawSnowGroundTrees(ctx, w, h) {
+        const r = this.renderer;
+        const rng = seededRandom(8888);
+        const profile = this.hill.getProfile();
+        const xStart = profile[0].x;
+        const xRange = profile[profile.length - 1].x - xStart;
+
+        const trees = [];
+        const treeCount = 12;
+        for (let i = 0; i < treeCount; i++) {
+            const wx = xStart + rng() * xRange;
+            const wy = this.hill.getHeightAtDistance(wx);
+            // Place trees behind the hill surface (larger offsetY = further behind)
+            const distance = rng(); // 0 = far, 1 = near
+            const offsetY = 6 + (1 - distance) * 20 + rng() * 5;
+            const treeH = 2.5 + distance * 4 + rng() * 2; // far trees smaller
+            trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng() });
+        }
+
+        // Sort: far trees first (drawn behind near trees)
+        trees.sort((a, b) => a.distance - b.distance);
+
+        for (const tree of trees) {
+            const base = r.worldToScreen(tree.wx, tree.wy);
+            const top = r.worldToScreen(tree.wx, tree.wy - tree.h);
+            const treeHPx = base.y - top.y;
+            if (treeHPx < 3 || base.y < -50 || base.y > h + 100) continue;
+            if (base.x < -100 || base.x > w + 100) continue;
+
+            const treeW = treeHPx * 0.5;
+            // Far trees are slightly lighter/more muted (atmospheric perspective)
+            const dist = tree.distance;
+
+            // --- Brown trunk ---
+            const trunkW = treeW * 0.12;
+            const trunkH = treeHPx * 0.18;
+            ctx.fillStyle = dist < 0.3 ? '#4a3520' : '#3a2510';
+            ctx.fillRect(base.x - trunkW, base.y - trunkH, trunkW * 2, trunkH);
+
+            // --- Three triangular foliage layers (dark green body) ---
+            const greenR = Math.floor(10 + (1 - dist) * 15);
+            const greenG = Math.floor(50 + (1 - dist) * 30 + tree.seed * 15);
+            const greenB = Math.floor(18 + (1 - dist) * 10);
+            const layers = [
+                { yOff: 0.0, wScale: 1.0, brighten: 0 },
+                { yOff: 0.28, wScale: 0.75, brighten: 8 },
+                { yOff: 0.52, wScale: 0.5, brighten: 16 },
+            ];
+            for (const layer of layers) {
+                const ly = base.y - treeHPx * (0.18 + layer.yOff * 0.82);
+                const lh = treeHPx * 0.42;
+                const lw = treeW * layer.wScale;
+                const gR = Math.min(255, greenR + layer.brighten);
+                const gG = Math.min(255, greenG + layer.brighten);
+                const gB = Math.min(255, greenB + layer.brighten);
+                ctx.fillStyle = `rgb(${gR},${gG},${gB})`;
+                ctx.beginPath();
+                ctx.moveTo(base.x, ly - lh);
+                ctx.lineTo(base.x - lw / 2, ly);
+                ctx.lineTo(base.x + lw / 2, ly);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // --- White snow on top of each foliage layer ---
+            ctx.save();
+            ctx.fillStyle = 'rgba(225, 238, 255, 0.7)';
+            // Snow cap on the tip
+            const capW = treeW * 0.22;
+            const capY = base.y - treeHPx * 0.95;
+            ctx.beginPath();
+            ctx.moveTo(base.x, top.y - 1);
+            ctx.lineTo(base.x - capW, capY + treeHPx * 0.08);
+            ctx.lineTo(base.x + capW, capY + treeHPx * 0.08);
+            ctx.closePath();
+            ctx.fill();
+
+            // Snow patches on lower layers (wider, subtle)
+            for (const layer of [layers[0], layers[1]]) {
+                const ly = base.y - treeHPx * (0.18 + layer.yOff * 0.82);
+                const lw = treeW * layer.wScale;
+                const snowW = lw * 0.45;
+                ctx.globalAlpha = 0.4;
+                ctx.beginPath();
+                ctx.moveTo(base.x - snowW * 0.3, ly - treeHPx * 0.35);
+                ctx.lineTo(base.x - snowW * 0.6, ly - treeHPx * 0.22);
+                ctx.lineTo(base.x + snowW * 0.1, ly - treeHPx * 0.28);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.restore();
+        }
     }
 
     /** Draw simple pine trees (triangular) along the sides of the hill. */
