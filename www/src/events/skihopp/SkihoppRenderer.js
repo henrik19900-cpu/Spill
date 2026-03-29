@@ -841,34 +841,41 @@ export default class SkihoppRenderer {
         this._drawSnowGroundTrees(ctx, w, h);
 
         // --- Sparkle dots that twinkle over time ---
-        const rng2 = seededRandom(4040);
+        // Cache sparkle seeded random data
+        if (!this._snowGroundSparkles) {
+            const rng2 = seededRandom(4040);
+            this._snowGroundSparkles = [];
+            for (let i = 0; i < 70; i++) {
+                const wxNorm = rng2();
+                const wyOff = 1 + rng2() * 14;
+                const freq = 1.2 + rng2() * 2.5;
+                const phase = rng2() * 6.28;
+                const dotR = 0.8 + rng2() * 1.0;
+                this._snowGroundSparkles.push({ wxNorm, wyOff, freq, phase, dotR });
+            }
+        }
         const t = this._time || 0;
         ctx.save();
-        for (let i = 0; i < 70; i++) {
-            const wx = xStart + rng2() * xRange;
-            const wy = this.hill.getHeightAtDistance(wx) + 1 + rng2() * 14;
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 0.4;
+        for (let i = 0; i < this._snowGroundSparkles.length; i++) {
+            const sd = this._snowGroundSparkles[i];
+            const raw = Math.sin(t * sd.freq + sd.phase);
+            if (raw < 0.3) continue;
+            const wx = xStart + sd.wxNorm * xRange;
+            const wy = this.hill.getHeightAtDistance(wx) + sd.wyOff;
             const sp = r.worldToScreen(wx, wy);
             if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) continue;
-            // Each sparkle has its own frequency and phase so they twinkle independently
-            const freq = 1.2 + rng2() * 2.5;
-            const phase = rng2() * 6.28;
-            // Sine produces smooth on/off; threshold creates discrete appear/disappear
-            const raw = Math.sin(t * freq + phase);
-            // Only visible when raw > 0.3, creating a twinkling effect
-            if (raw < 0.3) continue;
-            const intensity = (raw - 0.3) / 0.7; // 0..1
+            const intensity = (raw - 0.3) / 0.7;
             ctx.globalAlpha = 0.25 * intensity * intensity;
             ctx.beginPath();
-            const dotR = 0.8 + rng2() * 1.0;
-            ctx.arc(sp.x, sp.y, dotR, 0, Math.PI * 2);
-            ctx.fillStyle = '#ffffff';
+            ctx.arc(sp.x, sp.y, sd.dotR, 0, Math.PI * 2);
             ctx.fill();
             // Add a tiny cross-star on the brightest sparkles
             if (intensity > 0.7) {
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 0.4;
                 ctx.globalAlpha = 0.15 * intensity;
-                const cr = dotR * 2.5;
+                const cr = sd.dotR * 2.5;
                 ctx.beginPath();
                 ctx.moveTo(sp.x - cr, sp.y);
                 ctx.lineTo(sp.x + cr, sp.y);
@@ -1230,8 +1237,8 @@ export default class SkihoppRenderer {
         // Shadow strip just below surface edge
         ctx.beginPath();
         first = true;
-        for (const pt of profile) {
-            const sp = r.worldToScreen(pt.x, pt.y + 0.3);
+        for (let i = 0; i < profile.length; i++) {
+            const sp = r.worldToScreen(profile[i].x, profile[i].y + 0.3);
             if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
             else ctx.lineTo(sp.x, sp.y);
         }
@@ -1243,13 +1250,12 @@ export default class SkihoppRenderer {
         ctx.fillStyle = '#d0e0f0';
         ctx.fill();
 
-        // --- Surface outline ---
+        // --- Surface outline (use cached profile screen coords) ---
+        const profileScreen = this._getProfileScreen();
         ctx.beginPath();
-        first = true;
-        for (const pt of profile) {
-            const sp = r.worldToScreen(pt.x, pt.y);
-            if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
-            else ctx.lineTo(sp.x, sp.y);
+        ctx.moveTo(profileScreen[0].x, profileScreen[0].y);
+        for (let i = 1; i < profileScreen.length; i++) {
+            ctx.lineTo(profileScreen[i].x, profileScreen[i].y);
         }
         ctx.strokeStyle = '#667788';
         ctx.lineWidth = 1.5;
@@ -2237,12 +2243,10 @@ export default class SkihoppRenderer {
         const alpha = 0.15 * scaleFactor;
         if (alpha < 0.01) return;
 
-        ctx.save();
         ctx.fillStyle = `rgba(0,0,0,${alpha.toFixed(3)})`;
         ctx.beginPath();
         ctx.ellipse(sp.x, sp.y, baseRadiusX, baseRadiusY, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.restore();
     }
 
     /**

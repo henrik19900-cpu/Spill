@@ -1026,6 +1026,11 @@ export default class SkihoppGame {
                 break;
 
             case GameState.MENU:
+                // Button click feedback when returning to menu
+                if (prevState === GameState.RESULTS || prevState === GameState.SCORE) {
+                    this._safeAudioCall('playButtonClick');
+                }
+
                 // Full reset when returning to menu
                 this.jumper.reset(this.hill);
                 this.physics.reset();
