@@ -227,48 +227,95 @@ export default class SkihoppGame {
         // ----------------------------------------------------------
         // 2. Create Hill
         // ----------------------------------------------------------
-        this.hill = new Hill(hillConfig);
+        try {
+            this.hill = new Hill(hillConfig);
+        } catch (e) {
+            console.error('[SkihoppGame] Hill creation failed:', e);
+            this.hill = null;
+        }
 
         // ----------------------------------------------------------
         // 3. Create Jumper
         // ----------------------------------------------------------
-        this.jumper = new Jumper();
+        try {
+            this.jumper = new Jumper();
+        } catch (e) {
+            console.error('[SkihoppGame] Jumper creation failed:', e);
+            this.jumper = null;
+        }
 
         // ----------------------------------------------------------
         // 4. Create Physics
         // ----------------------------------------------------------
-        this.physics = new SkihoppPhysics(game, this.hill, this.jumper.getState());
+        try {
+            if (this.hill && this.jumper) {
+                this.physics = new SkihoppPhysics(game, this.hill, this.jumper.getState());
+            } else {
+                console.warn('[SkihoppGame] Skipping physics – hill or jumper not available.');
+            }
+        } catch (e) {
+            console.error('[SkihoppGame] Physics creation failed:', e);
+            this.physics = null;
+        }
 
         // ----------------------------------------------------------
         // 5. Create Renderer
         // ----------------------------------------------------------
-        this.skihoppRenderer = new SkihoppRenderer();
-        this.skihoppRenderer.init(game, this.hill, this._renderer);
+        try {
+            this.skihoppRenderer = new SkihoppRenderer();
+            this.skihoppRenderer.init(game, this.hill, this._renderer);
+        } catch (e) {
+            console.error('[SkihoppGame] SkihoppRenderer creation failed:', e);
+            this.skihoppRenderer = null;
+        }
 
         // ----------------------------------------------------------
         // 6. Create Controls
         // ----------------------------------------------------------
-        this.controls = new SkihoppControls(game);
-        this.controls.init(game, this.jumper.getState());
+        try {
+            this.controls = new SkihoppControls(game);
+            if (this.jumper) {
+                this.controls.init(game, this.jumper.getState());
+            }
+        } catch (e) {
+            console.error('[SkihoppGame] Controls creation failed:', e);
+            this.controls = null;
+        }
 
         // ----------------------------------------------------------
         // 7. Create Wind
         // ----------------------------------------------------------
-        this.wind = new Wind();
+        try {
+            this.wind = new Wind();
+        } catch (e) {
+            console.error('[SkihoppGame] Wind creation failed:', e);
+            this.wind = null;
+        }
 
         // ----------------------------------------------------------
         // 8. Create Scoring System
         // ----------------------------------------------------------
-        this.scoringSystem = new ScoringSystem(hillConfig);
+        try {
+            this.scoringSystem = new ScoringSystem(hillConfig);
+        } catch (e) {
+            console.error('[SkihoppGame] ScoringSystem creation failed:', e);
+            this.scoringSystem = null;
+        }
 
         // ----------------------------------------------------------
-        // 9. Create UI components
+        // 9. Create UI components (each independent – one failure
+        //    should not prevent the others from working)
         // ----------------------------------------------------------
-        this.menuScreen = new MenuScreen();
-        this.hud = new HUD();
-        this.judgeDisplay = new JudgeDisplay();
-        this.scoreboard = new Scoreboard();
-        this.tutorialScreen = new TutorialScreen();
+        try { this.menuScreen = new MenuScreen(); }
+        catch (e) { console.warn('[SkihoppGame] MenuScreen failed:', e.message); }
+        try { this.hud = new HUD(); }
+        catch (e) { console.warn('[SkihoppGame] HUD failed:', e.message); }
+        try { this.judgeDisplay = new JudgeDisplay(); }
+        catch (e) { console.warn('[SkihoppGame] JudgeDisplay failed:', e.message); }
+        try { this.scoreboard = new Scoreboard(); }
+        catch (e) { console.warn('[SkihoppGame] Scoreboard failed:', e.message); }
+        try { this.tutorialScreen = new TutorialScreen(); }
+        catch (e) { console.warn('[SkihoppGame] TutorialScreen failed:', e.message); }
 
         // ----------------------------------------------------------
         // 10. Store hills data for hill selection
@@ -806,11 +853,20 @@ export default class SkihoppGame {
                 }
                 // Never re-show tutorial on restart
 
-                // Quick smooth camera reset to inrun top on restart
+                // Smooth camera pan: full pan from overview on menu, quick reset on restart
                 if (isRestart) {
                     this._resetCameraPanActive = true;
                     this._resetCameraPanProgress = 0.4; // start partway for speed
+                } else {
+                    // MENU -> READY: smooth camera pan from overview to inrun top
+                    this._cameraPanActive = true;
+                    this._cameraPanProgress = 0;
                 }
+
+
+
+
+
 
                 // Stop wind sound from previous run
                 this._safeAudioCall('stopWind');

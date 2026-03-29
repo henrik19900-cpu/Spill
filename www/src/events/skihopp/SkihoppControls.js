@@ -660,20 +660,26 @@ export default class SkihoppControls {
       fb.tuckGlow = null;
     }
 
+    // -- Re-read difficulty each frame in case settings changed mid-game --
+    const diffKey = (this.game.config && this.game.config.difficulty) || 'normal';
+    this._difficulty = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
+
     // -- TAKEOFF: ring animation + auto-launch --
     if (state === GameState.TAKEOFF) {
       const elapsed = now - this._takeoffWindowStart;
+      const windowMs = this._difficulty.takeoffWindowMs;
+      const autoQ = this._difficulty.autoQuality;
 
       // Update ring progress for renderer (0 -> 1 over the timing window)
       if (fb) {
         fb.takeoffRing = {
-          progress: clamp(elapsed / TAKEOFF_WINDOW_MS, 0, 1),
+          progress: clamp(elapsed / windowMs, 0, 1),
         };
       }
 
-      if (!this._takeoffTapped && elapsed > TAKEOFF_WINDOW_MS) {
-        // Auto-launch: player missed the tap, set reduced quality
-        js.takeoffQuality = TAKEOFF_AUTO_QUALITY;
+      if (!this._takeoffTapped && elapsed > windowMs) {
+        // Auto-launch: player missed the tap, still give a decent jump
+        js.takeoffQuality = autoQ;
         this._takeoffTapped = true;
         if (fb) {
           fb.takeoffRing = null;
@@ -694,15 +700,16 @@ export default class SkihoppControls {
     // -- LANDING: timing bar + auto-penalty --
     if (state === GameState.LANDING) {
       const elapsed = now - this._landingWindowStart;
+      const landingMs = this._difficulty.landingWindowMs;
 
       // Update landing timing bar for renderer
       if (fb) {
         fb.landingBar = {
-          progress: clamp(elapsed / LANDING_WINDOW_MS, 0, 1),
+          progress: clamp(elapsed / landingMs, 0, 1),
         };
       }
 
-      if (!this._landingTapped && elapsed > LANDING_WINDOW_MS) {
+      if (!this._landingTapped && elapsed > landingMs) {
         js.landingQuality = NO_TELEMARK_PENALTY;
         this._landingTapped = true;
         if (fb) {

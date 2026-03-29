@@ -797,23 +797,38 @@ export default class SkihoppRenderer {
         ctx.restore();
 
         // --- Snow drift ridges (wavy highlight lines along the ground) ---
-        const rng3 = seededRandom(6060);
+        // Cache ridge data to avoid re-running seeded RNG every frame
+        if (!this._snowGroundRidges) {
+            const rng3 = seededRandom(6060);
+            this._snowGroundRidges = [];
+            for (let ridge = 0; ridge < 14; ridge++) {
+                const wxNorm = rng3();
+                const wyOff = 2 + rng3() * 16;
+                const ridgeLen = 6 + rng3() * 25;
+                const bright = rng3() < 0.5;
+                const lineWidth = 0.8 + rng3() * 0.8;
+                const segPhases = [];
+                for (let j = 0; j <= 12; j++) {
+                    segPhases.push(rng3() * 6.28);
+                }
+                this._snowGroundRidges.push({
+                    wxNorm, wyOff, ridgeLen, bright, lineWidth, segPhases,
+                });
+            }
+        }
         ctx.save();
         ctx.lineCap = 'round';
-        for (let ridge = 0; ridge < 14; ridge++) {
-            const baseWx = xStart + rng3() * xRange;
-            const baseWy = this.hill.getHeightAtDistance(baseWx) + 2 + rng3() * 16;
-            const ridgeLen = 6 + rng3() * 25;
-            const segments = 12;
-            // Alternate between brighter white and soft blue-white
-            const bright = rng3() < 0.5;
-            ctx.globalAlpha = bright ? 0.1 : 0.06;
-            ctx.strokeStyle = bright ? '#f0f6ff' : '#d8e8f8';
-            ctx.lineWidth = 0.8 + rng3() * 0.8;
+        for (let ri = 0; ri < this._snowGroundRidges.length; ri++) {
+            const rd = this._snowGroundRidges[ri];
+            const baseWx = xStart + rd.wxNorm * xRange;
+            const baseWy = this.hill.getHeightAtDistance(baseWx) + rd.wyOff;
+            ctx.globalAlpha = rd.bright ? 0.1 : 0.06;
+            ctx.strokeStyle = rd.bright ? '#f0f6ff' : '#d8e8f8';
+            ctx.lineWidth = rd.lineWidth;
             ctx.beginPath();
-            for (let j = 0; j <= segments; j++) {
-                const rx = baseWx + (j / segments) * ridgeLen;
-                const ry = baseWy + Math.sin(j * 0.7 + rng3() * 6.28) * 0.6;
+            for (let j = 0; j <= 12; j++) {
+                const rx = baseWx + (j / 12) * rd.ridgeLen;
+                const ry = baseWy + Math.sin(j * 0.7 + rd.segPhases[j]) * 0.6;
                 const sp = r.worldToScreen(rx, ry);
                 if (j === 0) ctx.moveTo(sp.x, sp.y);
                 else ctx.lineTo(sp.x, sp.y);
