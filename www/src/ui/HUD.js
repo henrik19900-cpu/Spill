@@ -449,13 +449,13 @@ export default class HUD {
 
             // Determine landing text and color
             let text, color;
-            if (d.landingQuality >= 2.5) {
+            if (d.landingQuality >= 0.9) {
                 text = 'TELEMARK!';
                 color = '#44ff88'; // bright green
-            } else if (d.landingQuality >= 1.0) {
+            } else if (d.landingQuality >= 0.6) {
                 text = 'Bra!';
                 color = '#ffdd44'; // yellow
-            } else if (d.landingQuality >= 0) {
+            } else if (d.landingQuality >= 0.3) {
                 text = 'OK';
                 color = '#ffaa44'; // orange
             } else {

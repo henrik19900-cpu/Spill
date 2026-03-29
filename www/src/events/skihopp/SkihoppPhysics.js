@@ -190,7 +190,10 @@ export default class SkihoppPhysics {
 
     /** Place the jumper at the start of the inrun. */
     _resetInrun() {
-        const inrunLength = this.hill.inrunLength || 100;
+        // distance tracks surface-distance remaining to table edge
+        const inrunLength = this.hill.getInrunSurfaceLength
+            ? this.hill.getInrunSurfaceLength()
+            : (this.hill.inrunLength || 100);
         this.jumper.distance = inrunLength;
         this.jumper.speed = 0;
         this._inrunTime = 0;
@@ -204,9 +207,8 @@ export default class SkihoppPhysics {
         const friction     = this.cfgInrun.friction   || 0.02;
         const maxSpeed     = this.cfgInrun.maxSpeed    || 26;   // m/s (~93.6 km/h)
 
-        // Slope angle at current position
-        const xOnHill = -j.distance;
-        const slopeAngle = degToRad(Math.abs(this.hill.getAngleAtDistance(xOnHill)));
+        // Slope angle at current position (use the already-synced x coordinate)
+        const slopeAngle = degToRad(Math.abs(this.hill.getAngleAtDistance(j.x)));
 
         // --- Natural acceleration with quadratic air resistance ---
         // Gravity component along slope
@@ -249,12 +251,18 @@ export default class SkihoppPhysics {
         this._syncPositionToInrun();
     }
 
-    /** Update jumper x/y to match their inrun distance position. */
+    /** Update jumper x/y to match their inrun surface-distance position. */
     _syncPositionToInrun() {
-        const xOnHill = -this.jumper.distance;
-        this.jumper.x = xOnHill;
-        this.jumper.y = this.hill.getHeightAtDistance(xOnHill);
-        this.jumper.bodyAngle = this.hill.getAngleAtDistance(xOnHill);
+        // distance = surface distance remaining to the table edge.
+        // Convert to surface distance from the TOP of the inrun.
+        const totalSurface = this.hill.getInrunSurfaceLength
+            ? this.hill.getInrunSurfaceLength()
+            : (this.hill.inrunLength || 100);
+        const distFromTop = totalSurface - this.jumper.distance;
+        const pos = this.hill.getPositionAlongInrun(distFromTop);
+        this.jumper.x = pos.x;
+        this.jumper.y = pos.y;
+        this.jumper.bodyAngle = this.hill.getAngleAtDistance(pos.x);
     }
 
     // ------------------------------------------------------------------
@@ -273,9 +281,10 @@ export default class SkihoppPhysics {
         const eased = smoothstep(progress);
 
         // Blend table position toward launch position
+        // Jumper enters TAKEOFF at (0,0), slides forward slightly during transition
         const tableAngleRad = degToRad(this.hill.tableAngle || 11);
-        j.x = lerp(-0.5, 0, eased);  // slide forward along the table
-        j.y = lerp(this.hill.getHeightAtDistance(-0.5), 0, eased);
+        j.x = lerp(0, 1.0, eased);   // slide forward past the table edge
+        j.y = lerp(0, -0.3 * clamp(j.takeoffQuality, 0, 1), eased); // slight upward rise
 
         // Body angle: smoothly pitch from inrun angle toward launch angle
         const quality = clamp(j.takeoffQuality, 0, 1);
@@ -302,9 +311,8 @@ export default class SkihoppPhysics {
             j.vx = launchSpeed * Math.cos(launchAngle);
             j.vy = launchSpeed * Math.sin(launchAngle) - upwardKick;
 
-            // Position at the table edge
-            j.x = 0;
-            j.y = 0;
+            // Position at the launch point (end of takeoff animation)
+            // j.x and j.y are already set by the lerp above; keep them
 
             // Set body angle to launch angle
             j.bodyAngle = radToDeg(launchAngle);
@@ -496,8 +504,10 @@ export default class SkihoppPhysics {
             // (since we used semi-implicit Euler, velocity is already updated;
             //  we approximate the landing-moment velocity via the same lerp)
 
-            // --- Landing distance ---
-            j.landingDistance = j.x;
+            // --- Landing distance (surface distance, not horizontal) ---
+            j.landingDistance = this.hill.getSurfaceDistanceAtX
+                ? this.hill.getSurfaceDistanceAtX(j.x)
+                : j.x;
 
             // --- Landing quality: angle matching ---
             const trajectoryAngle = radToDeg(Math.atan2(j.vy, j.vx));

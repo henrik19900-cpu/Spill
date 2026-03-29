@@ -82,9 +82,9 @@ const ANGLE_VELOCITY_DECAY = 0.92; // how fast inertia velocity decays each tick
 const TUCK_AERO_BONUS     = 1.0;  // speed gain per second while tucked (m/s^2)
 const RELEASE_AERO_PENALTY = 0.4; // speed loss per second when not tucked (m/s^2)
 
-const TELEMARK_PERFECT_BONUS = 3.0;
-const TELEMARK_GOOD_BONUS    = 1.5;
-const NO_TELEMARK_PENALTY    = -2.0;
+const TELEMARK_PERFECT_BONUS = 1.0;
+const TELEMARK_GOOD_BONUS    = 0.7;
+const NO_TELEMARK_PENALTY    = 0.1;
 
 const SCORE_READ_DELAY_MS = 1500; // minimum time to display score before allowing skip
 
