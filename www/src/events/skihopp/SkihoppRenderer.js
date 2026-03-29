@@ -123,24 +123,35 @@ export default class SkihoppRenderer {
         const rng = seededRandom(777);
         this._spectators = [];
 
-        // Place spectators along the outrun / flat area
+        // Place spectators along the outrun / flat area (fence line)
         const landingPts = this.hill.getLandingPoints();
         const last = landingPts[landingPts.length - 1];
         const flatStartX = last.x - 20;
         const flatY = last.y;
 
-        const colors = [
-            '#e63946', '#457b9d', '#2a9d8f', '#e9c46a',
-            '#f4a261', '#264653', '#d62828', '#023e8a',
-            '#ff006e', '#8338ec', '#ffbe0b', '#fb5607',
+        const bodyColors = [
+            '#e63946', '#457b9d', '#2a9d8f', '#264653',
+            '#d62828', '#023e8a', '#1d3557', '#6a0572',
         ];
+        const hatColors = [
+            '#ffbe0b', '#fb5607', '#ff006e', '#8338ec',
+            '#e9c46a', '#f4a261', '#00b4d8', '#ef233c',
+        ];
+        const flagColors = ['#ef233c', '#0077b6', '#ffd60a', '#2d6a4f', '#ffffff'];
 
-        for (let i = 0; i < 28; i++) {
+        for (let i = 0; i < 35; i++) {
             this._spectators.push({
-                x: flatStartX + rng() * 25,
-                y: flatY - 0.3 - rng() * 1.8,
-                color: colors[Math.floor(rng() * colors.length)],
-                h: 0.8 + rng() * 1.0,
+                x: flatStartX + rng() * 28,
+                y: flatY - 0.3 - rng() * 2.0,
+                bodyColor: bodyColors[Math.floor(rng() * bodyColors.length)],
+                hatColor: hatColors[Math.floor(rng() * hatColors.length)],
+                h: 0.8 + rng() * 0.6,
+                // Some spectators wave, some hold flags, some are still
+                action: rng() < 0.25 ? 'wave' : (rng() < 0.4 ? 'flag' : 'still'),
+                flagColor: flagColors[Math.floor(rng() * flagColors.length)],
+                // Random phase offset for wave animation
+                wavePhase: rng() * Math.PI * 2,
+                waveSpeed: 2 + rng() * 3,
             });
         }
     }
@@ -212,41 +223,73 @@ export default class SkihoppRenderer {
         const r = this.renderer;
         if (!r) return;
         let targetZoom, targetX, targetY;
+        // Very smooth transitions across all states (lerp speed 2)
+        let followSpeed = 2;
+        let zoomSpeed = 2;
 
         switch (gameState) {
             case GameState.MENU:
             case GameState.READY: {
-                // Wide shot: centre on middle of hill
+                // Wide overview shot: centre on middle of hill
                 const profile = this.hill.getProfile();
                 const mid = profile[Math.floor(profile.length * 0.4)];
                 targetX = mid.x;
                 targetY = mid.y;
-                targetZoom = 0.8;
+                targetZoom = 0.7;
+                followSpeed = 2;
+                zoomSpeed = 2;
                 break;
             }
-            case GameState.INRUN:
-                targetX = jumperState.x;
-                targetY = jumperState.y;
-                targetZoom = 3;
+            case GameState.INRUN: {
+                // Follow jumper closely, slightly ahead so track is visible
+                // Lead the jumper by a few meters downhill
+                targetX = jumperState.x + 5;
+                // Slightly above to show surrounding area
+                targetY = jumperState.y - 2;
+                // Tight zoom on the jumper during inrun
+                targetZoom = 2.5;
+                followSpeed = 2;
+                zoomSpeed = 2;
                 break;
-            case GameState.FLIGHT:
-                targetX = jumperState.x;
-                targetY = jumperState.y;
-                targetZoom = 1.5;
+            }
+            case GameState.TAKEOFF: {
+                // Dramatic launch moment: slight zoom in, centred on jumper
+                targetX = jumperState.x + 3;
+                targetY = jumperState.y - 2;
+                targetZoom = 3.0;
+                followSpeed = 2;
+                zoomSpeed = 2;
                 break;
-            case GameState.LANDING:
-                targetX = jumperState.x;
-                targetY = jumperState.y;
-                targetZoom = 2;
+            }
+            case GameState.FLIGHT: {
+                // Smoothly pull back to show the full flight arc
+                // Keep camera ahead and above so landing area stays visible
+                targetX = jumperState.x + 12;
+                targetY = jumperState.y - 8;
+                targetZoom = 1.2;
+                followSpeed = 2;
+                zoomSpeed = 2;
                 break;
+            }
+            case GameState.LANDING: {
+                // Quick zoom to show the telemark landing clearly
+                targetX = jumperState.x + 2;
+                targetY = jumperState.y - 1.5;
+                targetZoom = 2.0;
+                followSpeed = 2;
+                zoomSpeed = 2;
+                break;
+            }
             default:
                 targetX = jumperState.x;
                 targetY = jumperState.y;
                 targetZoom = 1.5;
+                followSpeed = 2;
+                zoomSpeed = 2;
         }
 
-        r.smoothFollow(targetX, targetY, dt, 4);
-        r.smoothZoom(targetZoom, dt, 3);
+        r.smoothFollow(targetX, targetY, dt, followSpeed);
+        r.smoothZoom(targetZoom, dt, zoomSpeed);
     }
 
     // ------------------------------------------------------------------
@@ -303,10 +346,23 @@ export default class SkihoppRenderer {
         const parallaxFactors = [0.1, 0.2, 0.3];
         const cameraX = this.renderer.cameraX;
 
+        // --- Warm amber glow at horizon line ---
+        const glowTop = h * 0.35;
+        const glowBottom = h * 0.65;
+        const glowGrad = ctx.createLinearGradient(0, glowTop, 0, glowBottom);
+        glowGrad.addColorStop(0, 'rgba(255,190,90,0)');
+        glowGrad.addColorStop(0.3, 'rgba(255,170,70,0.10)');
+        glowGrad.addColorStop(0.5, 'rgba(255,155,55,0.12)');
+        glowGrad.addColorStop(0.7, 'rgba(255,140,40,0.07)');
+        glowGrad.addColorStop(1, 'rgba(255,120,30,0)');
+        ctx.fillStyle = glowGrad;
+        ctx.fillRect(0, glowTop, w, glowBottom - glowTop);
+
         for (let layer = 0; layer < 3; layer++) {
             const { points, color } = this._mountains[layer];
             const offsetX = -cameraX * parallaxFactors[layer] * 0.01;
 
+            // Draw the mountain silhouette
             ctx.beginPath();
             const firstPt = points[0];
             ctx.moveTo((firstPt.x + offsetX) * w, firstPt.y * h);
@@ -322,6 +378,33 @@ export default class SkihoppRenderer {
             ctx.closePath();
             ctx.fillStyle = color;
             ctx.fill();
+
+            // --- White snow caps on peaks ---
+            // Find local peaks (lower y = higher on screen) and draw small white triangles
+            for (let i = 1; i < points.length - 1; i++) {
+                const prev = points[i - 1];
+                const curr = points[i];
+                const next = points[i + 1];
+
+                // A peak is where the point is higher (smaller y) than both neighbours
+                if (curr.y < prev.y && curr.y < next.y) {
+                    const peakX = (curr.x + offsetX) * w;
+                    const peakY = curr.y * h;
+                    // Snow cap size: small triangles, slightly larger for foreground layers
+                    const capH = 5 + layer * 2;
+                    const capW = capH * 1.5;
+                    // Front layers are more opaque
+                    const alpha = 0.5 + layer * 0.15;
+
+                    ctx.beginPath();
+                    ctx.moveTo(peakX, peakY);
+                    ctx.lineTo(peakX - capW / 2, peakY + capH);
+                    ctx.lineTo(peakX + capW / 2, peakY + capH);
+                    ctx.closePath();
+                    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+                    ctx.fill();
+                }
+            }
         }
     }
 
@@ -332,7 +415,9 @@ export default class SkihoppRenderer {
     _drawSnowGround(ctx, w, h) {
         const profile = this.hill.getProfile();
         const r = this.renderer;
+        const ppm = r.ppm;
 
+        // --- Main snow ground fill with gradient ---
         ctx.beginPath();
         let first = true;
         for (const pt of profile) {
@@ -340,16 +425,153 @@ export default class SkihoppRenderer {
             if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
             else ctx.lineTo(sp.x, sp.y);
         }
-
-        // Close the polygon along the bottom and back
         const lastScreen = r.worldToScreen(profile[profile.length - 1].x, profile[profile.length - 1].y);
         const firstScreen = r.worldToScreen(profile[0].x, profile[0].y);
         ctx.lineTo(lastScreen.x, h + 50);
         ctx.lineTo(firstScreen.x, h + 50);
         ctx.closePath();
 
-        ctx.fillStyle = '#e8f0ff';
+        // Gradient from bluish-white at surface to deeper blue below
+        const surfaceY = Math.min(firstScreen.y, lastScreen.y);
+        const groundGrad = ctx.createLinearGradient(0, surfaceY, 0, h + 50);
+        groundGrad.addColorStop(0, '#dce8f8');
+        groundGrad.addColorStop(0.15, '#c8d8ee');
+        groundGrad.addColorStop(0.5, '#a0b8d8');
+        groundGrad.addColorStop(1, '#7090b8');
+        ctx.fillStyle = groundGrad;
         ctx.fill();
+
+        // --- Subtle blue shadow texture stripes on the snow ---
+        const rng = seededRandom(2024);
+        ctx.save();
+        ctx.globalAlpha = 0.08;
+        for (let i = 0; i < 30; i++) {
+            const wx = profile[0].x + rng() * (profile[profile.length - 1].x - profile[0].x);
+            const wy = this.hill.getHeightAtDistance(wx);
+            const sp1 = r.worldToScreen(wx, wy + 1 + rng() * 8);
+            const sp2 = r.worldToScreen(wx + 3 + rng() * 12, wy + 2 + rng() * 10);
+            ctx.beginPath();
+            ctx.ellipse(sp1.x, sp1.y, Math.abs(sp2.x - sp1.x) * 0.6, Math.abs(sp2.y - sp1.y) * 0.3 + 4, rng() * 0.3, 0, Math.PI * 2);
+            ctx.fillStyle = '#6080b0';
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // --- Pine trees along the sides of the hill ---
+        this._drawPineTrees(ctx, w, h);
+
+        // --- Crowd areas near the outrun ---
+        this._drawCrowdArea(ctx, w, h);
+    }
+
+    /** Draw simple pine trees (triangular) along the sides of the hill. */
+    _drawPineTrees(ctx, w, h) {
+        const r = this.renderer;
+        const rng = seededRandom(3141);
+        const profile = this.hill.getProfile();
+        const startX = profile[0].x;
+        const endX = profile[profile.length - 1].x;
+
+        // Trees on both sides of the hill (offset laterally by drawing them
+        // above the hill surface at different x positions)
+        const treePositions = [];
+        for (let i = 0; i < 40; i++) {
+            const wx = startX + rng() * (endX - startX);
+            const wy = this.hill.getHeightAtDistance(wx);
+            // Offset trees below/behind the slope (positive y = further down)
+            const offsetY = 4 + rng() * 18;
+            const treeH = 3 + rng() * 5; // tree height in meters
+            treePositions.push({ wx, wy: wy + offsetY, h: treeH, shade: rng() });
+        }
+
+        // Sort by y so farther trees draw first
+        treePositions.sort((a, b) => a.wy - b.wy);
+
+        for (const tree of treePositions) {
+            const base = r.worldToScreen(tree.wx, tree.wy);
+            const top = r.worldToScreen(tree.wx, tree.wy - tree.h);
+            const treeHPx = base.y - top.y;
+            if (treeHPx < 3 || base.y < -50 || base.y > h + 100) continue;
+            if (base.x < -100 || base.x > w + 100) continue;
+
+            const treeW = treeHPx * 0.55;
+
+            // Trunk
+            ctx.fillStyle = '#3a2510';
+            ctx.fillRect(base.x - treeW * 0.08, base.y - treeHPx * 0.15, treeW * 0.16, treeHPx * 0.15);
+
+            // Three triangle layers for foliage
+            const darkGreen = tree.shade < 0.5 ? '#0a3a12' : '#0d4218';
+            const midGreen = tree.shade < 0.5 ? '#0e4a1a' : '#125520';
+            const lightGreen = tree.shade < 0.5 ? '#1a6030' : '#1e6e35';
+            const layers = [
+                { yOff: 0.0, wScale: 1.0, color: darkGreen },
+                { yOff: 0.25, wScale: 0.78, color: midGreen },
+                { yOff: 0.5, wScale: 0.55, color: lightGreen },
+            ];
+            for (const layer of layers) {
+                const ly = base.y - treeHPx * (0.15 + layer.yOff * 0.85);
+                const lh = treeHPx * 0.45;
+                const lw = treeW * layer.wScale;
+                ctx.fillStyle = layer.color;
+                ctx.beginPath();
+                ctx.moveTo(base.x, ly - lh);
+                ctx.lineTo(base.x - lw / 2, ly);
+                ctx.lineTo(base.x + lw / 2, ly);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // Snow caps on tree tops
+            ctx.fillStyle = 'rgba(220,235,255,0.6)';
+            ctx.beginPath();
+            const snowY = base.y - treeHPx * 0.92;
+            ctx.moveTo(base.x, top.y - 1);
+            ctx.lineTo(base.x - treeW * 0.18, snowY + treeHPx * 0.06);
+            ctx.lineTo(base.x + treeW * 0.18, snowY + treeHPx * 0.06);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    /** Draw crowd area with small colored dots near the outrun. */
+    _drawCrowdArea(ctx, w, h) {
+        const r = this.renderer;
+        const rng = seededRandom(5555);
+        const outrunEnd = this.hill.getOutrunEndPosition();
+        const kp = this.hill.getKPointPosition();
+
+        if (!outrunEnd || !kp) return;
+
+        // Crowd fence line (barrier along the side of the outrun)
+        const fenceStartX = kp.x + 15;
+        const fenceEndX = outrunEnd.x - 5;
+        const fenceY = this.hill.getHeightAtDistance(fenceEndX) || outrunEnd.y;
+
+        // Draw a simple fence line
+        ctx.strokeStyle = '#556677';
+        ctx.lineWidth = 1;
+        for (let fx = fenceStartX; fx < fenceEndX; fx += 3) {
+            const fy = this.hill.getHeightAtDistance(fx);
+            const sp = r.worldToScreen(fx, fy + 4);
+            const spTop = r.worldToScreen(fx, fy + 2.5);
+            ctx.beginPath();
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(spTop.x, spTop.y);
+            ctx.stroke();
+        }
+        // Horizontal fence rail
+        ctx.beginPath();
+        ctx.strokeStyle = '#667788';
+        ctx.lineWidth = 1.5;
+        let fFirst = true;
+        for (let fx = fenceStartX; fx < fenceEndX; fx += 2) {
+            const fy = this.hill.getHeightAtDistance(fx);
+            const sp = r.worldToScreen(fx, fy + 2.8);
+            if (fFirst) { ctx.moveTo(sp.x, sp.y); fFirst = false; }
+            else ctx.lineTo(sp.x, sp.y);
+        }
+        ctx.stroke();
     }
 
     // ------------------------------------------------------------------
@@ -703,20 +925,124 @@ export default class SkihoppRenderer {
 
     _drawSpectators(ctx) {
         const r = this.renderer;
+        const t = this._time || 0;
 
         for (const spec of this._spectators) {
             const sp = r.worldToScreen(spec.x, spec.y);
+            const ppm = r.ppm;
+            const h = spec.h * ppm;      // total stick figure height in px
+            const headR = h * 0.12;       // head radius
+            const legLen = h * 0.35;      // leg length
+            const bodyLen = h * 0.35;     // body (torso) line length
+            const armLen = h * 0.25;      // arm length
 
-            // Body (small rectangle)
-            ctx.fillStyle = spec.color;
-            const h = spec.h * r.ppm;
-            const w = h * 0.4;
-            ctx.fillRect(sp.x - w / 2, sp.y - h, w, h);
+            const lineW = Math.max(1, h * 0.06);
+            ctx.lineCap = 'round';
 
-            // Head (small circle)
+            // Feet position = base
+            const feetY = sp.y;
+            const hipY = feetY - legLen;
+            const shoulderY = hipY - bodyLen;
+            const headCenterY = shoulderY - headR;
+
+            // --- Leg lines (two lines from hip spreading down to feet) ---
+            ctx.strokeStyle = spec.bodyColor;
+            ctx.lineWidth = lineW;
+            // Left leg
+            ctx.beginPath();
+            ctx.moveTo(sp.x, hipY);
+            ctx.lineTo(sp.x - h * 0.1, feetY);
+            ctx.stroke();
+            // Right leg
+            ctx.beginPath();
+            ctx.moveTo(sp.x, hipY);
+            ctx.lineTo(sp.x + h * 0.1, feetY);
+            ctx.stroke();
+
+            // --- Body line (vertical from hip to shoulder) ---
+            ctx.strokeStyle = spec.bodyColor;
+            ctx.lineWidth = lineW * 1.2;
+            ctx.beginPath();
+            ctx.moveTo(sp.x, hipY);
+            ctx.lineTo(sp.x, shoulderY);
+            ctx.stroke();
+
+            // --- Arms (from shoulder) ---
+            ctx.strokeStyle = spec.bodyColor;
+            ctx.lineWidth = lineW;
+
+            if (spec.action === 'wave') {
+                // Left arm waves: angle varies with time
+                const waveAngle = Math.sin(t * spec.waveSpeed + spec.wavePhase) * 0.7;
+                const leftArmAngle = -1.2 + waveAngle; // swings around upper-left
+                const lax = sp.x + Math.cos(leftArmAngle) * armLen;
+                const lay = shoulderY + Math.sin(leftArmAngle) * armLen;
+                ctx.beginPath();
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(lax, lay);
+                ctx.stroke();
+                // Right arm relaxed down
+                ctx.beginPath();
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(sp.x + armLen * 0.7, shoulderY + armLen * 0.6);
+                ctx.stroke();
+            } else if (spec.action === 'flag') {
+                // Right arm up holding flag
+                const flagArmEndX = sp.x + armLen * 0.15;
+                const flagArmEndY = shoulderY - armLen * 0.9;
+                ctx.beginPath();
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(flagArmEndX, flagArmEndY);
+                ctx.stroke();
+                // Flag pole
+                ctx.strokeStyle = '#664422';
+                ctx.lineWidth = Math.max(0.8, lineW * 0.6);
+                const poleTopY = flagArmEndY - h * 0.2;
+                ctx.beginPath();
+                ctx.moveTo(flagArmEndX, flagArmEndY);
+                ctx.lineTo(flagArmEndX, poleTopY);
+                ctx.stroke();
+                // Flag rectangle
+                const flagW = h * 0.18;
+                const flagH = h * 0.1;
+                const wave = Math.sin(t * 3 + spec.wavePhase) * flagW * 0.08;
+                ctx.fillStyle = spec.flagColor;
+                ctx.beginPath();
+                ctx.moveTo(flagArmEndX, poleTopY);
+                ctx.lineTo(flagArmEndX + flagW + wave, poleTopY + flagH * 0.2);
+                ctx.lineTo(flagArmEndX + flagW - wave, poleTopY + flagH);
+                ctx.lineTo(flagArmEndX, poleTopY + flagH * 0.8);
+                ctx.closePath();
+                ctx.fill();
+                // Left arm relaxed down
+                ctx.strokeStyle = spec.bodyColor;
+                ctx.lineWidth = lineW;
+                ctx.beginPath();
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(sp.x - armLen * 0.7, shoulderY + armLen * 0.6);
+                ctx.stroke();
+            } else {
+                // Still: both arms relaxed at sides
+                ctx.beginPath();
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(sp.x - armLen * 0.7, shoulderY + armLen * 0.6);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(sp.x + armLen * 0.7, shoulderY + armLen * 0.6);
+                ctx.stroke();
+            }
+
+            // --- Head (circle) ---
             ctx.fillStyle = '#ffccaa';
             ctx.beginPath();
-            ctx.arc(sp.x, sp.y - h - w * 0.4, w * 0.4, 0, Math.PI * 2);
+            ctx.arc(sp.x, headCenterY, headR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // --- Colored hat (small circle sitting on top of head) ---
+            ctx.fillStyle = spec.hatColor;
+            ctx.beginPath();
+            ctx.arc(sp.x, headCenterY - headR * 0.9, headR * 0.55, 0, Math.PI * 2);
             ctx.fill();
         }
     }

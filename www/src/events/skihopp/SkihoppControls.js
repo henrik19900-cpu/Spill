@@ -5,6 +5,16 @@
  * game actions across the ski jumping state machine:
  *   MENU -> READY -> INRUN -> TAKEOFF -> FLIGHT -> LANDING -> SCORE -> RESULTS
  *
+ * Control scheme (realistic):
+ *   INRUN   : HOLD screen to maintain tuck position (better aerodynamics).
+ *             Releasing = worse aero = slightly slower. No tapping.
+ *   TAKEOFF : Tap within ~200ms window. Perfect = quality 1.0.
+ *             Auto-launch if missed = quality 0.3.
+ *   FLIGHT  : Slide finger up/down to control body angle (smooth with inertia).
+ *             Optimal angle ~35 degrees.
+ *   LANDING : Tap within 300ms window for telemark landing.
+ *   SCORE   : 1.5s delay before tap to continue.
+ *
  * Visual feedback system:
  *   Controls communicate feedback to the renderer via `game.feedback` - an
  *   object the renderer reads each frame. Fields:
@@ -13,7 +23,7 @@
  *     slowMotion : { factor, until } | null
  *     takeoffRing: { progress } | null  (0-1 ring animation)
  *     landingBar : { progress } | null  (0-1 timing bar)
- *     rhythmGlow : { alpha } | null     (0-1 green glow intensity)
+ *     tuckGlow   : { alpha } | null     (0-1 tuck indicator intensity)
  */
 
 import { GameState } from '../../core/Game.js';
@@ -41,7 +51,8 @@ export function createJumperState() {
     takeoffQuality: 0,   // 0-1, set during TAKEOFF
     landingDistance: 0,   // meters, recorded at landing
     landingQuality: 0,   // style bonus/penalty
-    inrunTaps: 0,        // total taps during INRUN
+    isTucked: false,     // true while player holds screen during INRUN
+    tuckDuration: 0,     // seconds spent in tuck position
     phase: 'MENU',       // mirrors GameState for convenience
   };
 }
@@ -50,11 +61,11 @@ export function createJumperState() {
 // Timing / tuning constants
 // ---------------------------------------------------------------------------
 
-const TAKEOFF_PERFECT_MS  = 120;   // generous perfect window
-const TAKEOFF_GOOD_MS     = 280;
-const TAKEOFF_POOR_MS     = 500;
+const TAKEOFF_WINDOW_MS   = 200;   // total window for takeoff tap
+const TAKEOFF_PERFECT_MS  = 80;    // tight perfect window within the 200ms
+const TAKEOFF_AUTO_QUALITY = 0.3;  // quality if player misses the tap entirely
 
-const LANDING_WINDOW_MS   = 400;   // slightly wider window for telemark
+const LANDING_WINDOW_MS   = 300;   // telemark landing window
 
 const BODY_ANGLE_MIN      = 10;   // degrees
 const BODY_ANGLE_MAX      = 55;   // degrees
@@ -67,15 +78,15 @@ const DRAG_SENSITIVITY    = 0.12; // degrees per pixel of vertical drag
 const ANGLE_INERTIA       = 0.88; // smoothing factor for angle velocity (0-1)
 const ANGLE_VELOCITY_DECAY = 0.92; // how fast inertia velocity decays each tick
 
-const TAP_BOOST_DEFAULT   = 0.8;  // m/s speed added per inrun tap
-const RHYTHM_BONUS        = 0.3;  // extra boost for consistent rhythm
-const RHYTHM_TOLERANCE_MS = 100;  // how close intervals must be for rhythm bonus
+// Inrun tuck parameters
+const TUCK_AERO_BONUS     = 1.0;  // speed gain per second while tucked (m/s^2)
+const RELEASE_AERO_PENALTY = 0.4; // speed loss per second when not tucked (m/s^2)
 
 const TELEMARK_PERFECT_BONUS = 3.0;
 const TELEMARK_GOOD_BONUS    = 1.5;
 const NO_TELEMARK_PENALTY    = -2.0;
 
-const SCORE_READ_DELAY_MS = 1200; // minimum time to display score before allowing skip
+const SCORE_READ_DELAY_MS = 1500; // minimum time to display score before allowing skip
 
 const SLOWMO_FACTOR       = 0.5;  // time scale during takeoff slow-motion
 const SLOWMO_DURATION_MS  = 400;  // how long slow-motion lasts after takeoff tap
@@ -103,10 +114,8 @@ export default class SkihoppControls {
     this._landingWindowStart = 0;   // timestamp when LANDING phase began
     this._landingTapped = false;
 
-    // Inrun rhythm tracking
-    this._lastTapTime = 0;          // timestamp of previous inrun tap
-    this._lastTapInterval = 0;      // ms between the two most recent taps
-    this._rhythmStreak = 0;         // consecutive rhythm-matched taps
+    // Inrun tuck tracking
+    this._inrunStartTime = 0;       // timestamp when INRUN phase began
 
     // Flight angle inertia
     this._angleVelocity = 0;        // degrees/sec, applied via inertia
@@ -115,7 +124,6 @@ export default class SkihoppControls {
     this._scoreShownAt = 0;
 
     // Config-driven values (overridden in init if config is available)
-    this._tapBoost = TAP_BOOST_DEFAULT;
     this._angleChangeRate = ANGLE_CHANGE_RATE;
   }
 
@@ -141,7 +149,7 @@ export default class SkihoppControls {
         slowMotion: null,
         takeoffRing: null,
         landingBar: null,
-        rhythmGlow: null,
+        tuckGlow: null,
       };
     }
 
@@ -155,7 +163,6 @@ export default class SkihoppControls {
     // Read config overrides if available
     const cfg = game.config && game.config.skihopp;
     if (cfg) {
-      this._tapBoost = cfg.inrun?.tapBoost ?? TAP_BOOST_DEFAULT;
       this._angleChangeRate = cfg.flight?.angleChangeRate ?? ANGLE_CHANGE_RATE;
     }
 
@@ -177,6 +184,14 @@ export default class SkihoppControls {
   _onStateChange(newState, _prevState) {
     if (this._jumperState) {
       this._jumperState.phase = newState;
+    }
+
+    if (newState === GameState.INRUN) {
+      this._inrunStartTime = performance.now();
+      if (this._jumperState) {
+        this._jumperState.isTucked = false;
+        this._jumperState.tuckDuration = 0;
+      }
     }
 
     if (newState === GameState.TAKEOFF) {
@@ -216,7 +231,7 @@ export default class SkihoppControls {
         break;
 
       case GameState.INRUN:
-        this._handleInrunTap();
+        // Inrun is hold-based (tuck), taps are ignored
         break;
 
       case GameState.TAKEOFF:
@@ -310,62 +325,50 @@ export default class SkihoppControls {
     this.game.setState(GameState.INRUN);
   }
 
-  _handleInrunTap() {
+  /**
+   * Update inrun tuck state based on whether the player is currently touching
+   * the screen. Called every tick from update().
+   * @param {number} dt - delta time in seconds
+   */
+  _updateInrunTuck(dt) {
     const js = this._jumperState;
-    if (!js) return;
+    if (!js || !this._input) return;
 
-    const now = performance.now();
-    js.inrunTaps++;
+    const wasTucked = js.isTucked;
+    js.isTucked = this._input.isTouching;
 
-    // Rhythm bonus: if the interval between this tap and the previous one
-    // is close to the interval between the two taps before that, add extra.
-    let boost = this._tapBoost;
-    let isRhythm = false;
-
-    if (this._lastTapTime > 0) {
-      const interval = now - this._lastTapTime;
-
-      if (this._lastTapInterval > 0) {
-        const diff = Math.abs(interval - this._lastTapInterval);
-        // Consistent rhythm if intervals differ by less than tolerance
-        if (diff < RHYTHM_TOLERANCE_MS) {
-          this._rhythmStreak++;
-          isRhythm = true;
-          // Escalating rhythm bonus: longer streaks = slightly more boost
-          const streakMultiplier = Math.min(this._rhythmStreak * 0.1, 0.5);
-          boost += RHYTHM_BONUS + streakMultiplier;
-        } else {
-          this._rhythmStreak = 0;
-        }
-      }
-
-      this._lastTapInterval = interval;
+    if (js.isTucked) {
+      js.tuckDuration += dt;
+      // Tuck = better aerodynamics = gain speed
+      js.speed += TUCK_AERO_BONUS * dt;
+    } else {
+      // Not tucked = worse aerodynamics = slight drag
+      js.speed -= RELEASE_AERO_PENALTY * dt;
+      js.speed = Math.max(js.speed, 0);
     }
 
-    this._lastTapTime = now;
-    js.speed += boost;
-
-    // Visual feedback: green glow for rhythm, subtle pulse otherwise
+    // Visual feedback: glow indicator for tuck state
     const fb = this.game.feedback;
     if (fb) {
-      if (isRhythm) {
-        // Flash green briefly for rhythm match
-        fb.flash = {
-          color: '#00ff44',
-          alpha: 0.15 + Math.min(this._rhythmStreak * 0.03, 0.15),
-          duration: 120,
-          startTime: now,
-        };
-        fb.rhythmGlow = {
-          alpha: clamp(this._rhythmStreak * 0.2, 0.2, 1.0),
+      if (js.isTucked) {
+        // Ramp up glow smoothly
+        const currentAlpha = fb.tuckGlow ? fb.tuckGlow.alpha : 0;
+        fb.tuckGlow = {
+          alpha: clamp(currentAlpha + dt * 3.0, 0, 1.0),
         };
       } else {
-        fb.rhythmGlow = { alpha: 0 };
+        // Fade out glow
+        const currentAlpha = fb.tuckGlow ? fb.tuckGlow.alpha : 0;
+        fb.tuckGlow = {
+          alpha: Math.max(0, currentAlpha - dt * 4.0),
+        };
+      }
+
+      // Haptic pulse when entering tuck
+      if (js.isTucked && !wasTucked) {
+        this._vibrate(10);
       }
     }
-
-    // Haptic feedback - slightly stronger for rhythm
-    this._vibrate(isRhythm ? 15 : 10);
   }
 
   _handleTakeoffTap() {
@@ -379,37 +382,31 @@ export default class SkihoppControls {
     const elapsed = now - this._takeoffWindowStart;
     const fb = this.game.feedback;
 
-    // Calculate takeoff quality based on timing
+    // Calculate takeoff quality based on timing within the 200ms window
     if (elapsed <= TAKEOFF_PERFECT_MS) {
       js.takeoffQuality = 1.0;
-      // Perfect: green flash + strong haptic
+      // Perfect: green flash + strong double-pulse haptic
       if (fb) {
         fb.flash = { color: '#00ff44', alpha: 0.35, duration: 300, startTime: now };
       }
-      this._vibrate([0, 40, 20, 40]);
-    } else if (elapsed <= TAKEOFF_GOOD_MS) {
-      // Interpolate quality within the "good" window
-      const t = (elapsed - TAKEOFF_PERFECT_MS) / (TAKEOFF_GOOD_MS - TAKEOFF_PERFECT_MS);
-      js.takeoffQuality = 0.6 + 0.4 * (1 - t);
-      // Good: yellow flash + medium haptic
+      this._vibrate([0, 50, 30, 50]);
+    } else if (elapsed <= TAKEOFF_WINDOW_MS) {
+      // Good but not perfect: linear interpolation from 1.0 down to 0.5
+      const t = (elapsed - TAKEOFF_PERFECT_MS) / (TAKEOFF_WINDOW_MS - TAKEOFF_PERFECT_MS);
+      js.takeoffQuality = 1.0 - 0.5 * t;
+      // Yellow flash + medium haptic
       if (fb) {
         fb.flash = { color: '#ffcc00', alpha: 0.3, duration: 250, startTime: now };
       }
-      this._vibrate([0, 30]);
-    } else if (elapsed <= TAKEOFF_POOR_MS) {
-      const t = (elapsed - TAKEOFF_GOOD_MS) / (TAKEOFF_POOR_MS - TAKEOFF_GOOD_MS);
-      js.takeoffQuality = 0.2 + 0.4 * (1 - t);
-      // Poor: red flash + weak haptic
-      if (fb) {
-        fb.flash = { color: '#ff3333', alpha: 0.25, duration: 200, startTime: now };
-      }
-      this._vibrate(15);
+      this._vibrate([0, 35]);
     } else {
-      js.takeoffQuality = 0.0;
-      // Missed: red flash
+      // Too late - tapped after the window closed (shouldn't normally happen
+      // since auto-launch fires, but handle defensively)
+      js.takeoffQuality = TAKEOFF_AUTO_QUALITY;
       if (fb) {
         fb.flash = { color: '#ff3333', alpha: 0.2, duration: 150, startTime: now };
       }
+      this._vibrate(15);
     }
 
     // Trigger slow-motion feel for dramatic takeoff moment
@@ -435,9 +432,9 @@ export default class SkihoppControls {
     const elapsed = now - this._landingWindowStart;
     const fb = this.game.feedback;
 
-    // Telemark landing quality
-    if (elapsed <= LANDING_WINDOW_MS * 0.35) {
-      // Perfect telemark - tapped quickly after landing contact
+    // Telemark landing quality (300ms window)
+    if (elapsed <= LANDING_WINDOW_MS * 0.4) {
+      // Perfect telemark - tapped within first 120ms
       js.landingQuality = TELEMARK_PERFECT_BONUS;
       if (fb) {
         fb.flash = { color: '#00ff44', alpha: 0.3, duration: 250, startTime: now };
@@ -445,8 +442,8 @@ export default class SkihoppControls {
       // Strong impactful haptic for perfect telemark
       this._vibrate([0, 60, 30, 60]);
     } else if (elapsed <= LANDING_WINDOW_MS) {
-      // Good telemark
-      const t = (elapsed - LANDING_WINDOW_MS * 0.35) / (LANDING_WINDOW_MS * 0.65);
+      // Good telemark - tapped within 120-300ms
+      const t = (elapsed - LANDING_WINDOW_MS * 0.4) / (LANDING_WINDOW_MS * 0.6);
       js.landingQuality = TELEMARK_GOOD_BONUS + (TELEMARK_PERFECT_BONUS - TELEMARK_GOOD_BONUS) * (1 - t);
       if (fb) {
         fb.flash = { color: '#ffcc00', alpha: 0.25, duration: 200, startTime: now };
@@ -500,25 +497,34 @@ export default class SkihoppControls {
       }
     }
 
-    // -- TAKEOFF: ring animation + auto-miss --
+    // -- INRUN: update tuck state based on touch --
+    if (state === GameState.INRUN) {
+      this._updateInrunTuck(dt);
+    } else if (fb) {
+      fb.tuckGlow = null;
+    }
+
+    // -- TAKEOFF: ring animation + auto-launch --
     if (state === GameState.TAKEOFF) {
       const elapsed = now - this._takeoffWindowStart;
 
       // Update ring progress for renderer (0 -> 1 over the timing window)
       if (fb) {
         fb.takeoffRing = {
-          progress: clamp(elapsed / TAKEOFF_POOR_MS, 0, 1),
+          progress: clamp(elapsed / TAKEOFF_WINDOW_MS, 0, 1),
         };
       }
 
-      if (!this._takeoffTapped && elapsed > TAKEOFF_POOR_MS) {
-        // Auto-miss: set quality to 0; physics will handle the transition
-        js.takeoffQuality = 0.0;
+      if (!this._takeoffTapped && elapsed > TAKEOFF_WINDOW_MS) {
+        // Auto-launch: player missed the tap, set reduced quality
+        js.takeoffQuality = TAKEOFF_AUTO_QUALITY;
         this._takeoffTapped = true;
         if (fb) {
           fb.takeoffRing = null;
           fb.flash = { color: '#ff3333', alpha: 0.2, duration: 150, startTime: now };
         }
+        // Weak haptic to indicate missed timing
+        this._vibrate(20);
       }
     } else if (fb) {
       fb.takeoffRing = null;
@@ -552,10 +558,7 @@ export default class SkihoppControls {
       fb.landingBar = null;
     }
 
-    // -- INRUN: decay rhythm glow when not tapping --
-    if (state === GameState.INRUN && fb && fb.rhythmGlow) {
-      fb.rhythmGlow.alpha = Math.max(0, fb.rhythmGlow.alpha - dt * 2.0);
-    }
+    // (Inrun tuck glow is handled in _updateInrunTuck)
   }
 
   /**
@@ -630,9 +633,7 @@ export default class SkihoppControls {
     this._unsubs = [];
     this._jumperState = null;
     this._input = null;
-    this._lastTapTime = 0;
-    this._lastTapInterval = 0;
-    this._rhythmStreak = 0;
+    this._inrunStartTime = 0;
     this._angleVelocity = 0;
     this._scoreShownAt = 0;
 
@@ -642,7 +643,7 @@ export default class SkihoppControls {
       this.game.feedback.slowMotion = null;
       this.game.feedback.takeoffRing = null;
       this.game.feedback.landingBar = null;
-      this.game.feedback.rhythmGlow = null;
+      this.game.feedback.tuckGlow = null;
     }
   }
 }

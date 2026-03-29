@@ -35,7 +35,14 @@ export default class JudgeDisplay {
      * @param {number} height
      * @param {object} judgeData
      *   { judges: [5 scores], distancePoints, stylePoints, windComp,
-     *     totalPoints, animationProgress (0-1) }
+     *     totalPoints, distance, rating, ratingTier, animationProgress (0-1) }
+     *
+     * Animation phases (TV-broadcast style):
+     *   0.0 - 0.2  Distance slides in from top (huge "132.5 m" text)
+     *   0.2 - 0.7  5 judge cards appear one-by-one
+     *   0.7 - 0.8  Strikethrough lines on highest / lowest scores
+     *   0.8 - 0.9  Breakdown fades in (stilpoeng, lengdepoeng, vindkomp)
+     *   0.9 - 1.0  Total score drops in with golden glow + rating text
      */
     render(ctx, width, height, judgeData = {}) {
         this._time += 0.016;
@@ -46,12 +53,15 @@ export default class JudgeDisplay {
             stylePoints: 0,
             windComp: 0,
             totalPoints: 0,
+            distance: 0,
+            rating: '',
+            ratingTier: 'B',
             animationProgress: 1,
             ...judgeData,
         };
 
         this._renderBackground(ctx, width, height);
-        this._renderTitle(ctx, width, height, d);
+        this._renderDistance(ctx, width, height, d);
         this._renderJudgeCards(ctx, width, height, d);
         this._renderBreakdown(ctx, width, height, d);
         this._renderTotal(ctx, width, height, d);

@@ -113,66 +113,43 @@ export default class Scoreboard {
     // -------------------------------------------------------------------
 
     _renderHeader(ctx, width, height) {
-        const y = 48;
+        const padX = 14;
 
-        // Background bar with gradient
-        const headerGrad = ctx.createLinearGradient(0, 0, 0, 100);
-        headerGrad.addColorStop(0, 'rgba(0,0,0,0.5)');
-        headerGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        // Dark header panel
+        const headerGrad = ctx.createLinearGradient(0, 0, 0, 95);
+        headerGrad.addColorStop(0, 'rgba(0,0,0,0.7)');
+        headerGrad.addColorStop(1, 'rgba(0,0,0,0.3)');
         ctx.fillStyle = headerGrad;
-        ctx.fillRect(0, 0, width, 100);
+        ctx.fillRect(0, 0, width, 95);
+
+        // Bottom accent line (Norwegian tricolor)
+        const accentY = 92;
+        const thirdW = width / 3;
+        ctx.fillStyle = '#BA0C2F';
+        ctx.fillRect(0, accentY, thirdW, 3);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(thirdW, accentY, thirdW, 3);
+        ctx.fillStyle = '#00205B';
+        ctx.fillRect(thirdW * 2, accentY, thirdW + 1, 3);
 
         ctx.save();
 
-        // Title with glow
-        ctx.shadowColor = 'rgba(200,220,255,0.6)';
-        ctx.shadowBlur = 16;
+        // Title "RESULTATER"
         ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${Math.min(width * 0.08, 32)}px sans-serif`;
+        ctx.font = `bold ${Math.max(Math.min(width * 0.075, 30), 18)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('RESULTATER', width / 2, y);
+        ctx.letterSpacing = '3px';
+        ctx.fillText('RESULTATER', width / 2, 34);
 
-        // Second pass for extra brightness
-        ctx.shadowBlur = 0;
-        ctx.fillText('RESULTATER', width / 2, y);
+        // Hill name subtitle
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        ctx.font = `${Math.max(Math.min(width * 0.035, 14), 12)}px sans-serif`;
+        ctx.letterSpacing = '1px';
+        ctx.fillText('Holmenkollbakken K120', width / 2, 62);
+
+        ctx.letterSpacing = '0px';
         ctx.restore();
-
-        // Decorative underline with gold gradient
-        const lineW = Math.min(width * 0.5, 200);
-        const lineY = y + 24;
-        const lineX = (width - lineW) / 2;
-
-        const lineGrad = ctx.createLinearGradient(lineX, 0, lineX + lineW, 0);
-        lineGrad.addColorStop(0, 'rgba(255,215,0,0)');
-        lineGrad.addColorStop(0.2, 'rgba(255,215,0,0.8)');
-        lineGrad.addColorStop(0.5, 'rgba(255,240,150,1)');
-        lineGrad.addColorStop(0.8, 'rgba(255,215,0,0.8)');
-        lineGrad.addColorStop(1, 'rgba(255,215,0,0)');
-
-        ctx.fillStyle = lineGrad;
-        ctx.fillRect(lineX, lineY, lineW, 2.5);
-
-        // Small diamond ornament in center
-        ctx.save();
-        ctx.translate(width / 2, lineY + 1);
-        ctx.rotate(Math.PI / 4);
-        ctx.fillStyle = '#FFD700';
-        ctx.fillRect(-3.5, -3.5, 7, 7);
-        ctx.restore();
-
-        // Norwegian flag accent below
-        const accentW = Math.min(width * 0.3, 120);
-        const barH = 2.5;
-        const barY = lineY + 10;
-        const barX = (width - accentW) / 2;
-
-        ctx.fillStyle = '#BA0C2F';
-        ctx.fillRect(barX, barY, accentW / 3, barH);
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(barX + accentW / 3, barY, accentW / 3, barH);
-        ctx.fillStyle = '#00205B';
-        ctx.fillRect(barX + (accentW / 3) * 2, barY, accentW / 3, barH);
     }
 
     // -------------------------------------------------------------------
@@ -186,30 +163,37 @@ export default class Scoreboard {
             ctx.font = '18px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('Ingen resultater ennå', width / 2, height / 2);
+            ctx.fillText('Ingen resultater enda', width / 2, height / 2);
             return;
         }
 
-        const tableTop = 110;
-        const rowHeight = 60;
-        const headerHeight = 36;
-        const padX = 14;
-        const buttonSpace = 80; // room for the button at bottom
+        const tableTop = 100;
+        const rowHeight = 52;
+        const headerHeight = 34;
+        const padX = 10;
+        const buttonSpace = 110; // room for buttons at bottom
 
         // Clamp scroll offset
         const maxScroll = Math.max(0, jumps.length * rowHeight + headerHeight - (height - tableTop - buttonSpace));
         this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxScroll));
 
-        // Column positions
+        // Column layout: #  Navn        Land   Lengde   Poeng
+        const fontSize = Math.max(Math.min(width * 0.04, 16), 16);
+        const smallFont = Math.max(Math.min(width * 0.03, 12), 11);
         const cols = {
-            rank: padX + 14,
-            flag: padX + 42,
-            name: padX + 68,
-            distance: width - padX - 110,
-            points: width - padX - 20,
+            rank:     padX + 22,
+            name:     padX + 46,
+            country:  width * 0.52,
+            distance: width * 0.72,
+            points:   width - padX - 8,
         };
 
         ctx.save();
+
+        // Dark semi-transparent table panel
+        this._roundRect(ctx, padX - 2, tableTop - 4, width - padX * 2 + 4, height - tableTop - buttonSpace + 8, 8);
+        ctx.fillStyle = 'rgba(10, 15, 30, 0.65)';
+        ctx.fill();
 
         // Clip to table area
         ctx.beginPath();
@@ -219,8 +203,8 @@ export default class Scoreboard {
         // Column headers
         const headY = tableTop + headerHeight / 2 - this.scrollOffset;
         if (headY > tableTop - headerHeight) {
-            ctx.fillStyle = 'rgba(255,255,255,0.4)';
-            ctx.font = `bold ${Math.min(width * 0.028, 11)}px sans-serif`;
+            ctx.fillStyle = 'rgba(255,255,255,0.5)';
+            ctx.font = `bold ${smallFont}px sans-serif`;
             ctx.textBaseline = 'middle';
             ctx.letterSpacing = '1px';
 
@@ -228,14 +212,19 @@ export default class Scoreboard {
             ctx.fillText('#', cols.rank, headY);
 
             ctx.textAlign = 'left';
-            ctx.fillText('UTOVER', cols.name, headY);
+            ctx.fillText('NAVN', cols.name, headY);
+
+            ctx.textAlign = 'center';
+            ctx.fillText('LAND', cols.country, headY);
 
             ctx.textAlign = 'right';
-            ctx.fillText('LENGDE', cols.distance + 50, headY);
+            ctx.fillText('LENGDE', cols.distance + 18, headY);
             ctx.fillText('POENG', cols.points, headY);
 
-            // Separator line
-            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.letterSpacing = '0px';
+
+            // Separator line under header
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(padX, headY + headerHeight / 2);
@@ -255,79 +244,91 @@ export default class Scoreboard {
             const isCurrent = this._isCurrentJumper(jump, data.currentJumper, i);
             const rank = jump.rank != null ? jump.rank : i + 1;
 
-            // Row background - alternating
+            // Row background
             if (isCurrent) {
-                // Player row: glowing border
+                // Player row: blue glow highlight
                 ctx.save();
-                ctx.shadowColor = 'rgba(100,180,255,0.5)';
-                ctx.shadowBlur = 12;
-                ctx.fillStyle = 'rgba(100,180,255,0.12)';
-                this._roundRect(ctx, padX - 2, rowY + 3, width - padX * 2 + 4, rowHeight - 6, 10);
+                ctx.shadowColor = 'rgba(80,160,255,0.6)';
+                ctx.shadowBlur = 14;
+                ctx.fillStyle = 'rgba(80,160,255,0.15)';
+                this._roundRect(ctx, padX, rowY + 2, width - padX * 2, rowHeight - 4, 6);
                 ctx.fill();
                 ctx.restore();
 
                 // Animated glowing border
-                const glowAlpha = 0.35 + Math.sin(this._time * 3) * 0.15;
-                ctx.strokeStyle = `rgba(100,180,255,${glowAlpha})`;
-                ctx.lineWidth = 2;
-                this._roundRect(ctx, padX - 2, rowY + 3, width - padX * 2 + 4, rowHeight - 6, 10);
+                const glowAlpha = 0.4 + Math.sin(this._time * 3) * 0.15;
+                ctx.strokeStyle = `rgba(80,170,255,${glowAlpha})`;
+                ctx.lineWidth = 1.5;
+                this._roundRect(ctx, padX, rowY + 2, width - padX * 2, rowHeight - 4, 6);
                 ctx.stroke();
             } else if (i % 2 === 0) {
                 ctx.fillStyle = 'rgba(255,255,255,0.04)';
-                this._roundRect(ctx, padX, rowY + 3, width - padX * 2, rowHeight - 6, 6);
-                ctx.fill();
+                ctx.fillRect(padX, rowY + 2, width - padX * 2, rowHeight - 4);
             }
 
-            // Rank: medal circles for top 3
+            // -- Rank column --
             if (rank <= 3) {
-                this._renderMedal(ctx, cols.rank, centerY, rank);
+                const medalColors = {
+                    1: '#FFD700',
+                    2: '#C0C0C0',
+                    3: '#CD7F32',
+                };
+                ctx.fillStyle = medalColors[rank];
+                ctx.font = `bold ${fontSize}px monospace`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(rank, cols.rank, centerY);
             } else {
                 ctx.fillStyle = 'rgba(255,255,255,0.5)';
-                ctx.font = 'bold 16px sans-serif';
+                ctx.font = `${fontSize}px monospace`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(rank, cols.rank, centerY);
             }
 
-            // Country flag (drawn rectangle)
-            this._renderFlag(ctx, cols.flag, centerY, jump.country);
-
-            // Name
-            ctx.fillStyle = isCurrent ? '#ffffff' : 'rgba(255,255,255,0.85)';
-            ctx.font = `${isCurrent ? 'bold ' : ''}${Math.min(width * 0.04, 16)}px sans-serif`;
+            // -- Name column --
+            ctx.fillStyle = isCurrent ? '#ffffff' : 'rgba(255,255,255,0.9)';
+            ctx.font = `${isCurrent ? 'bold ' : ''}${fontSize}px sans-serif`;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            const maxNameW = cols.distance - cols.name - 10;
+            const maxNameW = cols.country - cols.name - 12;
             const displayName = this._truncateName(ctx, jump.name || 'Ukjent', maxNameW);
-            ctx.fillText(displayName, cols.name, centerY - 6);
+            ctx.fillText(displayName, cols.name, centerY);
 
-            // Country code small text below name
-            ctx.fillStyle = 'rgba(255,255,255,0.35)';
-            ctx.font = `${Math.min(width * 0.025, 10)}px sans-serif`;
-            ctx.fillText(jump.country || '', cols.name, centerY + 10);
+            // -- Country column: 3-letter code with flag stripe --
+            const countryCode = jump.country || '???';
+            // Draw small flag stripe above the code
+            this._renderFlagStripe(ctx, cols.country, centerY - 9, countryCode);
+            // Country code text
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.font = `bold ${smallFont}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(countryCode, cols.country, centerY + 5);
 
-            // Distance
-            ctx.fillStyle = isCurrent ? '#ffffff' : 'rgba(255,255,255,0.8)';
-            ctx.font = `${Math.min(width * 0.038, 15)}px sans-serif`;
+            // -- Distance column (monospace) --
+            ctx.fillStyle = isCurrent ? '#ffffff' : 'rgba(255,255,255,0.85)';
+            ctx.font = `${fontSize}px monospace`;
             ctx.textAlign = 'right';
             ctx.textBaseline = 'middle';
             const dist = typeof jump.distance === 'number' ? `${jump.distance.toFixed(1)} m` : '-';
-            ctx.fillText(dist, cols.distance + 50, centerY);
+            ctx.fillText(dist, cols.distance + 18, centerY);
 
-            // Points (bold, slightly highlighted)
-            ctx.fillStyle = isCurrent ? '#88ddff' : 'rgba(200,220,255,0.9)';
-            ctx.font = `bold ${Math.min(width * 0.042, 17)}px sans-serif`;
+            // -- Points column (monospace, bold, accent) --
+            ctx.fillStyle = isCurrent ? '#88ddff' : 'rgba(200,220,255,0.95)';
+            ctx.font = `bold ${fontSize}px monospace`;
             ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
             const pts = typeof jump.totalPoints === 'number' ? jump.totalPoints.toFixed(1) : '-';
             ctx.fillText(pts, cols.points, centerY);
 
-            // Separator line (subtle)
+            // Separator line between rows
             if (i < jumps.length - 1) {
-                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+                ctx.strokeStyle = 'rgba(255,255,255,0.06)';
                 ctx.lineWidth = 1;
                 ctx.beginPath();
-                ctx.moveTo(padX + 30, rowY + rowHeight);
-                ctx.lineTo(width - padX, rowY + rowHeight);
+                ctx.moveTo(padX + 8, rowY + rowHeight);
+                ctx.lineTo(width - padX - 8, rowY + rowHeight);
                 ctx.stroke();
             }
         }

@@ -132,6 +132,15 @@ export default class Renderer {
     // -------------------------------------------------------------------
 
     /**
+     * Return the effective pixels-per-meter at the current zoom level.
+     * Useful for sizing UI elements or hit-testing in world units.
+     * @returns {number}
+     */
+    getScreenScale() {
+        return this.ppm;
+    }
+
+    /**
      * Return the visible world bounds (in meters) for the current camera.
      * @returns {{left: number, right: number, top: number, bottom: number}}
      */
