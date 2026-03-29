@@ -218,12 +218,12 @@ export default class SkihoppControls {
   // Tap handler (dispatches to current phase)
   // -----------------------------------------------------------------------
 
-  _onTap(_x, _y) {
+  _onTap(x, y) {
     const state = this.game.getState();
 
     switch (state) {
       case GameState.MENU:
-        this._handleMenuTap();
+        this._handleMenuTap(x, y);
         break;
 
       case GameState.READY:
@@ -317,8 +317,19 @@ export default class SkihoppControls {
   // Phase-specific tap handlers
   // -----------------------------------------------------------------------
 
-  _handleMenuTap() {
-    this.game.setState(GameState.READY);
+  _handleMenuTap(x, y) {
+    // Delegate to MenuScreen to check which button was tapped
+    const scene = this.game.currentScene;
+    if (scene && scene.menuScreen) {
+      const buttonId = scene.menuScreen.handleTap(x, y);
+      if (buttonId === 'single' || buttonId === 'competition') {
+        this.game.setState(GameState.READY);
+      }
+      // Other buttons (settings, etc.) are handled by MenuScreen or ignored
+    } else {
+      // Fallback: no menu screen, just start
+      this.game.setState(GameState.READY);
+    }
   }
 
   _handleReadyTap() {
