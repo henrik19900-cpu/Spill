@@ -2411,46 +2411,55 @@ export default class SkihoppRenderer {
     _drawSnowParticles(ctx, w, h) {
         const t = this._time || 0;
         const wind = this._wind || { speed: 0, direction: 0 };
-        // Wind influence on horizontal drift: direction in radians, speed in m/s
-        // Normalize to a gentle screen-space factor
         const windDriftX = Math.cos(wind.direction || 0) * (wind.speed || 0) * 0.012;
+        const particles = this._snowParticles;
 
         ctx.save();
-        for (const p of this._snowParticles) {
-            // Horizontal: base drift + wind (wind affects all, but more for larger particles)
+
+        // Pre-compute snowflake arm angles (avoid recomputing trig per flake)
+        // angles: 0, PI/3, 2PI/3, PI, 4PI/3, 5PI/3
+        const flakeCos = [1, 0.5, -0.5, -1, -0.5, 0.5];
+        const flakeSin = [0, 0.866025, 0.866025, 0, -0.866025, -0.866025];
+
+        // First pass: batch all regular (non-flake) circles
+        ctx.fillStyle = '#ffffff';
+        for (let i = 0; i < particles.length; i++) {
+            const p = particles[i];
+            if (p.isFlake) continue;
             const windFactor = 0.5 + p.depth * 0.5;
             const driftX = p.baseDriftX + windDriftX * windFactor;
-            // Add a gentle wobble
             const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
-
-            // Animate position with wrapping
             const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
             const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
-
             const sx = px * w;
             const sy = py * h;
-
             ctx.globalAlpha = p.alpha;
+            ctx.beginPath();
+            ctx.arc(sx, sy, p.r, 0, Math.PI * 2);
+            ctx.fill();
+        }
 
-            if (p.isFlake) {
-                // Draw a 6-armed snowflake star
-                const armLen = p.r * 1.2;
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 0.6;
-                ctx.beginPath();
-                for (let a = 0; a < 6; a++) {
-                    const angle = (a / 6) * Math.PI * 2;
-                    ctx.moveTo(sx, sy);
-                    ctx.lineTo(sx + Math.cos(angle) * armLen, sy + Math.sin(angle) * armLen);
-                }
-                ctx.stroke();
-            } else {
-                // Simple circular snowflake
-                ctx.beginPath();
-                ctx.arc(sx, sy, p.r, 0, Math.PI * 2);
-                ctx.fillStyle = '#ffffff';
-                ctx.fill();
+        // Second pass: snowflake shapes (fewer particles, set stroke style once)
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 0.6;
+        for (let i = 0; i < particles.length; i++) {
+            const p = particles[i];
+            if (!p.isFlake) continue;
+            const windFactor = 0.5 + p.depth * 0.5;
+            const driftX = p.baseDriftX + windDriftX * windFactor;
+            const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
+            const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
+            const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
+            const sx = px * w;
+            const sy = py * h;
+            const armLen = p.r * 1.2;
+            ctx.globalAlpha = p.alpha;
+            ctx.beginPath();
+            for (let a = 0; a < 6; a++) {
+                ctx.moveTo(sx, sy);
+                ctx.lineTo(sx + flakeCos[a] * armLen, sy + flakeSin[a] * armLen);
             }
+            ctx.stroke();
         }
         ctx.restore();
     }

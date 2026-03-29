@@ -11,18 +11,22 @@
       "maxSpeed": 26,
       "tapBoostPerTap": 0.5,
       "friction": 0.018,
-      "perfectTapWindow": 140
+      "perfectTapWindow": 140,
+      "untuckedSpeedFloor": 0.8,
+      "releaseAeroPenalty": 0.15
     },
     "takeoff": {
       "perfectWindow": 100,
-      "goodWindow": 250,
+      "goodWindow": 200,
       "poorWindow": 500,
       "perfectBonus": 1.0,
       "goodBonus": 0.6,
-      "poorBonus": 0.2
+      "poorBonus": 0.2,
+      "autoLaunchQuality": 0.4
     },
     "flight": {
       "optimalAngle": 33,
+      "defaultAngle": 33,
       "maxAngle": 55,
       "minAngle": 10,
       "liftCoefficient": 0.52,
@@ -30,13 +34,17 @@
       "angleChangeRate": 55,
       "windEffect": 0.5,
       "turbulenceStrength": 0.35,
-      "vStyleLiftBonus": 0.08
+      "vStyleLiftBonus": 0.08,
+      "angleInertia": 0.92,
+      "angleVelocityDecay": 0.95,
+      "autoDriftRate": 3.0
     },
     "landing": {
-      "telemarkWindow": 300,
+      "telemarkWindow": 400,
+      "telemarkAttemptWindow": 1000,
       "telemarkPerfectBonus": 3.0,
       "telemarkGoodBonus": 1.5,
-      "noTelemarkPenalty": -2.0,
+      "noTelemarkPenalty": -1.0,
       "maxSafeLandingAngle": 55
     },
     "scoring": {
@@ -45,6 +53,35 @@
       "basePoints": 60,
       "maxStylePoints": 20,
       "judgeCount": 5
+    },
+    "difficulty": {
+      "easy": {
+        "label": "ENKEL",
+        "takeoffPerfectMs": 150,
+        "takeoffWindowMs": 300,
+        "landingWindowMs": 500,
+        "landingAttemptMs": 1500,
+        "autoLaunchQuality": 0.5,
+        "untuckedSpeedFloor": 0.9
+      },
+      "normal": {
+        "label": "NORMAL",
+        "takeoffPerfectMs": 100,
+        "takeoffWindowMs": 200,
+        "landingWindowMs": 400,
+        "landingAttemptMs": 1000,
+        "autoLaunchQuality": 0.4,
+        "untuckedSpeedFloor": 0.8
+      },
+      "hard": {
+        "label": "VANSKELIG",
+        "takeoffPerfectMs": 60,
+        "takeoffWindowMs": 150,
+        "landingWindowMs": 200,
+        "landingAttemptMs": 500,
+        "autoLaunchQuality": 0.25,
+        "untuckedSpeedFloor": 0.6
+      }
     }
   }
 }
