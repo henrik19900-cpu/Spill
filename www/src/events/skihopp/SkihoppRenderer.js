@@ -435,13 +435,14 @@ export default class SkihoppRenderer {
         const surfaceY = Math.min(firstScreen.y, lastScreen.y);
         const groundGrad = ctx.createLinearGradient(0, surfaceY, 0, h + 50);
         groundGrad.addColorStop(0, '#dce8f8');
-        groundGrad.addColorStop(0.15, '#c8d8ee');
-        groundGrad.addColorStop(0.5, '#a0b8d8');
+        groundGrad.addColorStop(0.1, '#d0e0f2');
+        groundGrad.addColorStop(0.3, '#c0d4ea');
+        groundGrad.addColorStop(0.6, '#a0b8d8');
         groundGrad.addColorStop(1, '#7090b8');
         ctx.fillStyle = groundGrad;
         ctx.fill();
 
-        // --- Subtle blue shadow texture stripes on the snow ---
+        // --- Snow texture: subtle blue shadow ellipses ---
         const rng = seededRandom(2024);
         ctx.save();
         ctx.globalAlpha = 0.08;
@@ -454,6 +455,46 @@ export default class SkihoppRenderer {
             ctx.ellipse(sp1.x, sp1.y, Math.abs(sp2.x - sp1.x) * 0.6, Math.abs(sp2.y - sp1.y) * 0.3 + 4, rng() * 0.3, 0, Math.PI * 2);
             ctx.fillStyle = '#6080b0';
             ctx.fill();
+        }
+        ctx.restore();
+
+        // --- Snow texture: small sparkle dots (crystalline glints) ---
+        const rng2 = seededRandom(4040);
+        const t = this._time || 0;
+        ctx.save();
+        for (let i = 0; i < 50; i++) {
+            const wx = profile[0].x + rng2() * (profile[profile.length - 1].x - profile[0].x);
+            const wy = this.hill.getHeightAtDistance(wx) + 1 + rng2() * 12;
+            const sp = r.worldToScreen(wx, wy);
+            if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) continue;
+            const sparkle = 0.3 + 0.7 * Math.abs(Math.sin(t * (1.5 + rng2() * 2) + rng2() * 6.28));
+            ctx.globalAlpha = 0.15 * sparkle;
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, 1 + rng2() * 1.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // --- Snow drift ridges (subtle wavy highlight lines) ---
+        const rng3 = seededRandom(6060);
+        ctx.save();
+        ctx.globalAlpha = 0.06;
+        ctx.strokeStyle = '#e0ecff';
+        ctx.lineWidth = 1;
+        for (let ridge = 0; ridge < 8; ridge++) {
+            const baseWx = profile[0].x + rng3() * (profile[profile.length - 1].x - profile[0].x);
+            const baseWy = this.hill.getHeightAtDistance(baseWx) + 3 + rng3() * 15;
+            ctx.beginPath();
+            const ridgeLen = 8 + rng3() * 20;
+            for (let j = 0; j <= 10; j++) {
+                const rx = baseWx + (j / 10) * ridgeLen;
+                const ry = baseWy + Math.sin(j * 0.8 + rng3() * 6) * 0.5;
+                const sp = r.worldToScreen(rx, ry);
+                if (j === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
         }
         ctx.restore();
 
@@ -581,26 +622,132 @@ export default class SkihoppRenderer {
     _drawHillSurface(ctx, w, h) {
         const r = this.renderer;
         const profile = this.hill.getProfile();
+        const inrunPts = this.hill.getInrunPoints();
+        const landingPts = this.hill.getLandingPoints();
 
-        // --- Snow surface fill (slightly brighter than ground) ---
+        // --- Inrun: dark side walls flanking the ice track ---
+        const wallThickness = 1.2;
+        // Lower wall
         ctx.beginPath();
         let first = true;
-        for (const pt of profile) {
+        for (const pt of inrunPts) {
+            const sp = r.worldToScreen(pt.x, pt.y + wallThickness);
+            if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+            else ctx.lineTo(sp.x, sp.y);
+        }
+        for (let i = inrunPts.length - 1; i >= 0; i--) {
+            const sp = r.worldToScreen(inrunPts[i].x, inrunPts[i].y + wallThickness + 2.5);
+            ctx.lineTo(sp.x, sp.y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#2a3040';
+        ctx.fill();
+        // Upper wall
+        ctx.beginPath();
+        first = true;
+        for (const pt of inrunPts) {
+            const sp = r.worldToScreen(pt.x, pt.y - wallThickness);
+            if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+            else ctx.lineTo(sp.x, sp.y);
+        }
+        for (let i = inrunPts.length - 1; i >= 0; i--) {
+            const sp = r.worldToScreen(inrunPts[i].x, inrunPts[i].y - wallThickness - 2.5);
+            ctx.lineTo(sp.x, sp.y);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#2a3040';
+        ctx.fill();
+
+        // Orange barrier nets on top of walls
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#ff6600';
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        first = true;
+        for (let i = 0; i < inrunPts.length; i += 4) {
+            const sp = r.worldToScreen(inrunPts[i].x, inrunPts[i].y + wallThickness + 0.3);
+            if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+            else ctx.lineTo(sp.x, sp.y);
+        }
+        ctx.stroke();
+        ctx.beginPath();
+        first = true;
+        for (let i = 0; i < inrunPts.length; i += 4) {
+            const sp = r.worldToScreen(inrunPts[i].x, inrunPts[i].y - wallThickness - 0.3);
+            if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+            else ctx.lineTo(sp.x, sp.y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Net posts every ~8m along the inrun
+        ctx.strokeStyle = '#cc5500';
+        ctx.lineWidth = 1.5;
+        const postStep = Math.max(1, Math.floor(inrunPts.length / 12));
+        for (let i = 0; i < inrunPts.length; i += postStep) {
+            const pt = inrunPts[i];
+            let sp1 = r.worldToScreen(pt.x, pt.y + wallThickness + 0.3);
+            let sp2 = r.worldToScreen(pt.x, pt.y + wallThickness - 0.8);
+            ctx.beginPath(); ctx.moveTo(sp1.x, sp1.y); ctx.lineTo(sp2.x, sp2.y); ctx.stroke();
+            sp1 = r.worldToScreen(pt.x, pt.y - wallThickness - 0.3);
+            sp2 = r.worldToScreen(pt.x, pt.y - wallThickness + 0.8);
+            ctx.beginPath(); ctx.moveTo(sp1.x, sp1.y); ctx.lineTo(sp2.x, sp2.y); ctx.stroke();
+        }
+
+        // Icy blue-white inrun track surface
+        ctx.beginPath();
+        first = true;
+        for (const pt of inrunPts) {
             const sp = r.worldToScreen(pt.x, pt.y);
             if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
             else ctx.lineTo(sp.x, sp.y);
         }
-
-        // Close polygon with a thin strip below the surface (a few pixels)
-        const thickness = 4 * r.ppm; // surface layer thickness in pixels
-        const lastPt = profile[profile.length - 1];
-        const firstPt = profile[0];
-        const lastS = r.worldToScreen(lastPt.x, lastPt.y);
-        const firstS = r.worldToScreen(firstPt.x, firstPt.y);
-        ctx.lineTo(lastS.x, lastS.y + thickness);
-        ctx.lineTo(firstS.x, firstS.y + thickness);
+        const inrunLast = inrunPts[inrunPts.length - 1];
+        const inrunFirst = inrunPts[0];
+        const inrunLastS = r.worldToScreen(inrunLast.x, inrunLast.y);
+        const inrunFirstS = r.worldToScreen(inrunFirst.x, inrunFirst.y);
+        const iceThickness = 2 * r.ppm;
+        ctx.lineTo(inrunLastS.x, inrunLastS.y + iceThickness);
+        ctx.lineTo(inrunFirstS.x, inrunFirstS.y + iceThickness);
         ctx.closePath();
+        const iceGrad = ctx.createLinearGradient(inrunFirstS.x, inrunFirstS.y, inrunLastS.x, inrunLastS.y);
+        iceGrad.addColorStop(0, '#d8eeff');
+        iceGrad.addColorStop(0.3, '#c0ddf8');
+        iceGrad.addColorStop(0.6, '#b8d8f5');
+        iceGrad.addColorStop(1, '#d0e8ff');
+        ctx.fillStyle = iceGrad;
+        ctx.fill();
 
+        // Icy glare streaks
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        const glareStep = Math.max(1, Math.floor(inrunPts.length / 8));
+        for (let i = 0; i < inrunPts.length - 10; i += glareStep) {
+            const p1 = r.worldToScreen(inrunPts[i].x, inrunPts[i].y);
+            const p2 = r.worldToScreen(inrunPts[i + 8].x, inrunPts[i + 8].y);
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // --- Landing slope: white snow surface ---
+        ctx.beginPath();
+        first = true;
+        for (const pt of landingPts) {
+            const sp = r.worldToScreen(pt.x, pt.y);
+            if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+            else ctx.lineTo(sp.x, sp.y);
+        }
+        const landLastS = r.worldToScreen(landingPts[landingPts.length - 1].x, landingPts[landingPts.length - 1].y);
+        const landFirstS = r.worldToScreen(landingPts[0].x, landingPts[0].y);
+        const thickness = 4 * r.ppm;
+        ctx.lineTo(landLastS.x, landLastS.y + thickness);
+        ctx.lineTo(landFirstS.x, landFirstS.y + thickness);
+        ctx.closePath();
         ctx.fillStyle = '#ffffff';
         ctx.fill();
 
@@ -632,6 +779,9 @@ export default class SkihoppRenderer {
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
+        // --- Floodlight poles along the hill ---
+        this._drawFloodlights(ctx, w, h);
+
         // --- Distance markers on landing slope (every 10m) ---
         this._drawDistanceMarkers(ctx);
 
@@ -643,13 +793,75 @@ export default class SkihoppRenderer {
         this._drawJudgesTower(ctx);
     }
 
+    _drawFloodlights(ctx, w, h) {
+        const r = this.renderer;
+        const kp = this.hill.getKPointPosition();
+        const hs = this.hill.getHSPointPosition();
+        if (!kp || !hs) return;
+
+        const polePositions = [
+            { x: kp.x * 0.3, side: 1 },
+            { x: kp.x * 0.65, side: -1 },
+            { x: kp.x * 1.0, side: 1 },
+            { x: hs.x * 0.9, side: -1 },
+        ];
+
+        for (const pole of polePositions) {
+            const surfaceY = this.hill.getHeightAtDistance(pole.x);
+            const poleBaseY = surfaceY + pole.side * 6;
+            const poleHeight = 18;
+            const poleTopY = poleBaseY - poleHeight;
+
+            const base = r.worldToScreen(pole.x, poleBaseY);
+            const top = r.worldToScreen(pole.x, poleTopY);
+            if (base.x < -100 || base.x > w + 100) continue;
+
+            // Pole
+            ctx.beginPath();
+            ctx.moveTo(base.x, base.y);
+            ctx.lineTo(top.x, top.y);
+            ctx.strokeStyle = '#556677';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+
+            // Light fixture bracket
+            ctx.fillStyle = '#778899';
+            ctx.fillRect(top.x - 5, top.y - 2, 10, 4);
+
+            // Light cone
+            const coneTarget = r.worldToScreen(pole.x, surfaceY);
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen';
+            const coneH = Math.abs(coneTarget.y - top.y);
+            const coneGrad = ctx.createRadialGradient(top.x, top.y, 2, top.x, top.y, coneH * 0.9);
+            coneGrad.addColorStop(0, 'rgba(255,255,240,0.35)');
+            coneGrad.addColorStop(0.3, 'rgba(255,255,230,0.12)');
+            coneGrad.addColorStop(0.7, 'rgba(255,255,220,0.04)');
+            coneGrad.addColorStop(1, 'rgba(255,255,220,0)');
+            const coneSpread = coneH * 0.4;
+            ctx.beginPath();
+            ctx.moveTo(top.x - 3, top.y);
+            ctx.lineTo(top.x + 3, top.y);
+            ctx.lineTo(coneTarget.x + coneSpread, coneTarget.y);
+            ctx.lineTo(coneTarget.x - coneSpread, coneTarget.y);
+            ctx.closePath();
+            ctx.fillStyle = coneGrad;
+            ctx.fill();
+            ctx.restore();
+
+            // Bright dot at fixture
+            ctx.beginPath();
+            ctx.arc(top.x, top.y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffee';
+            ctx.fill();
+        }
+    }
+
     _drawDistanceMarkers(ctx) {
         const r = this.renderer;
         const landingPts = this.hill.getLandingPoints();
 
-        // Mark every 10m of horizontal distance
-        for (let dist = 10; dist <= 200; dist += 10) {
-            // Find the surface point closest to this distance
+        for (let dist = 50; dist <= 140; dist += 10) {
             let closest = null;
             let minDiff = Infinity;
             for (const pt of landingPts) {
@@ -662,14 +874,27 @@ export default class SkihoppRenderer {
             if (!closest || minDiff > 2) continue;
 
             const sp = r.worldToScreen(closest.x, closest.y);
+            const angle = this.hill.getAngleAtDistance(closest.x) * Math.PI / 180;
+            const nx = -Math.sin(angle);
+            const ny = Math.cos(angle);
+            const markerLen = 6;
 
-            // Short perpendicular green line
+            // Green perpendicular line
             ctx.beginPath();
-            ctx.moveTo(sp.x - 2, sp.y - 4);
-            ctx.lineTo(sp.x + 2, sp.y + 4);
-            ctx.strokeStyle = '#44aa44';
-            ctx.lineWidth = 1.5;
+            ctx.moveTo(sp.x - nx * markerLen, sp.y + ny * markerLen);
+            ctx.lineTo(sp.x + nx * markerLen, sp.y - ny * markerLen);
+            ctx.strokeStyle = '#33bb33';
+            ctx.lineWidth = 2;
             ctx.stroke();
+
+            // Distance number
+            ctx.save();
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillStyle = '#33bb33';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(String(dist), sp.x + nx * (markerLen + 2), sp.y - ny * (markerLen + 2) - 2);
+            ctx.restore();
         }
     }
 
@@ -678,66 +903,134 @@ export default class SkihoppRenderer {
         if (!pos) return;
 
         const sp = r.worldToScreen(pos.x, pos.y);
+        const angle = this.hill.getAngleAtDistance(pos.x) * Math.PI / 180;
+        const nx = -Math.sin(angle);
+        const ny = Math.cos(angle);
+        const lineLen = 14;
 
-        // Perpendicular line across the slope
-        const lineLen = 8;
+        // Thick perpendicular line
         ctx.beginPath();
-        ctx.moveTo(sp.x - lineLen * 0.4, sp.y - lineLen);
-        ctx.lineTo(sp.x + lineLen * 0.4, sp.y + lineLen);
+        ctx.moveTo(sp.x - nx * lineLen, sp.y + ny * lineLen);
+        ctx.lineTo(sp.x + nx * lineLen, sp.y - ny * lineLen);
         ctx.strokeStyle = color;
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 4;
         ctx.stroke();
 
-        // Label
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillStyle = color;
+        // Glow effect
+        ctx.save();
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = 8;
+        ctx.beginPath();
+        ctx.moveTo(sp.x - nx * lineLen, sp.y + ny * lineLen);
+        ctx.lineTo(sp.x + nx * lineLen, sp.y - ny * lineLen);
+        ctx.strokeStyle = color;
+        ctx.stroke();
+        ctx.restore();
+
+        // Label with background
+        ctx.save();
+        ctx.font = 'bold 13px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(label, sp.x, sp.y - lineLen - 4);
+        ctx.textBaseline = 'bottom';
+        const labelX = sp.x + nx * (lineLen + 4);
+        const labelY = sp.y - ny * (lineLen + 4) - 3;
+        const metrics = ctx.measureText(label);
+        const pad = 3;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(labelX - metrics.width / 2 - pad, labelY - 12 - pad, metrics.width + pad * 2, 14 + pad);
+        ctx.fillStyle = color;
+        ctx.fillText(label, labelX, labelY);
+        ctx.restore();
     }
 
     _drawJudgesTower(ctx) {
         const r = this.renderer;
-
-        // Position the tower near the K-point, offset to the side
         const kp = this.hill.getKPointPosition();
         if (!kp) return;
 
         const towerX = kp.x + 5;
-        const towerY = kp.y - 8; // above the slope
+        const surfaceY = this.hill.getHeightAtDistance(towerX);
+        const numFloors = 6;
+        const floorH = 3;
+        const towerTopY = surfaceY - numFloors * floorH;
 
-        const base = r.worldToScreen(towerX, kp.y);
-        const top = r.worldToScreen(towerX, towerY);
+        const base = r.worldToScreen(towerX, surfaceY + 3);
+        const top = r.worldToScreen(towerX, towerTopY);
 
-        const towerWidth = 10;
-        const floorHeight = (base.y - top.y) / 5;
+        const towerWidth = 14;
+        const towerHeight = base.y - top.y;
+        const floorHeightPx = towerHeight / numFloors;
 
-        // Tower body
-        ctx.fillStyle = '#334455';
-        ctx.fillRect(top.x - towerWidth / 2, top.y, towerWidth, base.y - top.y);
+        // Tower shadow
+        ctx.save();
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = '#000000';
+        ctx.beginPath();
+        ctx.moveTo(base.x - towerWidth / 2, base.y);
+        ctx.lineTo(base.x + towerWidth / 2, base.y);
+        ctx.lineTo(base.x + towerWidth / 2 + 8, base.y + 4);
+        ctx.lineTo(base.x - towerWidth / 2 + 8, base.y + 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
 
-        // Window floors
-        const floorColors = ['#445566', '#556677', '#4a5a6a', '#556677', '#445566'];
-        for (let i = 0; i < 5; i++) {
-            ctx.fillStyle = floorColors[i];
-            ctx.fillRect(
-                top.x - towerWidth / 2 + 1,
-                top.y + i * floorHeight + 1,
-                towerWidth - 2,
-                floorHeight - 2
-            );
-            // Small yellow window
-            ctx.fillStyle = '#ffdd66';
-            ctx.fillRect(
-                top.x - 2,
-                top.y + i * floorHeight + floorHeight * 0.25,
-                4,
-                floorHeight * 0.4
-            );
+        // Tower body (concrete gradient)
+        const bodyGrad = ctx.createLinearGradient(top.x - towerWidth / 2, top.y, top.x + towerWidth / 2, top.y);
+        bodyGrad.addColorStop(0, '#3a4a5a');
+        bodyGrad.addColorStop(0.5, '#4a5a6a');
+        bodyGrad.addColorStop(1, '#334455');
+        ctx.fillStyle = bodyGrad;
+        ctx.fillRect(top.x - towerWidth / 2, top.y, towerWidth, towerHeight);
+
+        // Floors with lit windows
+        const t = this._time || 0;
+        for (let i = 0; i < numFloors; i++) {
+            const floorY = top.y + i * floorHeightPx;
+
+            // Floor divider
+            ctx.fillStyle = '#2a3545';
+            ctx.fillRect(top.x - towerWidth / 2, floorY, towerWidth, 1.5);
+
+            // Two windows per floor
+            const winW = towerWidth * 0.28;
+            const winH = floorHeightPx * 0.5;
+            const winY = floorY + floorHeightPx * 0.25;
+
+            for (let wx = 0; wx < 2; wx++) {
+                const winX = top.x - towerWidth / 2 + 2 + wx * (towerWidth * 0.45);
+
+                // Window frame
+                ctx.fillStyle = '#2a3040';
+                ctx.fillRect(winX - 0.5, winY - 0.5, winW + 1, winH + 1);
+
+                // Warm yellow lit window with flicker
+                const flicker = 0.85 + 0.15 * Math.sin(t * 2.3 + i * 1.7 + wx * 3.1);
+                const warmR = Math.floor(255 * flicker);
+                const warmG = Math.floor(210 * flicker);
+                const warmB = Math.floor(80 * flicker);
+                ctx.fillStyle = `rgb(${warmR},${warmG},${warmB})`;
+                ctx.fillRect(winX, winY, winW, winH);
+
+                // Window glow
+                ctx.save();
+                ctx.globalAlpha = 0.15 * flicker;
+                const glowRad = Math.max(winW, winH) * 1.5;
+                const glowGrad = ctx.createRadialGradient(winX + winW / 2, winY + winH / 2, 1, winX + winW / 2, winY + winH / 2, glowRad);
+                glowGrad.addColorStop(0, `rgb(${warmR},${warmG},${warmB})`);
+                glowGrad.addColorStop(1, 'rgba(255,200,50,0)');
+                ctx.fillStyle = glowGrad;
+                ctx.fillRect(winX - glowRad, winY - glowRad, winW + glowRad * 2, winH + glowRad * 2);
+                ctx.restore();
+            }
         }
 
-        // Roof
+        // Roof / observation deck
         ctx.fillStyle = '#223344';
-        ctx.fillRect(top.x - towerWidth / 2 - 2, top.y - 3, towerWidth + 4, 4);
+        ctx.fillRect(top.x - towerWidth / 2 - 3, top.y - 4, towerWidth + 6, 5);
+        // Railing
+        ctx.strokeStyle = '#556677';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(top.x - towerWidth / 2 - 3, top.y - 7, towerWidth + 6, 3);
     }
 
     // ------------------------------------------------------------------
@@ -749,14 +1042,36 @@ export default class SkihoppRenderer {
 
         const r = this.renderer;
         const sp = r.worldToScreen(js.x, js.y);
-        const ppm = r.ppm; // pixels per meter at current zoom
+        const ppm = r.ppm;
 
-        ctx.save();
-        ctx.translate(sp.x, sp.y);
-
-        const scale = ppm; // 1 meter = this many pixels
+        const scale = ppm;
         const phase = js.phase;
         const bodyAngle = (js.bodyAngle || 0) * Math.PI / 180;
+
+        // --- Motion blur trail during FLIGHT (3 fading afterimages) ---
+        if (phase === GameState.FLIGHT || phase === 'FLIGHT') {
+            if (!this._jumperTrail) this._jumperTrail = [];
+            this._jumperTrail.push({ x: js.x, y: js.y, angle: bodyAngle });
+            if (this._jumperTrail.length > 4) this._jumperTrail.shift();
+
+            const trailCount = Math.min(3, this._jumperTrail.length - 1);
+            for (let i = 0; i < trailCount; i++) {
+                const t = this._jumperTrail[i];
+                const tsp = r.worldToScreen(t.x, t.y);
+                const alpha = (i + 1) / (trailCount + 2) * 0.3;
+                ctx.save();
+                ctx.globalAlpha = alpha;
+                ctx.translate(tsp.x, tsp.y);
+                this._drawJumperFlight(ctx, scale, t.angle);
+                ctx.restore();
+            }
+        } else {
+            this._jumperTrail = [];
+        }
+
+        // --- Draw the main jumper ---
+        ctx.save();
+        ctx.translate(sp.x, sp.y);
 
         if (phase === GameState.INRUN || phase === 'INRUN') {
             this._drawJumperInrun(ctx, scale, bodyAngle);
@@ -765,159 +1080,349 @@ export default class SkihoppRenderer {
         } else if (phase === GameState.LANDING || phase === 'LANDING') {
             this._drawJumperLanding(ctx, scale, bodyAngle);
         } else {
-            // Default: standing pose
             this._drawJumperInrun(ctx, scale, 0);
         }
 
         ctx.restore();
     }
 
-    /** Crouched inrun pose: low body, skis flat. */
+
+    /**
+     * Rounded red helmet with goggles strip (side view).
+     * Origin = centre of head, facing right.
+     */
+    _drawHelmet(ctx, s) {
+        const hr = 0.14 * s;
+
+        // Helmet shell
+        ctx.fillStyle = '#cc2222';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, hr, hr * 1.05, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Highlight
+        ctx.fillStyle = 'rgba(255,120,120,0.35)';
+        ctx.beginPath();
+        ctx.ellipse(-hr * 0.2, -hr * 0.3, hr * 0.4, hr * 0.3, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Goggles strip
+        ctx.fillStyle = '#222222';
+        ctx.beginPath();
+        ctx.ellipse(hr * 0.25, hr * 0.05, hr * 0.55, hr * 0.18, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Lens reflection
+        ctx.fillStyle = 'rgba(100,180,255,0.4)';
+        ctx.beginPath();
+        ctx.ellipse(hr * 0.35, -hr * 0.02, hr * 0.22, hr * 0.10, 0.1, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /**
+     * Dark gray ski with curved-up tip (2.4m long).
+     * Drawn from startX along positive X for the given length.
+     */
+    _drawSki(ctx, s, startX, length) {
+        const thickness = 0.05 * s;
+        const tipLen = 0.2 * s;
+        const tipCurve = 0.12 * s;
+
+        ctx.fillStyle = '#3a3a3a';
+        ctx.strokeStyle = '#2a2a2a';
+        ctx.lineWidth = Math.max(1, 0.02 * s);
+
+        ctx.beginPath();
+        ctx.moveTo(startX, thickness / 2);
+        ctx.lineTo(startX + length - tipLen, thickness / 2);
+        ctx.quadraticCurveTo(
+            startX + length, thickness / 2,
+            startX + length, -tipCurve
+        );
+        ctx.quadraticCurveTo(
+            startX + length - tipLen * 0.3, -tipCurve * 0.3,
+            startX + length - tipLen, -thickness / 2
+        );
+        ctx.lineTo(startX, -thickness / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    }
+
+    /** INRUN: deep crouch, arms tucked behind back, head down. */
     _drawJumperInrun(ctx, s, angle) {
         ctx.rotate(angle);
 
-        // Skis (flat under the jumper)
-        ctx.fillStyle = '#444444';
-        ctx.fillRect(-1.2 * s, -0.05 * s, 2.4 * s, 0.08 * s);
-
-        // Legs (crouched)
-        ctx.fillStyle = '#2244aa';
-        ctx.fillRect(-0.15 * s, -0.5 * s, 0.3 * s, 0.5 * s);
-
-        // Torso (leaning forward, crouched)
+        // --- Skis (2.4m, flat under jumper) ---
         ctx.save();
-        ctx.translate(0, -0.5 * s);
-        ctx.rotate(-0.6); // lean forward
-        ctx.fillStyle = '#2244aa';
-        ctx.fillRect(-0.15 * s, -0.6 * s, 0.3 * s, 0.6 * s);
+        this._drawSki(ctx, s, -1.2 * s, 2.4 * s);
+        ctx.restore();
 
-        // Head
-        ctx.fillStyle = '#cc2222'; // helmet
-        ctx.beginPath();
-        ctx.arc(0, -0.7 * s, 0.15 * s, 0, Math.PI * 2);
-        ctx.fill();
-        // Face
-        ctx.fillStyle = '#ffccaa';
-        ctx.beginPath();
-        ctx.arc(0.05 * s, -0.65 * s, 0.07 * s, 0, Math.PI * 2);
-        ctx.fill();
+        // Articulated crouch: feet at origin
+        const kneeX = -0.05 * s;
+        const kneeY = -0.40 * s;
+        const hipX = 0.05 * s;
+        const hipY = -0.55 * s;
 
+        // Lower leg (shin)
+        ctx.strokeStyle = '#1a3a99';
+        ctx.lineWidth = Math.max(2.5, 0.12 * s);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(kneeX, kneeY);
+        ctx.stroke();
+
+        // Boot
+        ctx.fillStyle = '#222';
+        ctx.fillRect(-0.08 * s, -0.06 * s, 0.18 * s, 0.06 * s);
+
+        // Upper leg (thigh)
+        ctx.strokeStyle = '#1a3a99';
+        ctx.lineWidth = Math.max(2.5, 0.13 * s);
+        ctx.beginPath();
+        ctx.moveTo(kneeX, kneeY);
+        ctx.lineTo(hipX, hipY);
+        ctx.stroke();
+
+        // Torso (leaning forward aggressively)
+        const shoulderX = hipX + 0.50 * s;
+        const shoulderY = hipY - 0.15 * s;
+        ctx.strokeStyle = '#2050bb';
+        ctx.lineWidth = Math.max(3, 0.18 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(shoulderX, shoulderY);
+        ctx.stroke();
+
+        // Suit detail stripe
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = Math.max(1, 0.04 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX + 0.05 * s, hipY - 0.02 * s);
+        ctx.lineTo(shoulderX - 0.05 * s, shoulderY + 0.02 * s);
+        ctx.stroke();
+
+        // Arms tucked behind back
+        ctx.strokeStyle = '#1a3a99';
+        ctx.lineWidth = Math.max(1.5, 0.08 * s);
+        ctx.beginPath();
+        ctx.moveTo(shoulderX - 0.10 * s, shoulderY + 0.05 * s);
+        ctx.lineTo(hipX + 0.10 * s, hipY + 0.10 * s);
+        ctx.lineTo(hipX - 0.15 * s, hipY + 0.15 * s);
+        ctx.stroke();
+
+        // Head (tilted down)
+        ctx.save();
+        ctx.translate(shoulderX + 0.18 * s, shoulderY - 0.03 * s);
+        ctx.rotate(0.25);
+        this._drawHelmet(ctx, s);
         ctx.restore();
     }
 
-    /** V-style flight: skis angled, body leaning forward. */
+    /** FLIGHT: body horizontal at bodyAngle, arms at sides, V-skis (25 deg each). */
     _drawJumperFlight(ctx, s, angle) {
         ctx.rotate(angle);
 
-        // Body leaning forward
-        ctx.save();
+        // Body horizontal. Head left (negative X), feet right (positive X).
+        const hipX = 0;
+        const hipY = 0;
 
         // Torso
-        ctx.fillStyle = '#2244aa';
-        ctx.fillRect(-0.12 * s, -0.15 * s, 0.24 * s, 0.9 * s);
-
-        // Legs trailing behind (downward in rotated frame)
-        ctx.fillStyle = '#2244aa';
-        ctx.fillRect(-0.10 * s, 0.75 * s, 0.20 * s, 0.6 * s);
-
-        // Head (at the front/top)
-        ctx.fillStyle = '#cc2222';
-        ctx.beginPath();
-        ctx.arc(0, -0.25 * s, 0.15 * s, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#ffccaa';
-        ctx.beginPath();
-        ctx.arc(0.06 * s, -0.20 * s, 0.07 * s, 0, Math.PI * 2);
-        ctx.fill();
-
-        // V-style skis
-        ctx.strokeStyle = '#444444';
-        ctx.lineWidth = Math.max(2, 0.06 * s);
+        const torsoLen = 0.55 * s;
+        const shoulderX = hipX - torsoLen;
+        const shoulderY = hipY - 0.03 * s;
+        ctx.strokeStyle = '#2050bb';
+        ctx.lineWidth = Math.max(3, 0.18 * s);
         ctx.lineCap = 'round';
-
-        // Left ski (angled out-left)
         ctx.beginPath();
-        ctx.moveTo(-0.1 * s, 1.3 * s);
-        ctx.lineTo(-0.6 * s, 1.3 * s + 1.2 * s);
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(shoulderX, shoulderY);
         ctx.stroke();
 
-        // Right ski (angled out-right)
+        // Suit stripe
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = Math.max(1, 0.04 * s);
         ctx.beginPath();
-        ctx.moveTo(0.1 * s, 1.3 * s);
-        ctx.lineTo(0.6 * s, 1.3 * s + 1.2 * s);
+        ctx.moveTo(hipX - 0.06 * s, hipY);
+        ctx.lineTo(shoulderX + 0.06 * s, shoulderY);
         ctx.stroke();
 
-        // Arms stretched along body
-        ctx.strokeStyle = '#2244aa';
-        ctx.lineWidth = Math.max(1.5, 0.05 * s);
+        // Legs (extending back from hip)
+        const kneeX = hipX + 0.42 * s;
+        const kneeY = hipY + 0.10 * s;
+        const footX = kneeX + 0.38 * s;
+        const footY = kneeY + 0.05 * s;
+
+        ctx.strokeStyle = '#1a3a99';
+        ctx.lineWidth = Math.max(2.5, 0.12 * s);
         ctx.beginPath();
-        ctx.moveTo(-0.12 * s, 0.2 * s);
-        ctx.lineTo(-0.25 * s, 0.8 * s);
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(kneeX, kneeY);
         ctx.stroke();
+        ctx.lineWidth = Math.max(2, 0.10 * s);
         ctx.beginPath();
-        ctx.moveTo(0.12 * s, 0.2 * s);
-        ctx.lineTo(0.25 * s, 0.8 * s);
+        ctx.moveTo(kneeX, kneeY);
+        ctx.lineTo(footX, footY);
         ctx.stroke();
 
+        // Boot
+        ctx.fillStyle = '#222';
+        ctx.save();
+        ctx.translate(footX, footY);
+        ctx.rotate(Math.atan2(footY - kneeY, footX - kneeX));
+        ctx.fillRect(-0.04 * s, -0.05 * s, 0.14 * s, 0.07 * s);
+        ctx.restore();
+
+        // V-style skis (25 deg spread each)
+        const vAngle = 25 * Math.PI / 180;
+        ctx.save();
+        ctx.translate(footX, footY);
+        ctx.save();
+        ctx.rotate(-vAngle);
+        this._drawSki(ctx, s, -0.1 * s, 2.4 * s);
+        ctx.restore();
+        ctx.save();
+        ctx.rotate(vAngle);
+        this._drawSki(ctx, s, -0.1 * s, 2.4 * s);
+        ctx.restore();
+        ctx.restore();
+
+        // Arms at sides
+        ctx.strokeStyle = '#1a3a99';
+        ctx.lineWidth = Math.max(1.5, 0.08 * s);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(shoulderX + 0.05 * s, shoulderY + 0.05 * s);
+        ctx.lineTo(shoulderX + 0.30 * s, shoulderY + 0.20 * s);
+        ctx.lineTo(hipX - 0.05 * s, hipY + 0.18 * s);
+        ctx.stroke();
+
+        // Glove
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        ctx.arc(hipX - 0.05 * s, hipY + 0.18 * s, 0.04 * s, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Head
+        ctx.save();
+        ctx.translate(shoulderX - 0.18 * s, shoulderY + 0.01 * s);
+        ctx.rotate(0.1);
+        this._drawHelmet(ctx, s);
         ctx.restore();
     }
 
-    /** Telemark landing: one foot forward, one back, arms out. */
+    /** LANDING: telemark -- one leg forward, one back, arms spread wide. */
     _drawJumperLanding(ctx, s, angle) {
         ctx.rotate(angle);
 
-        // Front ski (forward)
-        ctx.fillStyle = '#444444';
-        ctx.fillRect(-1.0 * s, -0.05 * s, 2.0 * s, 0.07 * s);
+        // Upright. Origin at ground contact. ~1.8m tall.
+        const hipX = 0;
+        const hipY = -0.90 * s;
 
-        // Back ski (behind, slightly offset)
-        ctx.fillRect(-0.5 * s, 0.3 * s, 2.0 * s, 0.07 * s);
+        // Front leg (forward, knee slightly bent)
+        const frontFootX = 0.40 * s;
+        const frontFootY = 0;
+        const frontKneeX = 0.20 * s;
+        const frontKneeY = -0.45 * s;
 
-        // Front leg
-        ctx.fillStyle = '#2244aa';
-        ctx.save();
-        ctx.translate(0.3 * s, 0);
-        ctx.rotate(-0.15);
-        ctx.fillRect(-0.08 * s, -0.7 * s, 0.16 * s, 0.7 * s);
-        ctx.restore();
-
-        // Back leg
-        ctx.fillStyle = '#2244aa';
-        ctx.save();
-        ctx.translate(-0.2 * s, 0.3 * s);
-        ctx.rotate(0.15);
-        ctx.fillRect(-0.08 * s, -0.7 * s, 0.16 * s, 0.7 * s);
-        ctx.restore();
-
-        // Torso (upright)
-        ctx.fillStyle = '#2244aa';
-        ctx.fillRect(-0.12 * s, -1.3 * s, 0.24 * s, 0.7 * s);
-
-        // Arms outstretched
-        ctx.strokeStyle = '#2244aa';
-        ctx.lineWidth = Math.max(2, 0.06 * s);
+        ctx.strokeStyle = '#1a3a99';
+        ctx.lineWidth = Math.max(2.5, 0.12 * s);
         ctx.lineCap = 'round';
-        // Left arm
         ctx.beginPath();
-        ctx.moveTo(-0.12 * s, -1.0 * s);
-        ctx.lineTo(-0.7 * s, -0.8 * s);
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(frontKneeX, frontKneeY);
         ctx.stroke();
-        // Right arm
         ctx.beginPath();
-        ctx.moveTo(0.12 * s, -1.0 * s);
-        ctx.lineTo(0.7 * s, -0.8 * s);
+        ctx.moveTo(frontKneeX, frontKneeY);
+        ctx.lineTo(frontFootX, frontFootY);
+        ctx.stroke();
+        ctx.fillStyle = '#222';
+        ctx.fillRect(frontFootX - 0.06 * s, -0.06 * s, 0.16 * s, 0.06 * s);
+
+        // Back leg (behind, deeper knee bend -- telemark)
+        const backFootX = -0.35 * s;
+        const backFootY = -0.10 * s;
+        const backKneeX = -0.15 * s;
+        const backKneeY = -0.50 * s;
+
+        ctx.strokeStyle = '#1a3a99';
+        ctx.lineWidth = Math.max(2.5, 0.12 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(backKneeX, backKneeY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(backKneeX, backKneeY);
+        ctx.lineTo(backFootX, backFootY);
+        ctx.stroke();
+        ctx.fillStyle = '#222';
+        ctx.fillRect(backFootX - 0.06 * s, backFootY - 0.04 * s, 0.16 * s, 0.06 * s);
+
+        // Front ski
+        ctx.save();
+        ctx.translate(frontFootX, frontFootY);
+        this._drawSki(ctx, s, -0.6 * s, 2.4 * s);
+        ctx.restore();
+
+        // Back ski
+        ctx.save();
+        ctx.translate(backFootX, backFootY);
+        this._drawSki(ctx, s, -0.6 * s, 2.4 * s);
+        ctx.restore();
+
+        // Torso (mostly upright, slight forward lean)
+        const shoulderX = hipX + 0.05 * s;
+        const shoulderY = hipY - 0.55 * s;
+        ctx.strokeStyle = '#2050bb';
+        ctx.lineWidth = Math.max(3, 0.18 * s);
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(shoulderX, shoulderY);
         ctx.stroke();
 
-        // Head
-        ctx.fillStyle = '#cc2222';
+        // Suit stripe
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = Math.max(1, 0.04 * s);
         ctx.beginPath();
-        ctx.arc(0, -1.45 * s, 0.15 * s, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#ffccaa';
+        ctx.moveTo(hipX, hipY + 0.05 * s);
+        ctx.lineTo(shoulderX, shoulderY + 0.05 * s);
+        ctx.stroke();
+
+        // Arms spread wide
+        ctx.strokeStyle = '#1a3a99';
+        ctx.lineWidth = Math.max(2, 0.09 * s);
+        ctx.lineCap = 'round';
+        // Forward-up arm
         ctx.beginPath();
-        ctx.arc(0.06 * s, -1.40 * s, 0.07 * s, 0, Math.PI * 2);
+        ctx.moveTo(shoulderX, shoulderY);
+        ctx.lineTo(shoulderX + 0.30 * s, shoulderY - 0.10 * s);
+        ctx.lineTo(shoulderX + 0.55 * s, shoulderY - 0.25 * s);
+        ctx.stroke();
+        // Backward-up arm
+        ctx.beginPath();
+        ctx.moveTo(shoulderX, shoulderY);
+        ctx.lineTo(shoulderX - 0.30 * s, shoulderY - 0.08 * s);
+        ctx.lineTo(shoulderX - 0.55 * s, shoulderY - 0.22 * s);
+        ctx.stroke();
+
+        // Gloves
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        ctx.arc(shoulderX + 0.55 * s, shoulderY - 0.25 * s, 0.04 * s, 0, Math.PI * 2);
         ctx.fill();
+        ctx.beginPath();
+        ctx.arc(shoulderX - 0.55 * s, shoulderY - 0.22 * s, 0.04 * s, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Head (upright)
+        ctx.save();
+        ctx.translate(shoulderX + 0.02 * s, shoulderY - 0.20 * s);
+        this._drawHelmet(ctx, s);
+        ctx.restore();
     }
+
 
     // ------------------------------------------------------------------
     // 6. Spectators
