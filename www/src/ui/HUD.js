@@ -1,8 +1,14 @@
 /**
  * HUD.js - TV broadcast-style overlay for Vinter-OL Skihopp
  *
- * Minimal, clean design inspired by real ski jumping broadcasts.
- * Phase-specific rendering: INRUN, TAKEOFF, FLIGHT, LANDING.
+ * Polished, phase-specific rendering inspired by real ski jumping broadcasts.
+ * Phases: INRUN, TAKEOFF, FLIGHT, LANDING.
+ *
+ * Data consumed from hudData:
+ *   speed, distance, bodyAngle, windSpeed, windDirection,
+ *   phase, takeoffQuality, landingQuality, kPoint,
+ *   feedback { flash, takeoffRing, tuckGlow, landingBar },
+ *   heightAboveGround, isTucked
  */
 
 export default class HUD {
@@ -11,6 +17,10 @@ export default class HUD {
         this._displayedDistance = 0;
         this._landingFlashTimer = 0;
         this._landingPhaseEntered = false;
+        this._takeoffFlashTimer = 0;
+        this._takeoffFlashColor = null;
+        this._prevPhase = null;
+        this._takeoffPhaseTime = 0;
     }
 
     // -------------------------------------------------------------------
@@ -35,6 +45,10 @@ export default class HUD {
             phase: 'INRUN',
             takeoffQuality: null,
             landingQuality: 0,
+            kPoint: 0,
+            feedback: {},
+            heightAboveGround: 0,
+            isTucked: false,
             ...hudData,
         };
 
@@ -43,16 +57,39 @@ export default class HUD {
         this._displayedDistance += distDelta * 0.15;
         if (Math.abs(distDelta) < 0.05) this._displayedDistance = d.distance;
 
-        // Track landing phase entry for flash timer
-        if (d.phase === 'LANDING' && !this._landingPhaseEntered) {
-            this._landingPhaseEntered = true;
-            this._landingFlashTimer = 0;
+        // Track phase transitions
+        if (d.phase !== this._prevPhase) {
+            if (d.phase === 'TAKEOFF') {
+                this._takeoffPhaseTime = 0;
+                this._takeoffFlashTimer = 0;
+                this._takeoffFlashColor = null;
+            }
+            if (d.phase === 'LANDING') {
+                this._landingPhaseEntered = true;
+                this._landingFlashTimer = 0;
+            }
+            this._prevPhase = d.phase;
+        }
+
+        if (d.phase === 'TAKEOFF') {
+            this._takeoffPhaseTime += 0.016;
         }
         if (d.phase === 'LANDING') {
             this._landingFlashTimer += 0.016;
         }
         if (d.phase !== 'LANDING') {
             this._landingPhaseEntered = false;
+        }
+
+        // Detect takeoff quality flash
+        if (d.phase === 'TAKEOFF' && d.takeoffQuality !== null && !this._takeoffFlashColor) {
+            if (d.takeoffQuality >= 0.9) this._takeoffFlashColor = '#44ff88';
+            else if (d.takeoffQuality >= 0.5) this._takeoffFlashColor = '#ffdd44';
+            else this._takeoffFlashColor = '#ff5544';
+            this._takeoffFlashTimer = 0;
+        }
+        if (this._takeoffFlashColor) {
+            this._takeoffFlashTimer += 0.016;
         }
 
         // Phase-specific rendering
@@ -70,468 +107,13 @@ export default class HUD {
                 this._renderLanding(ctx, width, height, d);
                 break;
         }
+
+        // Phase pill (top-center)
+        this._renderPhasePill(ctx, width, height, d);
     }
 
     // -------------------------------------------------------------------
-    // INRUN: Speed display + speed bar
-    // -------------------------------------------------------------------
-
-    _renderInrun(ctx, width, height, d) {
-        // Bottom-left: large speed number
-        const speedKmh = Math.round(d.speed * 3.6);
-        const x = 24;
-        const y = height - 60;
-
-        ctx.save();
-
-        // Semi-transparent background panel
-        const panelW = 110;
-        const panelH = 64;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        this._roundRect(ctx, x - 8, y - panelH + 10, panelW, panelH, 6);
-        ctx.fill();
-
-        // Large speed number
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-        ctx.shadowBlur = 4;
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 42px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'alphabetic';
-        ctx.fillText(String(speedKmh), x, y);
-
-        // "km/h" label
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-        ctx.font = '14px sans-serif';
-        const numWidth = ctx.measureText(String(speedKmh)).width;
-        ctx.font = 'bold 42px sans-serif';
-        const actualNumWidth = ctx.measureText(String(speedKmh)).width;
-        ctx.font = '14px sans-serif';
-        ctx.fillText('km/h', x + actualNumWidth + 6, y);
-
-        ctx.restore();
-
-        // Bottom: thin speed bar
-        this._renderSpeedBar(ctx, width, height, d);
-    }
-
-    _renderSpeedBar(ctx, width, height, d) {
-        const barY = height - 16;
-        const barH = 4;
-        const barMargin = 20;
-        const barW = width - barMargin * 2;
-        const maxSpeedKmh = 95; // ~26 m/s max inrun speed
-        const speedKmh = d.speed * 3.6;
-        const fill = Math.min(speedKmh / maxSpeedKmh, 1);
-
-        ctx.save();
-
-        // Track background
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-        this._roundRect(ctx, barMargin, barY, barW, barH, 2);
-        ctx.fill();
-
-        // Filled portion
-        if (fill > 0.01) {
-            const grad = ctx.createLinearGradient(barMargin, 0, barMargin + barW, 0);
-            grad.addColorStop(0, 'rgba(100, 180, 255, 0.8)');
-            grad.addColorStop(0.7, 'rgba(100, 220, 255, 0.9)');
-            grad.addColorStop(1, 'rgba(255, 255, 255, 1.0)');
-            ctx.fillStyle = grad;
-            this._roundRect(ctx, barMargin, barY, barW * fill, barH, 2);
-            ctx.fill();
-        }
-
-        ctx.restore();
-    }
-
-    // -------------------------------------------------------------------
-    // TAKEOFF: Pulsing target circle + "SATS!" text
-    // -------------------------------------------------------------------
-
-    _renderTakeoff(ctx, width, height, d) {
-        const cx = width / 2;
-        const cy = height * 0.4;
-
-        ctx.save();
-
-        // Pulsing shrinking circle
-        const pulse = 0.5 + Math.sin(this._time * 12) * 0.5; // fast pulse
-        const baseR = 80;
-        const minR = 20;
-        // Circle shrinks over the takeoff phase (brief, so use time-based)
-        const shrinkT = Math.min(this._time * 4 % 1, 1);
-        const r = baseR - (baseR - minR) * pulse * 0.3;
-
-        // Outer ring - white with glow
-        ctx.shadowColor = 'rgba(255, 255, 255, 0.6)';
-        ctx.shadowBlur = 20;
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.5 + pulse * 0.5})`;
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Inner ring
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.3 + pulse * 0.3})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Center dot
-        ctx.fillStyle = `rgba(255, 255, 255, ${0.6 + pulse * 0.4})`;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // "SATS!" text - bold, pulsing
-        const textScale = 1.0 + Math.sin(this._time * 10) * 0.08;
-        ctx.save();
-        ctx.translate(cx, cy + r + 40);
-        ctx.scale(textScale, textScale);
-        ctx.translate(-cx, -(cy + r + 40));
-
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-        ctx.shadowBlur = 6;
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 36px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('SATS!', cx, cy + r + 40);
-        ctx.restore();
-
-        ctx.restore();
-    }
-
-    // -------------------------------------------------------------------
-    // FLIGHT: Distance, wind, body angle gauge
-    // -------------------------------------------------------------------
-
-    _renderFlight(ctx, width, height, d) {
-        // Top-left: live distance
-        this._renderFlightDistance(ctx, width, height, d);
-        // Top-right: wind indicator
-        this._renderFlightWind(ctx, width, height, d);
-        // Bottom-right: body angle gauge
-        this._renderFlightAngleGauge(ctx, width, height, d);
-    }
-
-    _renderFlightDistance(ctx, width, height, d) {
-        const x = 20;
-        const y = 48;
-
-        ctx.save();
-
-        // Background panel
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-        this._roundRect(ctx, x - 6, y - 28, 170, 44, 6);
-        ctx.fill();
-
-        // Distance number
-        const dist = this._displayedDistance.toFixed(1);
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-        ctx.shadowBlur = 4;
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 32px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(dist, x, y);
-
-        // "m" suffix
-        ctx.shadowBlur = 0;
-        ctx.font = 'bold 32px sans-serif';
-        const numW = ctx.measureText(dist).width;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-        ctx.font = 'bold 20px sans-serif';
-        ctx.fillText(' m', x + numW, y + 2);
-
-        // K-point reference indicator
-        if (d.kPoint && this._displayedDistance > 0) {
-            const diff = this._displayedDistance - d.kPoint;
-            const kText = diff >= 0 ? `K +${diff.toFixed(1)}` : `K ${diff.toFixed(1)}`;
-            const kColor = diff >= 0 ? '#44ff88' : '#ff6644';
-            ctx.fillStyle = kColor;
-            ctx.font = 'bold 16px sans-serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(kText, x, y + 24);
-        }
-
-        // Speed in flight
-        if (d.speed > 0) {
-            const speedKmh = Math.round(d.speed * 3.6);
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.font = '14px sans-serif';
-            ctx.textAlign = 'left';
-            ctx.fillText(`${speedKmh} km/h`, x, y + 42);
-        }
-
-        ctx.restore();
-    }
-
-    _renderFlightWind(ctx, width, height, d) {
-        const x = width - 20;
-        const y = 48;
-
-        ctx.save();
-
-        // Background panel
-        const panelW = 100;
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-        this._roundRect(ctx, x - panelW + 6, y - 28, panelW, 44, 6);
-        ctx.fill();
-
-        // Wind arrow
-        const arrowX = x - panelW + 22;
-        const arrowY = y;
-        const windDir = (d.windDirection || 0) * (Math.PI / 180);
-        const arrowLen = 12;
-
-        ctx.save();
-        ctx.translate(arrowX, arrowY);
-        ctx.rotate(windDir);
-
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(-arrowLen, 0);
-        ctx.lineTo(arrowLen, 0);
-        ctx.stroke();
-
-        // Arrowhead
-        ctx.beginPath();
-        ctx.moveTo(arrowLen, 0);
-        ctx.lineTo(arrowLen - 5, -4);
-        ctx.moveTo(arrowLen, 0);
-        ctx.lineTo(arrowLen - 5, 4);
-        ctx.stroke();
-
-        ctx.restore();
-
-        // Wind speed text
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-        ctx.shadowBlur = 3;
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 18px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(d.windSpeed.toFixed(1), x - 4, y - 6);
-
-        // "m/s" label
-        ctx.shadowBlur = 0;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.font = '12px sans-serif';
-        ctx.fillText('m/s', x - 4, y + 10);
-
-        ctx.restore();
-    }
-
-    _renderFlightAngleGauge(ctx, width, height, d) {
-        const cx = width - 70;
-        const cy = height - 80;
-        const r = 48;
-
-        // Angle range: 10 to 55 degrees
-        const minDeg = 10;
-        const maxDeg = 55;
-        // Arc: upper semi-circle, left to right
-        const arcStart = Math.PI;  // 180 deg (left)
-        const arcEnd = 0;          // 0 deg (right)
-        const arcSweep = Math.PI;  // 180 degrees of arc
-
-        ctx.save();
-
-        // Background
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-        ctx.beginPath();
-        ctx.arc(cx, cy, r + 6, Math.PI, 0, false);
-        ctx.lineTo(cx + r + 6, cy + 8);
-        ctx.lineTo(cx - r - 6, cy + 8);
-        ctx.closePath();
-        ctx.fill();
-
-        // Track arc (dim)
-        ctx.beginPath();
-        ctx.arc(cx, cy, r - 4, arcStart, arcEnd, false);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.lineWidth = 8;
-        ctx.lineCap = 'butt';
-        ctx.stroke();
-
-        // Green zone: 30-40 degrees
-        const greenStartFrac = (30 - minDeg) / (maxDeg - minDeg);
-        const greenEndFrac = (40 - minDeg) / (maxDeg - minDeg);
-        const greenStart = arcStart + greenStartFrac * arcSweep;
-        const greenEnd = arcStart + greenEndFrac * arcSweep;
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, r - 4, greenStart, greenEnd, false);
-        ctx.strokeStyle = 'rgba(0, 200, 100, 0.6)';
-        ctx.lineWidth = 8;
-        ctx.stroke();
-
-        // Bright sweet spot: 33-37 degrees
-        const sweetStartFrac = (33 - minDeg) / (maxDeg - minDeg);
-        const sweetEndFrac = (37 - minDeg) / (maxDeg - minDeg);
-        const sweetStart = arcStart + sweetStartFrac * arcSweep;
-        const sweetEnd = arcStart + sweetEndFrac * arcSweep;
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, r - 4, sweetStart, sweetEnd, false);
-        ctx.strokeStyle = 'rgba(0, 255, 120, 0.9)';
-        ctx.lineWidth = 8;
-        ctx.stroke();
-
-        // Tick marks at 10, 20, 30, 40, 50
-        const ticks = [10, 20, 30, 40, 50];
-        for (const tickVal of ticks) {
-            const frac = (tickVal - minDeg) / (maxDeg - minDeg);
-            const angle = arcStart + frac * arcSweep;
-            const inner = r - 12;
-            const outer = r - 6;
-            ctx.beginPath();
-            ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
-            ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-            ctx.lineWidth = 1.5;
-            ctx.lineCap = 'round';
-            ctx.stroke();
-        }
-
-        // Needle - current body angle
-        const clampedAngle = Math.max(minDeg, Math.min(maxDeg, d.bodyAngle));
-        const angleFrac = (clampedAngle - minDeg) / (maxDeg - minDeg);
-        const needleAngle = arcStart + angleFrac * arcSweep;
-        const needleLen = r - 14;
-        const nx = cx + Math.cos(needleAngle) * needleLen;
-        const ny = cy + Math.sin(needleAngle) * needleLen;
-
-        // Color: green if in optimal zone, white otherwise
-        const inGreen = d.bodyAngle >= 30 && d.bodyAngle <= 40;
-        const needleColor = inGreen ? '#44ff88' : '#ffffff';
-
-        ctx.shadowColor = needleColor;
-        ctx.shadowBlur = 4;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(nx, ny);
-        ctx.strokeStyle = needleColor;
-        ctx.lineWidth = 2.5;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        // Needle tip
-        ctx.beginPath();
-        ctx.arc(nx, ny, 3, 0, Math.PI * 2);
-        ctx.fillStyle = needleColor;
-        ctx.fill();
-
-        // Center pivot
-        ctx.beginPath();
-        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-        ctx.fillStyle = '#444444';
-        ctx.fill();
-
-        // Angle text below gauge
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-        ctx.shadowBlur = 3;
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 18px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`${d.bodyAngle.toFixed(0)}°`, cx, cy + 16);
-
-        ctx.restore();
-    }
-
-    // -------------------------------------------------------------------
-    // LANDING: Flash landing quality + frozen distance
-    // -------------------------------------------------------------------
-
-    _renderLanding(ctx, width, height, d) {
-        // Show frozen distance (top-left, same position as flight)
-        this._renderFlightDistance(ctx, width, height, d);
-
-        // "TAP!" prompt if landing quality not yet set (player hasn't tapped)
-        if (d.landingQuality === 0 && this._landingFlashTimer < 0.3) {
-            const pulse = 0.6 + 0.4 * Math.sin(this._time * 15);
-            ctx.save();
-            ctx.globalAlpha = pulse;
-            ctx.fillStyle = '#44ff88';
-            ctx.font = 'bold 48px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.shadowColor = '#44ff88';
-            ctx.shadowBlur = 20;
-            ctx.fillText('TAP!', width / 2, height * 0.5);
-            ctx.restore();
-        }
-
-        // Brief landing quality flash (visible for ~2 seconds)
-        if (this._landingFlashTimer < 2.0) {
-            const alpha = this._landingFlashTimer < 1.5
-                ? 1.0
-                : 1.0 - (this._landingFlashTimer - 1.5) / 0.5; // fade out last 0.5s
-
-            ctx.save();
-
-            const cx = width / 2;
-            const cy = height * 0.4;
-
-            // Determine landing text and color
-            let text, color;
-            if (d.landingQuality >= 0.9) {
-                text = 'TELEMARK!';
-                color = '#44ff88'; // bright green
-            } else if (d.landingQuality >= 0.6) {
-                text = 'Bra!';
-                color = '#ffdd44'; // yellow
-            } else if (d.landingQuality >= 0.3) {
-                text = 'OK';
-                color = '#ffaa44'; // orange
-            } else {
-                text = 'Svakt';
-                color = '#ff6644'; // red-orange
-            }
-
-            ctx.globalAlpha = Math.max(0, alpha);
-
-            // Background pill
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            const pillW = 200;
-            const pillH = 56;
-            this._roundRect(ctx, cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2);
-            ctx.fill();
-
-            // Scale-in effect on first frames
-            const scaleT = Math.min(this._landingFlashTimer / 0.15, 1);
-            const scale = 0.6 + 0.4 * scaleT;
-
-            ctx.save();
-            ctx.translate(cx, cy);
-            ctx.scale(scale, scale);
-            ctx.translate(-cx, -cy);
-
-            // Text
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-            ctx.shadowBlur = 6;
-            ctx.fillStyle = color;
-            ctx.font = 'bold 34px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(text, cx, cy);
-
-            ctx.restore();
-            ctx.restore();
-        }
-    }
-
-    // -------------------------------------------------------------------
-    // Helpers
+    // Shared helpers: panels, pills, text
     // -------------------------------------------------------------------
 
     _roundRect(ctx, x, y, w, h, r) {
@@ -546,5 +128,606 @@ export default class HUD {
         ctx.lineTo(x, y + r);
         ctx.quadraticCurveTo(x, y, x + r, y);
         ctx.closePath();
+    }
+
+    _drawPanel(ctx, x, y, w, h, r = 8) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        this._roundRect(ctx, x, y, w, h, r);
+        ctx.fill();
+    }
+
+    _setShadow(ctx, blur = 4) {
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        ctx.shadowBlur = blur;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 1;
+    }
+
+    _clearShadow(ctx) {
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+    }
+
+    _renderPhasePill(ctx, width, _height, d) {
+        const labels = {
+            INRUN: { text: 'TILLØP', color: '#3388ff' },
+            TAKEOFF: { text: 'SATS', color: '#ff8833' },
+            FLIGHT: { text: 'SVEV', color: '#00cccc' },
+            LANDING: { text: 'LANDING', color: '#44cc66' },
+        };
+        const info = labels[d.phase];
+        if (!info) return;
+
+        ctx.save();
+        const pillH = 28;
+        ctx.font = 'bold 14px sans-serif';
+        const tw = ctx.measureText(info.text).width;
+        const pillW = tw + 24;
+        const px = (width - pillW) / 2;
+        const py = 12;
+
+        // Pill background
+        ctx.fillStyle = info.color;
+        ctx.globalAlpha = 0.85;
+        this._roundRect(ctx, px, py, pillW, pillH, pillH / 2);
+        ctx.fill();
+
+        // Pill text
+        ctx.globalAlpha = 1.0;
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        this._setShadow(ctx, 2);
+        ctx.fillText(info.text, width / 2, py + pillH / 2);
+        this._clearShadow(ctx);
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
+    // INRUN: Speed + tuck indicator + speed bar
+    // -------------------------------------------------------------------
+
+    _renderInrun(ctx, width, height, d) {
+        const speedKmh = Math.round(d.speed * 3.6);
+        const x = 24;
+        const y = height - 80;
+
+        ctx.save();
+
+        // Dark panel bottom-left
+        const panelW = 140;
+        const panelH = 68;
+        this._drawPanel(ctx, x - 10, y - 10, panelW, panelH, 10);
+
+        // Large speed number
+        this._setShadow(ctx, 5);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 46px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(speedKmh), x, y + panelH / 2 - 8);
+
+        // "km/h" unit
+        ctx.font = 'bold 46px sans-serif';
+        const numW = ctx.measureText(String(speedKmh)).width;
+        this._clearShadow(ctx);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('km/h', x + numW + 6, y + panelH / 2 - 6);
+
+        ctx.restore();
+
+        // Tuck indicator bar (right of speed panel)
+        this._renderTuckIndicator(ctx, x + panelW + 12, y - 10, height, d);
+
+        // Speed progress bar at bottom
+        this._renderSpeedBar(ctx, width, height, d);
+    }
+
+    _renderTuckIndicator(ctx, x, y, _height, d) {
+        ctx.save();
+        const barW = 8;
+        const barH = 68;
+
+        // Background
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        this._roundRect(ctx, x, y, barW, barH, 4);
+        ctx.fill();
+
+        // Tuck glow alpha from feedback or isTucked flag
+        const fb = d.feedback || {};
+        const tuckAlpha = fb.tuckGlow ? fb.tuckGlow.alpha : (d.isTucked ? 1.0 : 0.0);
+        const fillColor = tuckAlpha > 0.3 ? `rgba(68, 255, 100, ${tuckAlpha})` : `rgba(255, 80, 60, ${0.7 - tuckAlpha * 0.5})`;
+        const fillH = barH * Math.max(0.08, tuckAlpha);
+
+        ctx.fillStyle = fillColor;
+        this._roundRect(ctx, x, y + barH - fillH, barW, fillH, 4);
+        ctx.fill();
+
+        // Label
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('TUCK', x + barW / 2, y - 2);
+
+        ctx.restore();
+    }
+
+    _renderSpeedBar(ctx, width, height, d) {
+        const barY = height - 18;
+        const barH = 6;
+        const barMargin = 24;
+        const barW = width - barMargin * 2;
+        const maxSpeedKmh = 95;
+        const speedKmh = d.speed * 3.6;
+        const fill = Math.min(speedKmh / maxSpeedKmh, 1);
+
+        ctx.save();
+
+        // Track background
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
+        this._roundRect(ctx, barMargin, barY, barW, barH, 3);
+        ctx.fill();
+
+        // Filled portion
+        if (fill > 0.01) {
+            const grad = ctx.createLinearGradient(barMargin, 0, barMargin + barW, 0);
+            grad.addColorStop(0, 'rgba(80, 160, 255, 0.7)');
+            grad.addColorStop(0.6, 'rgba(100, 220, 255, 0.9)');
+            grad.addColorStop(1, 'rgba(255, 255, 255, 1.0)');
+            ctx.fillStyle = grad;
+            this._roundRect(ctx, barMargin, barY, barW * fill, barH, 3);
+            ctx.fill();
+
+            // Glow at leading edge
+            ctx.shadowColor = 'rgba(130, 210, 255, 0.6)';
+            ctx.shadowBlur = 8;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(barMargin + barW * fill, barY + barH / 2, 3, 0, Math.PI * 2);
+            ctx.fill();
+            this._clearShadow(ctx);
+        }
+
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
+    // TAKEOFF: Shrinking timing ring + "SATS!" + quality flash
+    // -------------------------------------------------------------------
+
+    _renderTakeoff(ctx, width, height, d) {
+        const cx = width / 2;
+        const cy = height * 0.38;
+        const fb = d.feedback || {};
+
+        ctx.save();
+
+        // Ring progress: 0 -> 1 over the takeoff window
+        const ringProgress = fb.takeoffRing ? fb.takeoffRing.progress : this._takeoffPhaseTime * 5;
+        const p = Math.min(ringProgress, 1);
+
+        // Ring shrinks from large to small
+        const maxR = Math.min(width, height) * 0.22;
+        const minR = 18;
+        const r = maxR - (maxR - minR) * p;
+
+        // Green target zone in center (always visible)
+        const targetR = minR + 8;
+        ctx.strokeStyle = 'rgba(68, 255, 100, 0.35)';
+        ctx.lineWidth = 14;
+        ctx.beginPath();
+        ctx.arc(cx, cy, targetR, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Brighter center dot of the target
+        ctx.fillStyle = 'rgba(68, 255, 100, 0.2)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, targetR - 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // The shrinking ring
+        const pulse = 0.5 + Math.sin(this._time * 14) * 0.5;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.6 + pulse * 0.4})`;
+        ctx.lineWidth = 4;
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        this._clearShadow(ctx);
+
+        // Inner thin ring
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 + pulse * 0.2})`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.6, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Center crosshair dot
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + pulse * 0.5})`;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // "SATS!" text - fast pulsing
+        const textPulse = 1.0 + Math.sin(this._time * 12) * 0.1;
+        ctx.save();
+        ctx.translate(cx, cy + r + 44);
+        ctx.scale(textPulse, textPulse);
+        ctx.translate(-cx, -(cy + r + 44));
+
+        this._setShadow(ctx, 8);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 38px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('SATS!', cx, cy + r + 44);
+        ctx.restore();
+
+        // Quality flash after tap
+        if (this._takeoffFlashColor && this._takeoffFlashTimer < 0.6) {
+            const fAlpha = this._takeoffFlashTimer < 0.3
+                ? 1.0
+                : 1.0 - (this._takeoffFlashTimer - 0.3) / 0.3;
+            ctx.globalAlpha = Math.max(0, fAlpha);
+            // Full-screen flash tint
+            ctx.fillStyle = this._takeoffFlashColor;
+            ctx.globalAlpha = Math.max(0, fAlpha) * 0.18;
+            ctx.fillRect(0, 0, width, height);
+            ctx.globalAlpha = 1.0;
+        }
+
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
+    // FLIGHT: Distance, K-ref, speed, height, wind, angle gauge
+    // -------------------------------------------------------------------
+
+    _renderFlight(ctx, width, height, d) {
+        this._renderFlightInfoPanel(ctx, width, height, d);
+        this._renderFlightWind(ctx, width, height, d);
+        this._renderFlightAngleGauge(ctx, width, height, d);
+    }
+
+    _renderFlightInfoPanel(ctx, width, _height, d) {
+        const x = 20;
+        const y = 48;
+
+        ctx.save();
+
+        // Compute layout heights
+        let panelH = 52;
+        if (d.kPoint && this._displayedDistance > 0) panelH += 22;
+        if (d.speed > 0) panelH += 20;
+        if (d.heightAboveGround > 0) panelH += 20;
+
+        // Background panel
+        this._drawPanel(ctx, x - 8, y - 32, 180, panelH, 10);
+
+        // Distance: large bold
+        const dist = this._displayedDistance.toFixed(1);
+        this._setShadow(ctx, 5);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 36px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(dist, x, y);
+
+        // "m" suffix
+        ctx.font = 'bold 36px sans-serif';
+        const numW = ctx.measureText(dist).width;
+        this._clearShadow(ctx);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillText(' m', x + numW, y + 2);
+
+        let lineY = y + 24;
+
+        // K-point reference
+        if (d.kPoint && this._displayedDistance > 0) {
+            const diff = this._displayedDistance - d.kPoint;
+            const kText = diff >= 0 ? `K +${diff.toFixed(1)}` : `K ${diff.toFixed(1)}`;
+            const kColor = diff >= 0 ? '#44ff88' : '#ff5544';
+            ctx.fillStyle = kColor;
+            ctx.font = 'bold 18px sans-serif';
+            ctx.textAlign = 'left';
+            this._setShadow(ctx, 3);
+            ctx.fillText(kText, x, lineY);
+            this._clearShadow(ctx);
+            lineY += 22;
+        }
+
+        // Speed in flight
+        if (d.speed > 0) {
+            const speedKmh = Math.round(d.speed * 3.6);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+            ctx.font = '18px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`${speedKmh} km/h`, x, lineY);
+            lineY += 20;
+        }
+
+        // Height above ground
+        if (d.heightAboveGround > 0.5) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+            ctx.font = '16px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`Høyde: ${d.heightAboveGround.toFixed(1)}m`, x, lineY);
+        }
+
+        ctx.restore();
+    }
+
+    _renderFlightWind(ctx, width, _height, d) {
+        const x = width - 22;
+        const y = 52;
+
+        ctx.save();
+
+        // Background panel
+        const panelW = 110;
+        const panelH = 48;
+        this._drawPanel(ctx, x - panelW + 8, y - 30, panelW, panelH, 10);
+
+        // Wind arrow
+        const arrowX = x - panelW + 28;
+        const arrowY = y - 6;
+        const windDir = (d.windDirection || 0) * (Math.PI / 180);
+        const arrowLen = 12;
+
+        ctx.save();
+        ctx.translate(arrowX, arrowY);
+        ctx.rotate(windDir);
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-arrowLen, 0);
+        ctx.lineTo(arrowLen, 0);
+        ctx.stroke();
+
+        // Arrowhead
+        ctx.beginPath();
+        ctx.moveTo(arrowLen, 0);
+        ctx.lineTo(arrowLen - 6, -4);
+        ctx.moveTo(arrowLen, 0);
+        ctx.lineTo(arrowLen - 6, 4);
+        ctx.stroke();
+        ctx.restore();
+
+        // Wind speed text
+        this._setShadow(ctx, 3);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 20px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(d.windSpeed.toFixed(1), x - 6, y - 10);
+
+        // "m/s" label
+        this._clearShadow(ctx);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('m/s', x - 6, y + 8);
+
+        ctx.restore();
+    }
+
+    _renderFlightAngleGauge(ctx, width, height, d) {
+        const cx = width - 72;
+        const cy = height - 82;
+        const r = 50;
+
+        // Angle range: 10 to 55 degrees
+        const minDeg = 10;
+        const maxDeg = 55;
+        const arcStart = Math.PI;
+        const arcSweep = Math.PI;
+
+        ctx.save();
+
+        // Background semicircle panel
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r + 8, Math.PI, 0, false);
+        ctx.lineTo(cx + r + 8, cy + 10);
+        ctx.lineTo(cx - r - 8, cy + 10);
+        ctx.closePath();
+        ctx.fill();
+
+        // Track arc (dim)
+        ctx.beginPath();
+        ctx.arc(cx, cy, r - 4, arcStart, 0, false);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.lineWidth = 10;
+        ctx.lineCap = 'butt';
+        ctx.stroke();
+
+        // Green zone: 30-40 degrees
+        const greenStartFrac = (30 - minDeg) / (maxDeg - minDeg);
+        const greenEndFrac = (40 - minDeg) / (maxDeg - minDeg);
+        const greenStart = arcStart + greenStartFrac * arcSweep;
+        const greenEnd = arcStart + greenEndFrac * arcSweep;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, r - 4, greenStart, greenEnd, false);
+        ctx.strokeStyle = 'rgba(0, 200, 100, 0.5)';
+        ctx.lineWidth = 10;
+        ctx.stroke();
+
+        // Bright sweet spot: 33-37 degrees
+        const sweetStartFrac = (33 - minDeg) / (maxDeg - minDeg);
+        const sweetEndFrac = (37 - minDeg) / (maxDeg - minDeg);
+        const sweetStart = arcStart + sweetStartFrac * arcSweep;
+        const sweetEnd = arcStart + sweetEndFrac * arcSweep;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, r - 4, sweetStart, sweetEnd, false);
+        ctx.strokeStyle = 'rgba(0, 255, 120, 0.85)';
+        ctx.lineWidth = 10;
+        ctx.stroke();
+
+        // Tick marks
+        const ticks = [10, 20, 30, 40, 50];
+        for (const tickVal of ticks) {
+            const frac = (tickVal - minDeg) / (maxDeg - minDeg);
+            const angle = arcStart + frac * arcSweep;
+            const inner = r - 14;
+            const outer = r - 5;
+            ctx.beginPath();
+            ctx.moveTo(cx + Math.cos(angle) * inner, cy + Math.sin(angle) * inner);
+            ctx.lineTo(cx + Math.cos(angle) * outer, cy + Math.sin(angle) * outer);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+            ctx.lineWidth = 1.5;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+        }
+
+        // Needle
+        const clampedAngle = Math.max(minDeg, Math.min(maxDeg, d.bodyAngle));
+        const angleFrac = (clampedAngle - minDeg) / (maxDeg - minDeg);
+        const needleAngle = arcStart + angleFrac * arcSweep;
+        const needleLen = r - 16;
+        const nx = cx + Math.cos(needleAngle) * needleLen;
+        const ny = cy + Math.sin(needleAngle) * needleLen;
+
+        const inGreen = d.bodyAngle >= 30 && d.bodyAngle <= 40;
+        const needleColor = inGreen ? '#44ff88' : '#ffffff';
+
+        ctx.shadowColor = needleColor;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(nx, ny);
+        ctx.strokeStyle = needleColor;
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        this._clearShadow(ctx);
+
+        // Needle tip glow
+        ctx.beginPath();
+        ctx.arc(nx, ny, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = needleColor;
+        ctx.fill();
+
+        // Center pivot
+        ctx.beginPath();
+        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#555555';
+        ctx.fill();
+
+        // Angle text below
+        this._setShadow(ctx, 3);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${d.bodyAngle.toFixed(0)}°`, cx, cy + 18);
+        this._clearShadow(ctx);
+
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
+    // LANDING: Frozen distance + TAP prompt + quality flash
+    // -------------------------------------------------------------------
+
+    _renderLanding(ctx, width, height, d) {
+        // Show frozen distance (top-left, same panel as flight)
+        this._renderFlightInfoPanel(ctx, width, height, d);
+
+        const cx = width / 2;
+        const cy = height * 0.45;
+
+        // "TAP!" prompt if landing quality not yet set
+        if (d.landingQuality === 0) {
+            const pulse = 0.6 + 0.4 * Math.abs(Math.sin(this._time * 14));
+            ctx.save();
+
+            // Pulsing green prompt
+            ctx.globalAlpha = pulse;
+            this._setShadow(ctx, 16);
+            ctx.shadowColor = 'rgba(68, 255, 136, 0.6)';
+            ctx.fillStyle = '#44ff88';
+            ctx.font = 'bold 56px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('TAP!', cx, cy);
+            this._clearShadow(ctx);
+            ctx.restore();
+            return;
+        }
+
+        // Landing quality flash (1.5s visible)
+        if (this._landingFlashTimer < 1.8) {
+            // Scale-in: 0.6 -> 1.0 over 0.2s, then hold, then fade
+            const scaleT = Math.min(this._landingFlashTimer / 0.2, 1);
+            const scale = 0.6 + 0.4 * this._easeOutBack(scaleT);
+            const alpha = this._landingFlashTimer < 1.3
+                ? 1.0
+                : 1.0 - (this._landingFlashTimer - 1.3) / 0.5;
+
+            // Determine text and color
+            let text, color;
+            if (d.landingQuality >= 0.9) {
+                text = 'TELEMARK!';
+                color = '#44ff88';
+            } else if (d.landingQuality >= 0.6) {
+                text = 'Bra!';
+                color = '#ffdd44';
+            } else if (d.landingQuality >= 0.3) {
+                text = 'OK';
+                color = '#ffaa44';
+            } else {
+                text = 'Svakt';
+                color = '#ff5544';
+            }
+
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, alpha);
+
+            // Background pill
+            ctx.font = 'bold 38px sans-serif';
+            const tw = ctx.measureText(text).width;
+            const pillW = tw + 48;
+            const pillH = 60;
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+            this._roundRect(ctx, cx - pillW / 2, cy - pillH / 2, pillW, pillH, pillH / 2);
+            ctx.fill();
+
+            // Scaled text
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(scale, scale);
+            ctx.translate(-cx, -cy);
+
+            this._setShadow(ctx, 8);
+            ctx.shadowColor = color;
+            ctx.fillStyle = color;
+            ctx.font = 'bold 38px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, cx, cy);
+            this._clearShadow(ctx);
+
+            ctx.restore();
+            ctx.restore();
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Easing helpers
+    // -------------------------------------------------------------------
+
+    _easeOutBack(t) {
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
     }
 }
