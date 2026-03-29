@@ -60,7 +60,13 @@ export default class JudgeDisplay {
             ...judgeData,
         };
 
+        // Reset particle burst flag at the start of a new score animation
+        if (d.animationProgress < 0.05) {
+            this._particlesBurst = false;
+        }
+
         this._renderBackground(ctx, width, height);
+        this._renderTitle(ctx, width, height, d);
         this._renderDistance(ctx, width, height, d);
         this._renderJudgeCards(ctx, width, height, d);
         this._renderBreakdown(ctx, width, height, d);
@@ -103,7 +109,7 @@ export default class JudgeDisplay {
     // -------------------------------------------------------------------
 
     _renderTitle(ctx, width, height, d) {
-        const y = height * 0.07;
+        const y = height * 0.025;
 
         ctx.save();
         // Title with subtle glow
@@ -624,17 +630,28 @@ export default class JudgeDisplay {
         ctx.fillText(d.totalPoints.toFixed(1), width / 2, y - 5);
         ctx.restore();
 
+        // Rating label below the score (e.g. "Fantastisk!", "Bra hopp!")
+        if (d.rating) {
+            const ratingColors = {
+                S: '#FFD700',  // gold
+                A: '#7BFFB0',  // green
+                B: '#7BC8FF',  // blue
+                C: '#FFA888',  // orange
+            };
+            const ratingColor = ratingColors[d.ratingTier] || '#ffffff';
+            ctx.fillStyle = ratingColor;
+            ctx.font = `700 ${Math.min(width * 0.05, 20)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(d.rating, width / 2, y + textSize + 2);
+        }
+
         ctx.restore();
 
-        // Trigger particle burst once
+        // Trigger particle burst once per score display
         if (totalProgress >= 0.9 && !this._particlesBurst) {
             this._particlesBurst = true;
             this._spawnParticles(width / 2, y, width);
-        }
-
-        // Reset particle burst flag when animation resets
-        if (totalProgress <= 0) {
-            this._particlesBurst = false;
         }
 
         // Tap to continue hint

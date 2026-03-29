@@ -402,17 +402,18 @@ export default class SkihoppRenderer {
         ctx.fillStyle = moonGlow;
         ctx.fillRect(moonX - moonR * 5, moonY - moonR * 5, moonR * 10, moonR * 10);
         ctx.restore();
-        // Crescent: draw bright disc, then clip with a dark disc offset to the right
+        // Crescent: draw bright disc with a clipped-out section for the crescent shape.
+        // We avoid 'destination-out' on the main canvas because it would punch through
+        // the sky gradient. Instead, draw the crescent as an arc path.
         ctx.save();
+        // Create a clipping region: the full moon circle MINUS the shadow circle
+        // Using even-odd fill rule to create the crescent shape
         ctx.beginPath();
         ctx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+        // Counter-arc for the shadow (drawn counter-clockwise for even-odd subtraction)
+        ctx.arc(moonX + moonR * 0.5, moonY - moonR * 0.15, moonR * 0.85, 0, Math.PI * 2, true);
         ctx.fillStyle = 'rgba(230,235,255,0.9)';
-        ctx.fill();
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.beginPath();
-        ctx.arc(moonX + moonR * 0.5, moonY - moonR * 0.15, moonR * 0.85, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(0,0,0,1)';
-        ctx.fill();
+        ctx.fill('evenodd');
         ctx.restore();
 
         // Twinkling stars with sparkle shapes on bright ones
@@ -1360,19 +1361,19 @@ export default class SkihoppRenderer {
         const phase = js.phase;
         const bodyAngle = (js.bodyAngle || 0) * Math.PI / 180;
 
-        // --- Motion blur trail during FLIGHT (3 fading afterimages) ---
+        // --- Motion trail during FLIGHT (last 4 positions, fading afterimages) ---
         if (phase === GameState.FLIGHT || phase === 'FLIGHT') {
             if (!this._jumperTrail) this._jumperTrail = [];
             this._jumperTrail.push({ x: js.x, y: js.y, angle: bodyAngle });
-            if (this._jumperTrail.length > 4) this._jumperTrail.shift();
+            if (this._jumperTrail.length > 5) this._jumperTrail.shift();
 
-            const trailCount = Math.min(3, this._jumperTrail.length - 1);
+            const trailAlphas = [0.05, 0.1, 0.15, 0.2];
+            const trailCount = Math.min(4, this._jumperTrail.length - 1);
             for (let i = 0; i < trailCount; i++) {
                 const t = this._jumperTrail[i];
                 const tsp = r.worldToScreen(t.x, t.y);
-                const alpha = (i + 1) / (trailCount + 2) * 0.3;
                 ctx.save();
-                ctx.globalAlpha = alpha;
+                ctx.globalAlpha = trailAlphas[i] || 0.05;
                 ctx.translate(tsp.x, tsp.y);
                 this._drawJumperFlight(ctx, scale, t.angle);
                 ctx.restore();
@@ -1388,8 +1389,6 @@ export default class SkihoppRenderer {
         if (phase === GameState.INRUN || phase === 'INRUN') {
             this._drawJumperInrun(ctx, scale, bodyAngle);
         } else if (phase === GameState.TAKEOFF || phase === 'TAKEOFF') {
-            // During takeoff, draw the inrun pose with the current body angle
-            // (smooth transition from crouch to launch)
             this._drawJumperInrun(ctx, scale, bodyAngle);
         } else if (phase === GameState.FLIGHT || phase === 'FLIGHT') {
             this._drawJumperFlight(ctx, scale, bodyAngle);
@@ -1404,68 +1403,250 @@ export default class SkihoppRenderer {
 
 
     /**
-     * Rounded red helmet with goggles strip (side view).
+     * Aerodynamic helmet with dark visor/goggles (side view).
      * Origin = centre of head, facing right.
+     * Glossy dark red with highlight, oval shape wider at back.
      */
     _drawHelmet(ctx, s) {
-        const hr = 0.14 * s;
+        const hr = 0.15 * s;
 
-        // Helmet shell
-        ctx.fillStyle = '#cc2222';
+        // Helmet shell -- aerodynamic oval, wider at back
+        const grad = ctx.createRadialGradient(
+            -hr * 0.15, -hr * 0.25, hr * 0.1,
+            0, 0, hr * 1.3
+        );
+        grad.addColorStop(0, '#ff4444');
+        grad.addColorStop(0.35, '#cc1111');
+        grad.addColorStop(0.7, '#991111');
+        grad.addColorStop(1, '#660a0a');
+        ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.ellipse(0, 0, hr, hr * 1.05, 0, 0, Math.PI * 2);
+        ctx.ellipse(-hr * 0.08, 0, hr * 1.15, hr * 1.0, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        // Highlight
-        ctx.fillStyle = 'rgba(255,120,120,0.35)';
+        // Glossy highlight arc on top
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = '#ff8888';
         ctx.beginPath();
-        ctx.ellipse(-hr * 0.2, -hr * 0.3, hr * 0.4, hr * 0.3, -0.3, 0, Math.PI * 2);
+        ctx.ellipse(-hr * 0.25, -hr * 0.4, hr * 0.5, hr * 0.22, -0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Secondary highlight (small bright spot)
+        ctx.save();
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = '#ffbbbb';
+        ctx.beginPath();
+        ctx.ellipse(-hr * 0.35, -hr * 0.3, hr * 0.18, hr * 0.12, -0.4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Visor/goggles strip -- dark band across front
+        ctx.fillStyle = '#1a1a1a';
+        ctx.beginPath();
+        ctx.ellipse(hr * 0.35, hr * 0.05, hr * 0.6, hr * 0.22, 0.05, 0, Math.PI * 2);
         ctx.fill();
 
-        // Goggles strip
-        ctx.fillStyle = '#222222';
+        // Goggles frame edge
+        ctx.strokeStyle = '#333333';
+        ctx.lineWidth = Math.max(0.5, 0.015 * s);
         ctx.beginPath();
-        ctx.ellipse(hr * 0.25, hr * 0.05, hr * 0.55, hr * 0.18, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.ellipse(hr * 0.35, hr * 0.05, hr * 0.6, hr * 0.22, 0.05, 0, Math.PI * 2);
+        ctx.stroke();
 
-        // Lens reflection
-        ctx.fillStyle = 'rgba(100,180,255,0.4)';
+        // Visor blue reflection -- curved highlight
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        const visorGrad = ctx.createLinearGradient(
+            hr * 0.1, -hr * 0.1, hr * 0.7, hr * 0.15
+        );
+        visorGrad.addColorStop(0, 'rgba(80,160,255,0.0)');
+        visorGrad.addColorStop(0.3, 'rgba(100,190,255,0.7)');
+        visorGrad.addColorStop(0.6, 'rgba(140,210,255,0.5)');
+        visorGrad.addColorStop(1, 'rgba(80,160,255,0.0)');
+        ctx.fillStyle = visorGrad;
         ctx.beginPath();
-        ctx.ellipse(hr * 0.35, -hr * 0.02, hr * 0.22, hr * 0.10, 0.1, 0, Math.PI * 2);
+        ctx.ellipse(hr * 0.4, -hr * 0.01, hr * 0.35, hr * 0.10, 0.1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Chin guard (small dark area below visor)
+        ctx.fillStyle = '#880808';
+        ctx.beginPath();
+        ctx.ellipse(hr * 0.3, hr * 0.35, hr * 0.25, hr * 0.12, 0.1, 0, Math.PI);
         ctx.fill();
     }
 
     /**
-     * Dark gray ski with curved-up tip (2.4m long).
+     * Detailed ski with curved-up tip, dark gray base, colored stripe, and binding.
+     * 2.4m long, thin profile.
      * Drawn from startX along positive X for the given length.
      */
     _drawSki(ctx, s, startX, length) {
         const thickness = 0.05 * s;
-        const tipLen = 0.2 * s;
-        const tipCurve = 0.12 * s;
+        const tipLen = 0.25 * s;
+        const tipCurve = 0.14 * s;
 
-        ctx.fillStyle = '#3a3a3a';
-        ctx.strokeStyle = '#2a2a2a';
-        ctx.lineWidth = Math.max(1, 0.02 * s);
-
+        // Main ski body -- dark gray
+        ctx.fillStyle = '#333333';
         ctx.beginPath();
         ctx.moveTo(startX, thickness / 2);
         ctx.lineTo(startX + length - tipLen, thickness / 2);
         ctx.quadraticCurveTo(
-            startX + length, thickness / 2,
+            startX + length - tipLen * 0.3, thickness / 2,
             startX + length, -tipCurve
         );
         ctx.quadraticCurveTo(
-            startX + length - tipLen * 0.3, -tipCurve * 0.3,
+            startX + length - tipLen * 0.5, -tipCurve * 0.2,
             startX + length - tipLen, -thickness / 2
         );
         ctx.lineTo(startX, -thickness / 2);
         ctx.closePath();
         ctx.fill();
+
+        // Outline
+        ctx.strokeStyle = '#1a1a1a';
+        ctx.lineWidth = Math.max(0.5, 0.015 * s);
+        ctx.stroke();
+
+        // Bright colored stripe down the center (yellow)
+        ctx.strokeStyle = '#ffcc00';
+        ctx.lineWidth = Math.max(1, 0.025 * s);
+        ctx.beginPath();
+        ctx.moveTo(startX + 0.02 * s, 0);
+        ctx.lineTo(startX + length - tipLen * 1.1, 0);
+        ctx.stroke();
+
+        // Secondary thin red accent stripe
+        ctx.strokeStyle = '#dd2200';
+        ctx.lineWidth = Math.max(0.5, 0.012 * s);
+        ctx.beginPath();
+        ctx.moveTo(startX + 0.02 * s, thickness * 0.3);
+        ctx.lineTo(startX + length - tipLen * 1.2, thickness * 0.3);
+        ctx.stroke();
+
+        // Binding -- small rectangle near the foot position
+        const bindX = startX + length * 0.3;
+        const bindW = 0.12 * s;
+        const bindH = thickness * 1.8;
+        ctx.fillStyle = '#555555';
+        ctx.fillRect(bindX - bindW / 2, -bindH / 2, bindW, bindH);
+        // Binding top clip
+        ctx.fillStyle = '#777777';
+        ctx.fillRect(bindX - bindW * 0.35, -bindH / 2 - thickness * 0.3, bindW * 0.7, thickness * 0.4);
+        // Binding heel piece
+        ctx.fillStyle = '#444444';
+        ctx.fillRect(bindX + bindW * 0.3, -bindH * 0.35, bindW * 0.3, bindH * 0.7);
+    }
+
+    /** Draw a limb segment with rounded ends. */
+    _drawLimb(ctx, x1, y1, x2, y2, width, color) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
         ctx.stroke();
     }
 
-    /** INRUN: deep crouch, arms tucked behind back, head down. */
+    /** Draw a detailed boot at position, rotated to leg angle. */
+    _drawBoot(ctx, s, x, y, angle) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        const bw = 0.16 * s;
+        const bh = 0.09 * s;
+        // Boot body -- dark gray/black
+        ctx.fillStyle = '#222222';
+        ctx.beginPath();
+        ctx.moveTo(-bw * 0.3, -bh / 2);
+        ctx.lineTo(bw * 0.7, -bh / 2);
+        ctx.lineTo(bw * 0.7, bh * 0.1);
+        ctx.lineTo(bw * 0.5, bh / 2);
+        ctx.lineTo(-bw * 0.3, bh / 2);
+        ctx.closePath();
+        ctx.fill();
+        // Boot sole
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(-bw * 0.3, bh * 0.25, bw, bh * 0.25);
+        // Boot buckle detail
+        ctx.fillStyle = '#555555';
+        ctx.fillRect(bw * 0.1, -bh * 0.35, bw * 0.15, bh * 0.15);
+        ctx.restore();
+    }
+
+    /** Draw a glove at position (darker blue). */
+    _drawGlove(ctx, s, x, y) {
+        ctx.fillStyle = '#0d2266';
+        ctx.beginPath();
+        ctx.ellipse(x, y, 0.05 * s, 0.035 * s, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#1a3388';
+        ctx.beginPath();
+        ctx.ellipse(x, y, 0.035 * s, 0.04 * s, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** Draw torso with suit details: rich blue main, lighter side panel stripes, bib number. */
+    _drawTorso(ctx, s, hipX, hipY, shoulderX, shoulderY) {
+        const dx = shoulderX - hipX;
+        const dy = shoulderY - hipY;
+        const torsoAngle = Math.atan2(dy, dx);
+        const torsoW = Math.max(3, 0.20 * s);
+
+        // Main body suit -- rich blue
+        ctx.strokeStyle = '#1a40aa';
+        ctx.lineWidth = torsoW;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(shoulderX, shoulderY);
+        ctx.stroke();
+
+        // Side panel stripes (lighter blue, offset to both sides)
+        const nx = -Math.sin(torsoAngle);
+        const ny = Math.cos(torsoAngle);
+        const stripeOff = torsoW * 0.35;
+        ctx.strokeStyle = '#3366cc';
+        ctx.lineWidth = Math.max(1.5, 0.06 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX + nx * stripeOff, hipY + ny * stripeOff);
+        ctx.lineTo(shoulderX + nx * stripeOff, shoulderY + ny * stripeOff);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(hipX - nx * stripeOff, hipY - ny * stripeOff);
+        ctx.lineTo(shoulderX - nx * stripeOff, shoulderY - ny * stripeOff);
+        ctx.stroke();
+
+        // Subtle highlight line along center
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = Math.max(1, 0.03 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX + dx * 0.1, hipY + dy * 0.1);
+        ctx.lineTo(hipX + dx * 0.9, hipY + dy * 0.9);
+        ctx.stroke();
+
+        // Bib / number on chest area
+        const bibX = hipX + dx * 0.55;
+        const bibY = hipY + dy * 0.55;
+        ctx.save();
+        ctx.translate(bibX, bibY);
+        ctx.rotate(torsoAngle);
+        const bibW = 0.14 * s;
+        const bibH = 0.10 * s;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.fillRect(-bibW / 2, -bibH / 2, bibW, bibH);
+        ctx.fillStyle = '#111111';
+        ctx.font = `bold ${Math.max(5, 0.07 * s)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('7', 0, 0);
+        ctx.restore();
+    }
+
+    /** INRUN: DEEP crouch, knees bent, body folded forward, arms tucked behind lower back, chin tucked. */
     _drawJumperInrun(ctx, s, angle) {
         ctx.rotate(angle);
 
@@ -1474,123 +1655,137 @@ export default class SkihoppRenderer {
         this._drawSki(ctx, s, -1.2 * s, 2.4 * s);
         ctx.restore();
 
-        // Articulated crouch: feet at origin
-        const kneeX = -0.05 * s;
-        const kneeY = -0.40 * s;
-        const hipX = 0.05 * s;
-        const hipY = -0.55 * s;
-
-        // Lower leg (shin)
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.12 * s);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(kneeX, kneeY);
-        ctx.stroke();
+        // Deep crouch articulation: feet at origin, very compact
+        const footX = 0;
+        const footY = 0;
+        const kneeX = 0.10 * s;       // knee pushed forward (deep bend)
+        const kneeY = -0.32 * s;
+        const hipX = -0.05 * s;       // hip low and back
+        const hipY = -0.38 * s;
 
         // Boot
-        ctx.fillStyle = '#222';
-        ctx.fillRect(-0.08 * s, -0.06 * s, 0.18 * s, 0.06 * s);
+        this._drawBoot(ctx, s, footX, footY - 0.02 * s, 0);
 
-        // Upper leg (thigh)
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.13 * s);
-        ctx.beginPath();
-        ctx.moveTo(kneeX, kneeY);
-        ctx.lineTo(hipX, hipY);
-        ctx.stroke();
+        // Lower leg (shin) -- deep angle
+        this._drawLimb(ctx, footX, footY - 0.02 * s, kneeX, kneeY,
+            Math.max(2.5, 0.13 * s), '#1a40aa');
 
-        // Torso (leaning forward aggressively)
-        const shoulderX = hipX + 0.50 * s;
-        const shoulderY = hipY - 0.15 * s;
-        ctx.strokeStyle = '#2050bb';
-        ctx.lineWidth = Math.max(3, 0.18 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(shoulderX, shoulderY);
-        ctx.stroke();
+        // Upper leg (thigh) -- folded tight
+        this._drawLimb(ctx, kneeX, kneeY, hipX, hipY,
+            Math.max(2.5, 0.14 * s), '#1a40aa');
 
-        // Suit detail stripe
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = Math.max(1, 0.04 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX + 0.05 * s, hipY - 0.02 * s);
-        ctx.lineTo(shoulderX - 0.05 * s, shoulderY + 0.02 * s);
-        ctx.stroke();
+        // Torso -- folded forward aggressively, nearly parallel to thighs
+        const shoulderX = hipX + 0.52 * s;
+        const shoulderY = hipY - 0.08 * s;
+        this._drawTorso(ctx, s, hipX, hipY, shoulderX, shoulderY);
 
-        // Arms tucked behind back
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(1.5, 0.08 * s);
-        ctx.beginPath();
-        ctx.moveTo(shoulderX - 0.10 * s, shoulderY + 0.05 * s);
-        ctx.lineTo(hipX + 0.10 * s, hipY + 0.10 * s);
-        ctx.lineTo(hipX - 0.15 * s, hipY + 0.15 * s);
-        ctx.stroke();
+        // Arms tucked behind lower back (two segments per arm)
+        const elbowX = shoulderX - 0.15 * s;
+        const elbowY = shoulderY + 0.12 * s;
+        const handX = hipX - 0.05 * s;
+        const handY = hipY + 0.14 * s;
+        this._drawLimb(ctx, shoulderX - 0.08 * s, shoulderY + 0.06 * s, elbowX, elbowY,
+            Math.max(1.5, 0.08 * s), '#1a40aa');
+        this._drawLimb(ctx, elbowX, elbowY, handX, handY,
+            Math.max(1.5, 0.07 * s), '#1a40aa');
+        this._drawGlove(ctx, s, handX, handY);
 
-        // Head (tilted down)
+        // Second arm (slightly offset for depth)
+        const elbow2X = elbowX + 0.02 * s;
+        const elbow2Y = elbowY - 0.03 * s;
+        const hand2X = handX + 0.03 * s;
+        const hand2Y = handY - 0.02 * s;
+        this._drawLimb(ctx, shoulderX - 0.06 * s, shoulderY + 0.04 * s, elbow2X, elbow2Y,
+            Math.max(1.5, 0.07 * s), '#1a40aa');
+        this._drawLimb(ctx, elbow2X, elbow2Y, hand2X, hand2Y,
+            Math.max(1.5, 0.06 * s), '#1a40aa');
+        this._drawGlove(ctx, s, hand2X, hand2Y);
+
+        // Head (tilted down, chin tucked)
         ctx.save();
-        ctx.translate(shoulderX + 0.18 * s, shoulderY - 0.03 * s);
-        ctx.rotate(0.25);
+        ctx.translate(shoulderX + 0.16 * s, shoulderY + 0.02 * s);
+        ctx.rotate(0.4);
         this._drawHelmet(ctx, s);
         ctx.restore();
     }
 
-    /** FLIGHT: body horizontal at bodyAngle, arms at sides, V-skis (25 deg each). */
+    /** FLIGHT: body nearly horizontal, stretched forward, slight back arch, arms at sides, V-style skis 25 deg. */
     _drawJumperFlight(ctx, s, angle) {
         ctx.rotate(angle);
 
-        // Body horizontal. Head left (negative X), feet right (positive X).
         const hipX = 0;
         const hipY = 0;
 
-        // Torso
-        const torsoLen = 0.55 * s;
+        // Torso -- stretched forward with slight arch (quadratic curve)
+        const torsoLen = 0.58 * s;
         const shoulderX = hipX - torsoLen;
-        const shoulderY = hipY - 0.03 * s;
-        ctx.strokeStyle = '#2050bb';
-        ctx.lineWidth = Math.max(3, 0.18 * s);
+        const shoulderY = hipY - 0.06 * s;
+        const midTorsoX = hipX - torsoLen * 0.5;
+        const midTorsoY = hipY - 0.10 * s;
+        const torsoW = Math.max(3, 0.20 * s);
+
+        // Main body suit with arch
+        ctx.strokeStyle = '#1a40aa';
+        ctx.lineWidth = torsoW;
         ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(hipX, hipY);
-        ctx.lineTo(shoulderX, shoulderY);
+        ctx.quadraticCurveTo(midTorsoX, midTorsoY, shoulderX, shoulderY);
         ctx.stroke();
 
-        // Suit stripe
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = Math.max(1, 0.04 * s);
+        // Side panel stripes along the arch
+        const stripeOff = torsoW * 0.35;
+        ctx.strokeStyle = '#3366cc';
+        ctx.lineWidth = Math.max(1.5, 0.06 * s);
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY + stripeOff);
+        ctx.quadraticCurveTo(midTorsoX, midTorsoY + stripeOff, shoulderX, shoulderY + stripeOff);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY - stripeOff);
+        ctx.quadraticCurveTo(midTorsoX, midTorsoY - stripeOff, shoulderX, shoulderY - stripeOff);
+        ctx.stroke();
+
+        // Center highlight
+        ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+        ctx.lineWidth = Math.max(1, 0.03 * s);
         ctx.beginPath();
         ctx.moveTo(hipX - 0.06 * s, hipY);
-        ctx.lineTo(shoulderX + 0.06 * s, shoulderY);
+        ctx.quadraticCurveTo(midTorsoX, midTorsoY - 0.01 * s, shoulderX + 0.06 * s, shoulderY);
         ctx.stroke();
 
-        // Legs (extending back from hip)
-        const kneeX = hipX + 0.42 * s;
-        const kneeY = hipY + 0.10 * s;
-        const footX = kneeX + 0.38 * s;
-        const footY = kneeY + 0.05 * s;
-
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.12 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(kneeX, kneeY);
-        ctx.stroke();
-        ctx.lineWidth = Math.max(2, 0.10 * s);
-        ctx.beginPath();
-        ctx.moveTo(kneeX, kneeY);
-        ctx.lineTo(footX, footY);
-        ctx.stroke();
-
-        // Boot
-        ctx.fillStyle = '#222';
+        // Bib on chest
+        const bibAngle = Math.atan2(shoulderY - hipY, shoulderX - hipX);
         ctx.save();
-        ctx.translate(footX, footY);
-        ctx.rotate(Math.atan2(footY - kneeY, footX - kneeX));
-        ctx.fillRect(-0.04 * s, -0.05 * s, 0.14 * s, 0.07 * s);
+        ctx.translate(midTorsoX, midTorsoY);
+        ctx.rotate(bibAngle);
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        const bibW = 0.12 * s;
+        const bibH = 0.08 * s;
+        ctx.fillRect(-bibW / 2, -bibH / 2, bibW, bibH);
+        ctx.fillStyle = '#111';
+        ctx.font = `bold ${Math.max(4, 0.06 * s)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('7', 0, 0);
         ctx.restore();
 
-        // V-style skis (25 deg spread each)
+        // Legs (extending back from hip, nearly straight for flight)
+        const kneeX = hipX + 0.40 * s;
+        const kneeY = hipY + 0.04 * s;
+        const footX = kneeX + 0.40 * s;
+        const footY = kneeY + 0.02 * s;
+
+        this._drawLimb(ctx, hipX, hipY, kneeX, kneeY,
+            Math.max(2.5, 0.13 * s), '#1a40aa');
+        this._drawLimb(ctx, kneeX, kneeY, footX, footY,
+            Math.max(2, 0.11 * s), '#1a40aa');
+
+        // Boots
+        const legAngle = Math.atan2(footY - kneeY, footX - kneeX);
+        this._drawBoot(ctx, s, footX, footY, legAngle);
+
+        // V-style skis (25 deg spread each, tips slightly upward)
         const vAngle = 25 * Math.PI / 180;
         ctx.save();
         ctx.translate(footX, footY);
@@ -1604,82 +1799,35 @@ export default class SkihoppRenderer {
         ctx.restore();
         ctx.restore();
 
-        // Arms at sides
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(1.5, 0.08 * s);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(shoulderX + 0.05 * s, shoulderY + 0.05 * s);
-        ctx.lineTo(shoulderX + 0.30 * s, shoulderY + 0.20 * s);
-        ctx.lineTo(hipX - 0.05 * s, hipY + 0.18 * s);
-        ctx.stroke();
+        // Arms pressed tight along the sides (two arms for depth)
+        const armW = Math.max(1.5, 0.07 * s);
+        this._drawLimb(ctx, shoulderX + 0.08 * s, shoulderY + 0.10 * s,
+            hipX - 0.10 * s, hipY + 0.12 * s, armW, '#1a40aa');
+        this._drawGlove(ctx, s, hipX - 0.10 * s, hipY + 0.12 * s);
+        this._drawLimb(ctx, shoulderX + 0.10 * s, shoulderY + 0.08 * s,
+            hipX - 0.06 * s, hipY + 0.10 * s, Math.max(1.5, 0.08 * s), '#152e80');
+        this._drawGlove(ctx, s, hipX - 0.06 * s, hipY + 0.10 * s);
 
-        // Glove
-        ctx.fillStyle = '#222';
-        ctx.beginPath();
-        ctx.arc(hipX - 0.05 * s, hipY + 0.18 * s, 0.04 * s, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Head
+        // Head -- stretched forward, nose-down
         ctx.save();
-        ctx.translate(shoulderX - 0.18 * s, shoulderY + 0.01 * s);
-        ctx.rotate(0.1);
+        ctx.translate(shoulderX - 0.16 * s, shoulderY + 0.02 * s);
+        ctx.rotate(0.15);
         this._drawHelmet(ctx, s);
         ctx.restore();
     }
 
-    /** LANDING: telemark -- one leg forward, one back, arms spread wide. */
+    /** LANDING: telemark -- front foot forward, back foot behind, arms spread wide, body upright. */
     _drawJumperLanding(ctx, s, angle) {
         ctx.rotate(angle);
 
-        // Upright. Origin at ground contact. ~1.8m tall.
         const hipX = 0;
-        const hipY = -0.90 * s;
+        const hipY = -0.85 * s;
 
-        // Front leg (forward, knee slightly bent)
-        const frontFootX = 0.40 * s;
-        const frontFootY = 0;
-        const frontKneeX = 0.20 * s;
-        const frontKneeY = -0.45 * s;
-
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.12 * s);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(frontKneeX, frontKneeY);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(frontKneeX, frontKneeY);
-        ctx.lineTo(frontFootX, frontFootY);
-        ctx.stroke();
-        ctx.fillStyle = '#222';
-        ctx.fillRect(frontFootX - 0.06 * s, -0.06 * s, 0.16 * s, 0.06 * s);
-
-        // Back leg (behind, deeper knee bend -- telemark)
-        const backFootX = -0.35 * s;
-        const backFootY = -0.10 * s;
-        const backKneeX = -0.15 * s;
-        const backKneeY = -0.50 * s;
-
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2.5, 0.12 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(backKneeX, backKneeY);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(backKneeX, backKneeY);
-        ctx.lineTo(backFootX, backFootY);
-        ctx.stroke();
-        ctx.fillStyle = '#222';
-        ctx.fillRect(backFootX - 0.06 * s, backFootY - 0.04 * s, 0.16 * s, 0.06 * s);
-
-        // Front ski
-        ctx.save();
-        ctx.translate(frontFootX, frontFootY);
-        this._drawSki(ctx, s, -0.6 * s, 2.4 * s);
-        ctx.restore();
+        // --- Back leg (behind, deeper knee bend -- telemark) drawn first (behind) ---
+        const backFootX = -0.38 * s;
+        const backFootY = -0.12 * s;
+        const backKneeX = -0.12 * s;
+        const backKneeY = -0.52 * s;
 
         // Back ski
         ctx.save();
@@ -1687,54 +1835,63 @@ export default class SkihoppRenderer {
         this._drawSki(ctx, s, -0.6 * s, 2.4 * s);
         ctx.restore();
 
-        // Torso (mostly upright, slight forward lean)
-        const shoulderX = hipX + 0.05 * s;
-        const shoulderY = hipY - 0.55 * s;
-        ctx.strokeStyle = '#2050bb';
-        ctx.lineWidth = Math.max(3, 0.18 * s);
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY);
-        ctx.lineTo(shoulderX, shoulderY);
-        ctx.stroke();
+        // Back thigh + shin
+        this._drawLimb(ctx, hipX, hipY, backKneeX, backKneeY,
+            Math.max(2.5, 0.12 * s), '#152e80');
+        this._drawLimb(ctx, backKneeX, backKneeY, backFootX, backFootY,
+            Math.max(2, 0.11 * s), '#152e80');
+        const backLegAngle = Math.atan2(backFootY - backKneeY, backFootX - backKneeX);
+        this._drawBoot(ctx, s, backFootX, backFootY, backLegAngle);
 
-        // Suit stripe
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = Math.max(1, 0.04 * s);
-        ctx.beginPath();
-        ctx.moveTo(hipX, hipY + 0.05 * s);
-        ctx.lineTo(shoulderX, shoulderY + 0.05 * s);
-        ctx.stroke();
+        // --- Front leg (forward, knee slightly bent) ---
+        const frontFootX = 0.45 * s;
+        const frontFootY = 0;
+        const frontKneeX = 0.25 * s;
+        const frontKneeY = -0.42 * s;
 
-        // Arms spread wide
-        ctx.strokeStyle = '#1a3a99';
-        ctx.lineWidth = Math.max(2, 0.09 * s);
-        ctx.lineCap = 'round';
-        // Forward-up arm
-        ctx.beginPath();
-        ctx.moveTo(shoulderX, shoulderY);
-        ctx.lineTo(shoulderX + 0.30 * s, shoulderY - 0.10 * s);
-        ctx.lineTo(shoulderX + 0.55 * s, shoulderY - 0.25 * s);
-        ctx.stroke();
-        // Backward-up arm
-        ctx.beginPath();
-        ctx.moveTo(shoulderX, shoulderY);
-        ctx.lineTo(shoulderX - 0.30 * s, shoulderY - 0.08 * s);
-        ctx.lineTo(shoulderX - 0.55 * s, shoulderY - 0.22 * s);
-        ctx.stroke();
-
-        // Gloves
-        ctx.fillStyle = '#222';
-        ctx.beginPath();
-        ctx.arc(shoulderX + 0.55 * s, shoulderY - 0.25 * s, 0.04 * s, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(shoulderX - 0.55 * s, shoulderY - 0.22 * s, 0.04 * s, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Head (upright)
+        // Front ski
         ctx.save();
-        ctx.translate(shoulderX + 0.02 * s, shoulderY - 0.20 * s);
+        ctx.translate(frontFootX, frontFootY);
+        this._drawSki(ctx, s, -0.6 * s, 2.4 * s);
+        ctx.restore();
+
+        // Front thigh + shin
+        this._drawLimb(ctx, hipX, hipY, frontKneeX, frontKneeY,
+            Math.max(2.5, 0.13 * s), '#1a40aa');
+        this._drawLimb(ctx, frontKneeX, frontKneeY, frontFootX, frontFootY,
+            Math.max(2, 0.12 * s), '#1a40aa');
+        const frontLegAngle = Math.atan2(frontFootY - frontKneeY, frontFootX - frontKneeX);
+        this._drawBoot(ctx, s, frontFootX, frontFootY, frontLegAngle);
+
+        // Torso (mostly upright, slight forward lean)
+        const shoulderX = hipX + 0.08 * s;
+        const shoulderY = hipY - 0.52 * s;
+        this._drawTorso(ctx, s, hipX, hipY, shoulderX, shoulderY);
+
+        // --- Arms spread wide and slightly up for balance ---
+        const armW = Math.max(2, 0.09 * s);
+        // Forward-up arm (upper arm + forearm)
+        const fElbowX = shoulderX + 0.25 * s;
+        const fElbowY = shoulderY - 0.06 * s;
+        const fHandX = shoulderX + 0.52 * s;
+        const fHandY = shoulderY - 0.20 * s;
+        this._drawLimb(ctx, shoulderX, shoulderY, fElbowX, fElbowY, armW, '#1a40aa');
+        this._drawLimb(ctx, fElbowX, fElbowY, fHandX, fHandY, armW, '#1a40aa');
+        this._drawGlove(ctx, s, fHandX, fHandY);
+
+        // Backward-up arm (upper arm + forearm)
+        const bElbowX = shoulderX - 0.25 * s;
+        const bElbowY = shoulderY - 0.04 * s;
+        const bHandX = shoulderX - 0.52 * s;
+        const bHandY = shoulderY - 0.18 * s;
+        this._drawLimb(ctx, shoulderX, shoulderY, bElbowX, bElbowY, armW, '#1a40aa');
+        this._drawLimb(ctx, bElbowX, bElbowY, bHandX, bHandY, armW, '#1a40aa');
+        this._drawGlove(ctx, s, bHandX, bHandY);
+
+        // Head (upright, looking forward)
+        ctx.save();
+        ctx.translate(shoulderX + 0.03 * s, shoulderY - 0.18 * s);
+        ctx.rotate(0.05);
         this._drawHelmet(ctx, s);
         ctx.restore();
     }
