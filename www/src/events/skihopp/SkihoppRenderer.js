@@ -223,36 +223,32 @@ export default class SkihoppRenderer {
         const r = this.renderer;
         if (!r) return;
         let targetZoom, targetX, targetY;
-        // Use a low lerp speed for silky-smooth broadcast-style transitions
+        // Very smooth transitions across all states (lerp speed 2)
         let followSpeed = 2;
         let zoomSpeed = 2;
 
         switch (gameState) {
             case GameState.MENU:
             case GameState.READY: {
-                // Wide establishing shot: centre on middle of hill
+                // Wide overview shot: centre on middle of hill
                 const profile = this.hill.getProfile();
                 const mid = profile[Math.floor(profile.length * 0.4)];
                 targetX = mid.x;
                 targetY = mid.y;
-                targetZoom = 0.8;
+                targetZoom = 0.7;
                 followSpeed = 2;
                 zoomSpeed = 2;
                 break;
             }
             case GameState.INRUN: {
-                // Side camera, slightly ahead of the jumper (positive x = downhill)
-                const speed = Math.sqrt(
-                    (jumperState.vx || 0) ** 2 + (jumperState.vy || 0) ** 2
-                );
-                // Lead the jumper by a few meters so the track ahead is visible
-                targetX = jumperState.x + 6;
+                // Follow jumper closely, slightly ahead so track is visible
+                // Lead the jumper by a few meters downhill
+                targetX = jumperState.x + 5;
                 // Slightly above to show surrounding area
-                targetY = jumperState.y - 3;
-                // Start at a medium zoom; tighten as speed builds for intensity
-                const speedFactor = Math.min(speed / 30, 1); // 0-1 as speed reaches ~30 m/s
-                targetZoom = lerp(2.0, 2.8, speedFactor);
-                followSpeed = 2.5;
+                targetY = jumperState.y - 2;
+                // Tight zoom on the jumper during inrun
+                targetZoom = 2.5;
+                followSpeed = 2;
                 zoomSpeed = 2;
                 break;
             }
@@ -261,27 +257,27 @@ export default class SkihoppRenderer {
                 targetX = jumperState.x + 3;
                 targetY = jumperState.y - 2;
                 targetZoom = 3.0;
-                followSpeed = 3;
-                zoomSpeed = 2.5;
+                followSpeed = 2;
+                zoomSpeed = 2;
                 break;
             }
             case GameState.FLIGHT: {
-                // TV broadcast wide angle: pull back to show the full arc
+                // Smoothly pull back to show the full flight arc
                 // Keep camera ahead and above so landing area stays visible
                 targetX = jumperState.x + 12;
                 targetY = jumperState.y - 8;
                 targetZoom = 1.2;
                 followSpeed = 2;
-                zoomSpeed = 1.8;
+                zoomSpeed = 2;
                 break;
             }
             case GameState.LANDING: {
-                // Quick zoom in to show the telemark clearly
+                // Quick zoom to show the telemark landing clearly
                 targetX = jumperState.x + 2;
                 targetY = jumperState.y - 1.5;
-                targetZoom = 2.8;
-                followSpeed = 3;
-                zoomSpeed = 3;
+                targetZoom = 2.0;
+                followSpeed = 2;
+                zoomSpeed = 2;
                 break;
             }
             default:
@@ -350,13 +346,14 @@ export default class SkihoppRenderer {
         const parallaxFactors = [0.1, 0.2, 0.3];
         const cameraX = this.renderer.cameraX;
 
-        // --- Warm amber horizon glow at the base of the mountains ---
-        const glowTop = h * 0.38;
-        const glowBottom = h * 0.62;
+        // --- Warm amber glow at horizon line ---
+        const glowTop = h * 0.35;
+        const glowBottom = h * 0.65;
         const glowGrad = ctx.createLinearGradient(0, glowTop, 0, glowBottom);
-        glowGrad.addColorStop(0, 'rgba(255,180,80,0)');
-        glowGrad.addColorStop(0.4, 'rgba(255,160,60,0.08)');
-        glowGrad.addColorStop(0.7, 'rgba(255,140,40,0.05)');
+        glowGrad.addColorStop(0, 'rgba(255,190,90,0)');
+        glowGrad.addColorStop(0.3, 'rgba(255,170,70,0.10)');
+        glowGrad.addColorStop(0.5, 'rgba(255,155,55,0.12)');
+        glowGrad.addColorStop(0.7, 'rgba(255,140,40,0.07)');
         glowGrad.addColorStop(1, 'rgba(255,120,30,0)');
         ctx.fillStyle = glowGrad;
         ctx.fillRect(0, glowTop, w, glowBottom - glowTop);
@@ -382,8 +379,8 @@ export default class SkihoppRenderer {
             ctx.fillStyle = color;
             ctx.fill();
 
-            // --- Snow caps on mountain peaks ---
-            // Find local peaks (lower y = higher on screen) and draw white triangles
+            // --- White snow caps on peaks ---
+            // Find local peaks (lower y = higher on screen) and draw small white triangles
             for (let i = 1; i < points.length - 1; i++) {
                 const prev = points[i - 1];
                 const curr = points[i];
@@ -393,18 +390,18 @@ export default class SkihoppRenderer {
                 if (curr.y < prev.y && curr.y < next.y) {
                     const peakX = (curr.x + offsetX) * w;
                     const peakY = curr.y * h;
-                    // Snow cap size varies by layer (back layers have smaller caps)
-                    const capH = (6 + layer * 3);
-                    const capW = capH * 1.4;
-                    // White snow cap with slight transparency for back layers
-                    const alpha = 0.4 + layer * 0.15;
+                    // Snow cap size: small triangles, slightly larger for foreground layers
+                    const capH = 5 + layer * 2;
+                    const capW = capH * 1.5;
+                    // Front layers are more opaque
+                    const alpha = 0.5 + layer * 0.15;
 
                     ctx.beginPath();
                     ctx.moveTo(peakX, peakY);
                     ctx.lineTo(peakX - capW / 2, peakY + capH);
                     ctx.lineTo(peakX + capW / 2, peakY + capH);
                     ctx.closePath();
-                    ctx.fillStyle = `rgba(220,235,255,${alpha.toFixed(2)})`;
+                    ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
                     ctx.fill();
                 }
             }
@@ -933,117 +930,119 @@ export default class SkihoppRenderer {
         for (const spec of this._spectators) {
             const sp = r.worldToScreen(spec.x, spec.y);
             const ppm = r.ppm;
-            const h = spec.h * ppm;      // total body height in px
-            const headR = h * 0.15;       // head radius
-            const bodyW = h * 0.2;        // body/torso width
+            const h = spec.h * ppm;      // total stick figure height in px
+            const headR = h * 0.12;       // head radius
+            const legLen = h * 0.35;      // leg length
+            const bodyLen = h * 0.35;     // body (torso) line length
+            const armLen = h * 0.25;      // arm length
 
-            // --- Legs (two short lines from base) ---
-            ctx.strokeStyle = spec.bodyColor;
-            ctx.lineWidth = Math.max(1, bodyW * 0.3);
+            const lineW = Math.max(1, h * 0.06);
             ctx.lineCap = 'round';
+
+            // Feet position = base
+            const feetY = sp.y;
+            const hipY = feetY - legLen;
+            const shoulderY = hipY - bodyLen;
+            const headCenterY = shoulderY - headR;
+
+            // --- Leg lines (two lines from hip spreading down to feet) ---
+            ctx.strokeStyle = spec.bodyColor;
+            ctx.lineWidth = lineW;
             // Left leg
             ctx.beginPath();
-            ctx.moveTo(sp.x - bodyW * 0.25, sp.y);
-            ctx.lineTo(sp.x - bodyW * 0.4, sp.y + h * 0.05);
+            ctx.moveTo(sp.x, hipY);
+            ctx.lineTo(sp.x - h * 0.1, feetY);
             ctx.stroke();
             // Right leg
             ctx.beginPath();
-            ctx.moveTo(sp.x + bodyW * 0.25, sp.y);
-            ctx.lineTo(sp.x + bodyW * 0.4, sp.y + h * 0.05);
+            ctx.moveTo(sp.x, hipY);
+            ctx.lineTo(sp.x + h * 0.1, feetY);
             ctx.stroke();
 
-            // --- Torso (vertical line) ---
-            const torsoTop = sp.y - h * 0.6;
+            // --- Body line (vertical from hip to shoulder) ---
             ctx.strokeStyle = spec.bodyColor;
-            ctx.lineWidth = Math.max(1.5, bodyW * 0.5);
+            ctx.lineWidth = lineW * 1.2;
             ctx.beginPath();
-            ctx.moveTo(sp.x, sp.y);
-            ctx.lineTo(sp.x, torsoTop);
+            ctx.moveTo(sp.x, hipY);
+            ctx.lineTo(sp.x, shoulderY);
             ctx.stroke();
 
-            // --- Arms ---
-            const armY = torsoTop + h * 0.12;
-            ctx.lineWidth = Math.max(1, bodyW * 0.3);
+            // --- Arms (from shoulder) ---
+            ctx.strokeStyle = spec.bodyColor;
+            ctx.lineWidth = lineW;
 
             if (spec.action === 'wave') {
-                // One arm waves up and down
-                const waveAngle = Math.sin(t * spec.waveSpeed + spec.wavePhase) * 0.6;
-                // Left arm (waving)
-                const waveEndX = sp.x - h * 0.3 * Math.cos(waveAngle - 0.8);
-                const waveEndY = armY - h * 0.3 * Math.sin(waveAngle + 0.8);
+                // Left arm waves: angle varies with time
+                const waveAngle = Math.sin(t * spec.waveSpeed + spec.wavePhase) * 0.7;
+                const leftArmAngle = -1.2 + waveAngle; // swings around upper-left
+                const lax = sp.x + Math.cos(leftArmAngle) * armLen;
+                const lay = shoulderY + Math.sin(leftArmAngle) * armLen;
                 ctx.beginPath();
-                ctx.moveTo(sp.x, armY);
-                ctx.lineTo(waveEndX, waveEndY);
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(lax, lay);
                 ctx.stroke();
-                // Right arm (static, down)
+                // Right arm relaxed down
                 ctx.beginPath();
-                ctx.moveTo(sp.x, armY);
-                ctx.lineTo(sp.x + bodyW * 0.6, armY + h * 0.15);
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(sp.x + armLen * 0.7, shoulderY + armLen * 0.6);
                 ctx.stroke();
             } else if (spec.action === 'flag') {
-                // One arm holds a flag up
-                const flagArmX = sp.x + bodyW * 0.15;
-                const flagTopY = torsoTop - h * 0.35;
-                // Arm going up
+                // Right arm up holding flag
+                const flagArmEndX = sp.x + armLen * 0.15;
+                const flagArmEndY = shoulderY - armLen * 0.9;
                 ctx.beginPath();
-                ctx.moveTo(sp.x, armY);
-                ctx.lineTo(flagArmX, flagTopY);
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(flagArmEndX, flagArmEndY);
                 ctx.stroke();
-                // Flag pole (thin line extending above)
+                // Flag pole
                 ctx.strokeStyle = '#664422';
-                ctx.lineWidth = Math.max(0.8, bodyW * 0.15);
+                ctx.lineWidth = Math.max(0.8, lineW * 0.6);
+                const poleTopY = flagArmEndY - h * 0.2;
                 ctx.beginPath();
-                ctx.moveTo(flagArmX, flagTopY);
-                ctx.lineTo(flagArmX, flagTopY - h * 0.25);
+                ctx.moveTo(flagArmEndX, flagArmEndY);
+                ctx.lineTo(flagArmEndX, poleTopY);
                 ctx.stroke();
                 // Flag rectangle
-                const flagW = h * 0.2;
-                const flagH = h * 0.12;
+                const flagW = h * 0.18;
+                const flagH = h * 0.1;
                 const wave = Math.sin(t * 3 + spec.wavePhase) * flagW * 0.08;
                 ctx.fillStyle = spec.flagColor;
                 ctx.beginPath();
-                ctx.moveTo(flagArmX, flagTopY - h * 0.25);
-                ctx.lineTo(flagArmX + flagW + wave, flagTopY - h * 0.25 + flagH * 0.2);
-                ctx.lineTo(flagArmX + flagW - wave, flagTopY - h * 0.25 + flagH);
-                ctx.lineTo(flagArmX, flagTopY - h * 0.25 + flagH * 0.8);
+                ctx.moveTo(flagArmEndX, poleTopY);
+                ctx.lineTo(flagArmEndX + flagW + wave, poleTopY + flagH * 0.2);
+                ctx.lineTo(flagArmEndX + flagW - wave, poleTopY + flagH);
+                ctx.lineTo(flagArmEndX, poleTopY + flagH * 0.8);
                 ctx.closePath();
                 ctx.fill();
-                // Other arm (static, down)
+                // Left arm relaxed down
                 ctx.strokeStyle = spec.bodyColor;
-                ctx.lineWidth = Math.max(1, bodyW * 0.3);
+                ctx.lineWidth = lineW;
                 ctx.beginPath();
-                ctx.moveTo(sp.x, armY);
-                ctx.lineTo(sp.x - bodyW * 0.6, armY + h * 0.15);
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(sp.x - armLen * 0.7, shoulderY + armLen * 0.6);
                 ctx.stroke();
             } else {
                 // Still: both arms relaxed at sides
                 ctx.beginPath();
-                ctx.moveTo(sp.x, armY);
-                ctx.lineTo(sp.x - bodyW * 0.6, armY + h * 0.18);
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(sp.x - armLen * 0.7, shoulderY + armLen * 0.6);
                 ctx.stroke();
                 ctx.beginPath();
-                ctx.moveTo(sp.x, armY);
-                ctx.lineTo(sp.x + bodyW * 0.6, armY + h * 0.18);
+                ctx.moveTo(sp.x, shoulderY);
+                ctx.lineTo(sp.x + armLen * 0.7, shoulderY + armLen * 0.6);
                 ctx.stroke();
             }
 
             // --- Head (circle) ---
             ctx.fillStyle = '#ffccaa';
             ctx.beginPath();
-            ctx.arc(sp.x, torsoTop - headR, headR, 0, Math.PI * 2);
+            ctx.arc(sp.x, headCenterY, headR, 0, Math.PI * 2);
             ctx.fill();
 
-            // --- Colorful hat (small triangle/bobble on top of head) ---
+            // --- Colored hat (small circle sitting on top of head) ---
             ctx.fillStyle = spec.hatColor;
             ctx.beginPath();
-            ctx.moveTo(sp.x - headR * 0.7, torsoTop - headR * 1.2);
-            ctx.lineTo(sp.x + headR * 0.7, torsoTop - headR * 1.2);
-            ctx.lineTo(sp.x, torsoTop - headR * 2.3);
-            ctx.closePath();
-            ctx.fill();
-            // Bobble on top
-            ctx.beginPath();
-            ctx.arc(sp.x, torsoTop - headR * 2.3, headR * 0.25, 0, Math.PI * 2);
+            ctx.arc(sp.x, headCenterY - headR * 0.9, headR * 0.55, 0, Math.PI * 2);
             ctx.fill();
         }
     }

@@ -384,7 +384,7 @@ export default class SkihoppGame {
         switch (newState) {
             case GameState.READY:
                 // Reset jumper for a new attempt
-                this.jumper.reset();
+                this.jumper.reset(this.hill);
                 this.physics.reset();
                 this._resetFlightTracking();
                 this._countdownTimer = 0;
@@ -393,23 +393,17 @@ export default class SkihoppGame {
                 this._scoreAnimationTime = 0;
 
                 // Stop wind sound from previous run
-                if (this._audio && typeof this._audio.stopWind === 'function') {
-                    this._audio.stopWind();
-                }
+                this._safeAudioCall('stopWind');
                 break;
 
             case GameState.INRUN:
                 // Run has started - play ambient sounds
-                if (this._audio) {
-                    this._audio.playWind(this.wind.getSpeed() / 4);
-                }
+                this._safeAudioCall('playWind', this.wind.getSpeed() / 4);
                 break;
 
             case GameState.TAKEOFF:
                 // Swoosh sound at the table edge
-                if (this._audio) {
-                    this._audio.playSwoosh();
-                }
+                this._safeAudioCall('playSwoosh');
                 break;
 
             case GameState.LANDING:
@@ -422,19 +416,13 @@ export default class SkihoppGame {
                 }
 
                 // Stop crowd ambience from flight, play landing sound
-                if (this._audio) {
-                    if (typeof this._audio.stopCrowdAmbience === 'function') {
-                        this._audio.stopCrowdAmbience();
-                    }
-                    this._audio.playLanding(jumperState.landingQuality);
-                }
+                this._safeAudioCall('stopCrowdAmbience');
+                this._safeAudioCall('playLanding', jumperState.landingQuality);
                 break;
 
             case GameState.SCORE:
                 // Stop wind sound when leaving active phases
-                if (this._audio && typeof this._audio.stopWind === 'function') {
-                    this._audio.stopWind();
-                }
+                this._safeAudioCall('stopWind');
 
                 // Calculate score
                 this._scoreResult = this.scoringSystem.calculateScore({
@@ -450,15 +438,16 @@ export default class SkihoppGame {
                 this._scoreAnimationTime = 0;
 
                 // Audio effects for score reveal
-                if (this._audio) {
-                    this._audio.playJudgeReveal();
-                    this._audio.playCrowdCheer(
-                        this._scoreResult.totalPoints > 120 ? 1.0 : 0.5
-                    );
-                }
+                this._safeAudioCall('playJudgeReveal');
+                this._safeAudioCall('playCrowdCheer',
+                    this._scoreResult.totalPoints > 120 ? 1.0 : 0.5
+                );
                 break;
 
             case GameState.RESULTS:
+                // Stop wind sound on results screen
+                this._safeAudioCall('stopWind');
+
                 // Add this jump to the results list
                 this._jumpResults.push({
                     name: 'Spiller',
@@ -473,14 +462,14 @@ export default class SkihoppGame {
                 this._jumpResults.forEach((r, i) => { r.rank = i + 1; });
 
                 // Fanfare for good scores
-                if (this._audio && this._scoreResult && this._scoreResult.totalPoints > 130) {
-                    this._audio.playFanfare();
+                if (this._scoreResult && this._scoreResult.totalPoints > 130) {
+                    this._safeAudioCall('playFanfare');
                 }
                 break;
 
             case GameState.MENU:
                 // Full reset when returning to menu
-                this.jumper.reset();
+                this.jumper.reset(this.hill);
                 this.physics.reset();
                 this._resetFlightTracking();
                 this._countdownTimer = 0;
@@ -489,10 +478,8 @@ export default class SkihoppGame {
                 this._scoreAnimationTime = 0;
 
                 // Stop all looping audio
-                if (this._audio) {
-                    if (typeof this._audio.stopWind === 'function') this._audio.stopWind();
-                    if (typeof this._audio.stopCrowdAmbience === 'function') this._audio.stopCrowdAmbience();
-                }
+                this._safeAudioCall('stopWind');
+                this._safeAudioCall('stopCrowdAmbience');
                 break;
 
             default:
@@ -546,16 +533,30 @@ export default class SkihoppGame {
         // Wind speed is 0-4 m/s; normalise to 0-1 for AudioManager
         if (state === GameState.INRUN || state === GameState.FLIGHT ||
             state === GameState.TAKEOFF || state === GameState.LANDING) {
-            this._audio.playWind(this.wind.getSpeed() / 4);
+            this._safeAudioCall('playWind', this.wind.getSpeed() / 4);
         }
 
         // Crowd ambience during flight that builds with distance
-        if (state === GameState.FLIGHT && typeof this._audio.playCrowdAmbience === 'function') {
+        if (state === GameState.FLIGHT) {
             const jumperState = this.jumper.getState();
             const kPoint = this.hill.kPoint || 120;
             // Volume ramps from 0.2 to 1.0 as distance approaches (and exceeds) K-point
             const intensity = Math.min(1.0, 0.2 + 0.8 * (jumperState.distance / kPoint));
-            this._audio.playCrowdAmbience(intensity);
+            this._safeAudioCall('playCrowdAmbience', intensity);
+        }
+    }
+
+    /**
+     * Safely call an audio method with typeof guard and try-catch.
+     * @param {string} method - method name on this._audio
+     * @param {...*} args - arguments to pass
+     */
+    _safeAudioCall(method, ...args) {
+        if (!this._audio || typeof this._audio[method] !== 'function') return;
+        try {
+            this._audio[method](...args);
+        } catch (e) {
+            console.warn(`[SkihoppGame] audio.${method}() error:`, e);
         }
     }
 
