@@ -1,0 +1,563 @@
+/**
+ * StatsScreen.js - Statistics and achievements screen for Vinter-OL Skihopp
+ *
+ * Renders directly to Canvas 2D context. Designed for mobile portrait (~390x844).
+ * Displays player stats, XP progress, mini jump graph, and achievements.
+ */
+
+export default class StatsScreen {
+    constructor() {
+        /** Scroll offset for the entire content area. */
+        this.scrollOffset = 0;
+
+        /** Cached back button hit area. */
+        this._backRect = null;
+
+        /** Total content height (recalculated each render). */
+        this._contentHeight = 0;
+
+        /** Animation time tracker. */
+        this._time = 0;
+    }
+
+    // -------------------------------------------------------------------
+    // Main render
+    // -------------------------------------------------------------------
+
+    /**
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {number} width   - logical CSS pixels
+     * @param {number} height  - logical CSS pixels
+     * @param {object} statsData - from ProgressionManager.getStats()
+     */
+    render(ctx, width, height, statsData = {}) {
+        this._time += 0.016;
+
+        const data = {
+            totalJumps: 0,
+            bestDistances: {},
+            bestScores: {},
+            avgScore: 0,
+            perfectLandings: 0,
+            level: 1,
+            xp: 0,
+            xpForNextLevel: 100,
+            achievements: [],
+            recentJumps: [],
+            ...statsData,
+        };
+
+        // Clamp scroll
+        const headerH = 60;
+        const maxScroll = Math.max(0, this._contentHeight - (height - headerH));
+        this.scrollOffset = Math.max(0, Math.min(this.scrollOffset, maxScroll));
+
+        this._renderBackground(ctx, width, height);
+        this._renderHeader(ctx, width, height);
+
+        // Clip content below header
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, headerH, width, height - headerH);
+        ctx.clip();
+
+        let cursorY = headerH + 20 - this.scrollOffset;
+
+        cursorY = this._renderLevelSection(ctx, width, cursorY, data);
+        cursorY = this._renderStatsGrid(ctx, width, cursorY, data);
+        cursorY = this._renderMiniGraph(ctx, width, cursorY, data);
+        cursorY = this._renderAchievements(ctx, width, cursorY, data);
+
+        // Extra bottom padding
+        cursorY += 40;
+
+        ctx.restore();
+
+        // Track total content height for scroll clamping
+        this._contentHeight = cursorY + this.scrollOffset - headerH;
+    }
+
+    // -------------------------------------------------------------------
+    // Background
+    // -------------------------------------------------------------------
+
+    _renderBackground(ctx, width, height) {
+        const grad = ctx.createLinearGradient(0, 0, 0, height);
+        grad.addColorStop(0, '#0a0e1a');
+        grad.addColorStop(0.4, '#111827');
+        grad.addColorStop(1, '#0f172a');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, height);
+    }
+
+    // -------------------------------------------------------------------
+    // Header: "STATISTIKK" + back button
+    // -------------------------------------------------------------------
+
+    _renderHeader(ctx, width, height) {
+        const headerH = 60;
+
+        // Header background
+        const grad = ctx.createLinearGradient(0, 0, 0, headerH);
+        grad.addColorStop(0, 'rgba(0,0,0,0.6)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.2)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, headerH);
+
+        // Bottom separator
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, headerH);
+        ctx.lineTo(width, headerH);
+        ctx.stroke();
+
+        // Back button arrow
+        const btnSize = 40;
+        const btnX = 10;
+        const btnY = (headerH - btnSize) / 2;
+        this._backRect = { x: btnX, y: btnY, w: btnSize, h: btnSize };
+
+        ctx.save();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        const cx = btnX + btnSize / 2;
+        const cy = btnY + btnSize / 2;
+        ctx.beginPath();
+        ctx.moveTo(cx + 4, cy - 10);
+        ctx.lineTo(cx - 6, cy);
+        ctx.lineTo(cx + 4, cy + 10);
+        ctx.stroke();
+        ctx.restore();
+
+        // Title
+        ctx.save();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.min(width * 0.055, 22)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('STATISTIKK', width / 2, headerH / 2);
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
+    // Level + XP bar
+    // -------------------------------------------------------------------
+
+    _renderLevelSection(ctx, width, y, data) {
+        const padX = 20;
+        const panelW = width - padX * 2;
+        const panelH = 72;
+
+        // Panel background
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.06)';
+        this._roundRect(ctx, padX, y, panelW, panelH, 12);
+        ctx.fill();
+
+        // "Level N" text
+        const levelFontSize = Math.min(width * 0.065, 26);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${levelFontSize}px sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`Level ${data.level}`, padX + 16, y + 26);
+
+        // XP text on the right
+        const xpText = `${data.xp} / ${data.xpForNextLevel} XP`;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = `${Math.min(width * 0.032, 13)}px sans-serif`;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(xpText, padX + panelW - 16, y + 26);
+
+        // XP bar track
+        const barX = padX + 16;
+        const barY = y + 46;
+        const barW = panelW - 32;
+        const barH = 10;
+
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        this._roundRect(ctx, barX, barY, barW, barH, barH / 2);
+        ctx.fill();
+
+        // XP bar fill with gradient
+        const progress = data.xpForNextLevel > 0
+            ? Math.min(1, data.xp / data.xpForNextLevel)
+            : 0;
+        const fillW = Math.max(barH, barW * progress);
+
+        if (progress > 0) {
+            const barGrad = ctx.createLinearGradient(barX, barY, barX + fillW, barY);
+            barGrad.addColorStop(0, '#3b82f6');
+            barGrad.addColorStop(0.5, '#60a5fa');
+            barGrad.addColorStop(1, '#a78bfa');
+            ctx.fillStyle = barGrad;
+            this._roundRect(ctx, barX, barY, fillW, barH, barH / 2);
+            ctx.fill();
+        }
+
+        ctx.restore();
+
+        return y + panelH + 20;
+    }
+
+    // -------------------------------------------------------------------
+    // Stats grid (2x3)
+    // -------------------------------------------------------------------
+
+    _renderStatsGrid(ctx, width, y, data) {
+        const padX = 20;
+        const gap = 10;
+        const cols = 2;
+        const rows = 3;
+        const cellW = (width - padX * 2 - gap) / cols;
+        const cellH = 68;
+
+        const stats = [
+            { value: data.totalJumps, label: 'Total hopp' },
+            { value: this._formatDist(data.bestDistances?.K90), label: 'Beste K90' },
+            { value: this._formatDist(data.bestDistances?.K120), label: 'Beste K120' },
+            { value: this._formatDist(data.bestDistances?.K185), label: 'Beste K185' },
+            { value: data.avgScore != null ? data.avgScore.toFixed(1) : '-', label: 'Snittpoeng' },
+            { value: data.perfectLandings, label: 'Perfekte landinger' },
+        ];
+
+        const valueFontSize = Math.min(width * 0.065, 26);
+        const labelFontSize = Math.min(width * 0.03, 12);
+
+        for (let i = 0; i < stats.length; i++) {
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            const cx = padX + col * (cellW + gap);
+            const cy = y + row * (cellH + gap);
+
+            // Cell background
+            ctx.save();
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            this._roundRect(ctx, cx, cy, cellW, cellH, 10);
+            ctx.fill();
+
+            // Value
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${valueFontSize}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(String(stats[i].value), cx + cellW / 2, cy + cellH * 0.38);
+
+            // Label
+            ctx.fillStyle = 'rgba(255,255,255,0.45)';
+            ctx.font = `${labelFontSize}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(stats[i].label, cx + cellW / 2, cy + cellH * 0.75);
+
+            ctx.restore();
+        }
+
+        return y + rows * (cellH + gap) + 10;
+    }
+
+    // -------------------------------------------------------------------
+    // Mini graph: last 10 jumps
+    // -------------------------------------------------------------------
+
+    _renderMiniGraph(ctx, width, y, data) {
+        const jumps = data.recentJumps;
+        if (!jumps || jumps.length === 0) return y;
+
+        const padX = 20;
+        const panelW = width - padX * 2;
+        const panelH = 160;
+
+        // Section label
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = `bold ${Math.min(width * 0.032, 13)}px sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('SISTE HOPP', padX, y + 8);
+        ctx.restore();
+
+        y += 22;
+
+        // Panel background
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        this._roundRect(ctx, padX, y, panelW, panelH, 10);
+        ctx.fill();
+
+        // Graph area within panel
+        const graphPadL = 40;
+        const graphPadR = 16;
+        const graphPadT = 18;
+        const graphPadB = 28;
+        const gx = padX + graphPadL;
+        const gy = y + graphPadT;
+        const gw = panelW - graphPadL - graphPadR;
+        const gh = panelH - graphPadT - graphPadB;
+
+        // Determine Y range
+        const minDist = Math.min(...jumps);
+        const maxDist = Math.max(...jumps);
+        const rangeBuffer = Math.max(5, (maxDist - minDist) * 0.15);
+        const yMin = Math.floor(minDist - rangeBuffer);
+        const yMax = Math.ceil(maxDist + rangeBuffer);
+        const yRange = yMax - yMin || 1;
+
+        // Y-axis labels
+        ctx.fillStyle = 'rgba(255,255,255,0.35)';
+        ctx.font = `${Math.min(width * 0.025, 10)}px sans-serif`;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${yMax}m`, gx - 6, gy);
+        ctx.fillText(`${yMin}m`, gx - 6, gy + gh);
+
+        // Horizontal grid lines
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 3; i++) {
+            const ly = gy + (gh / 3) * i;
+            ctx.beginPath();
+            ctx.moveTo(gx, ly);
+            ctx.lineTo(gx + gw, ly);
+            ctx.stroke();
+        }
+
+        // K-point reference line (dashed) - use K120 = 120m as a common reference
+        const kPoint = 120;
+        if (kPoint >= yMin && kPoint <= yMax) {
+            const kY = gy + gh - ((kPoint - yMin) / yRange) * gh;
+            ctx.save();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = 'rgba(255,200,50,0.4)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(gx, kY);
+            ctx.lineTo(gx + gw, kY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // K-point label
+            ctx.fillStyle = 'rgba(255,200,50,0.5)';
+            ctx.font = `${Math.min(width * 0.022, 9)}px sans-serif`;
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText('K-punkt', gx - 6, kY - 2);
+            ctx.restore();
+        }
+
+        // Plot data points and line
+        const points = [];
+        const count = jumps.length;
+        for (let i = 0; i < count; i++) {
+            const px = gx + (count > 1 ? (i / (count - 1)) * gw : gw / 2);
+            const py = gy + gh - ((jumps[i] - yMin) / yRange) * gh;
+            points.push({ x: px, y: py });
+        }
+
+        // Green connecting line
+        if (points.length > 1) {
+            ctx.save();
+            ctx.strokeStyle = '#4ade80';
+            ctx.lineWidth = 2;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x, points[i].y);
+            }
+            ctx.stroke();
+
+            // Subtle gradient fill under the line
+            ctx.lineTo(points[points.length - 1].x, gy + gh);
+            ctx.lineTo(points[0].x, gy + gh);
+            ctx.closePath();
+            const fillGrad = ctx.createLinearGradient(0, gy, 0, gy + gh);
+            fillGrad.addColorStop(0, 'rgba(74,222,128,0.15)');
+            fillGrad.addColorStop(1, 'rgba(74,222,128,0)');
+            ctx.fillStyle = fillGrad;
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Dots
+        for (let i = 0; i < points.length; i++) {
+            ctx.beginPath();
+            ctx.arc(points[i].x, points[i].y, 3.5, 0, Math.PI * 2);
+            ctx.fillStyle = '#4ade80';
+            ctx.fill();
+            ctx.strokeStyle = '#0a0e1a';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        // X-axis: jump numbers
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.font = `${Math.min(width * 0.022, 9)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (let i = 0; i < count; i++) {
+            const px = gx + (count > 1 ? (i / (count - 1)) * gw : gw / 2);
+            ctx.fillText(String(i + 1), px, gy + gh + 6);
+        }
+
+        ctx.restore();
+
+        return y + panelH + 20;
+    }
+
+    // -------------------------------------------------------------------
+    // Achievements section
+    // -------------------------------------------------------------------
+
+    _renderAchievements(ctx, width, y, data) {
+        const achievements = data.achievements;
+        if (!achievements || achievements.length === 0) return y;
+
+        const padX = 20;
+
+        // Section header
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = `bold ${Math.min(width * 0.032, 13)}px sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('OPPN\u00c5ELSER', padX, y + 8);
+        ctx.restore();
+
+        y += 26;
+
+        // Achievement cards - 2 columns
+        const gap = 10;
+        const cols = 2;
+        const cardW = (width - padX * 2 - gap) / cols;
+        const cardH = 80;
+
+        const nameFontSize = Math.min(width * 0.03, 12);
+        const descFontSize = Math.min(width * 0.025, 10);
+        const iconFontSize = Math.min(width * 0.06, 24);
+
+        for (let i = 0; i < achievements.length; i++) {
+            const ach = achievements[i];
+            const col = i % cols;
+            const row = Math.floor(i / cols);
+            const cx = padX + col * (cardW + gap);
+            const cy = y + row * (cardH + gap);
+            const unlocked = ach.unlocked;
+
+            ctx.save();
+
+            // Card background
+            if (unlocked) {
+                ctx.fillStyle = 'rgba(74,222,128,0.1)';
+            } else {
+                ctx.fillStyle = 'rgba(255,255,255,0.03)';
+            }
+            this._roundRect(ctx, cx, cy, cardW, cardH, 10);
+            ctx.fill();
+
+            // Border for unlocked
+            if (unlocked) {
+                ctx.strokeStyle = 'rgba(74,222,128,0.3)';
+                ctx.lineWidth = 1;
+                this._roundRect(ctx, cx, cy, cardW, cardH, 10);
+                ctx.stroke();
+            }
+
+            // Dimming for locked
+            if (!unlocked) {
+                ctx.globalAlpha = 0.4;
+            }
+
+            // Icon or lock
+            ctx.font = `${iconFontSize}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            if (unlocked) {
+                ctx.fillText(ach.icon || '', cx + cardW / 2, cy + 26);
+            } else {
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                // Lock symbol
+                ctx.font = `${iconFontSize * 0.8}px sans-serif`;
+                ctx.fillText('\uD83D\uDD12', cx + cardW / 2, cy + 26);
+            }
+
+            // Name
+            ctx.fillStyle = unlocked ? '#ffffff' : 'rgba(255,255,255,0.7)';
+            ctx.font = `bold ${nameFontSize}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(ach.name || '', cx + cardW / 2, cy + 50);
+
+            // Checkmark for unlocked
+            if (unlocked) {
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = '#4ade80';
+                ctx.font = `bold ${Math.min(width * 0.028, 11)}px sans-serif`;
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'top';
+                ctx.fillText('\u2713', cx + cardW - 8, cy + 6);
+            }
+
+            ctx.restore();
+        }
+
+        const totalRows = Math.ceil(achievements.length / cols);
+        return y + totalRows * (cardH + gap);
+    }
+
+    // -------------------------------------------------------------------
+    // Input handling
+    // -------------------------------------------------------------------
+
+    /**
+     * Check if a tap hits the back button.
+     * @param {number} x - tap X in CSS pixels
+     * @param {number} y - tap Y in CSS pixels
+     * @returns {string|null} 'back' or null
+     */
+    handleTap(x, y) {
+        if (this._backRect) {
+            const b = this._backRect;
+            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
+                return 'back';
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Scroll through the content.
+     * @param {number} deltaY - scroll delta (positive = scroll down)
+     */
+    handleScroll(deltaY) {
+        this.scrollOffset += deltaY;
+    }
+
+    // -------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------
+
+    _formatDist(value) {
+        if (value == null) return '-';
+        return `${value.toFixed(1)}m`;
+    }
+
+    _roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+}

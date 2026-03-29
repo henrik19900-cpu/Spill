@@ -26,5 +26,19 @@
     "flatLength": 110,
     "gateCount": 25,
     "defaultGate": 18
+  },
+  "K185": {
+    "name": "Vikersundbakken K185",
+    "kPoint": 185,
+    "hillSize": 225,
+    "inrunLength": 110,
+    "inrunAngle": 38,
+    "tableAngle": 11,
+    "tableLength": 7.5,
+    "landingAngle": 37,
+    "landingSteepness": 0.58,
+    "flatLength": 130,
+    "gateCount": 30,
+    "defaultGate": 22
   }
 }
