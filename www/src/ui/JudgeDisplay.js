@@ -155,6 +155,45 @@ export default class JudgeDisplay {
     }
 
     // -------------------------------------------------------------------
+    // Distance display (large "132.5 m" text sliding in from top)
+    // -------------------------------------------------------------------
+
+    _renderDistance(ctx, width, height, d) {
+        // Show distance in the first 40% of the animation, then keep it visible but smaller
+        const slideProgress = Math.min(1, d.animationProgress / 0.20);
+        if (slideProgress <= 0) return;
+
+        const eased = this._easeOutCubic(slideProgress);
+
+        ctx.save();
+
+        // Slide in from above
+        const targetY = height * 0.06;
+        const startY = -60;
+        const y = startY + (targetY - startY) * eased;
+
+        ctx.globalAlpha = Math.min(1, slideProgress * 2);
+
+        // Distance number
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = '#ffffff';
+        const fontSize = Math.min(width * 0.12, 48);
+        ctx.font = `800 ${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`${d.distance.toFixed(1)} m`, width / 2, y);
+
+        // Hill name subtitle
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = `400 ${Math.min(width * 0.035, 14)}px sans-serif`;
+        ctx.fillText(d.hillName || '', width / 2, y + fontSize * 0.55 + 4);
+
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
     // Judge cards with 3D flip animation
     // -------------------------------------------------------------------
 

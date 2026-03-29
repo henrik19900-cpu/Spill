@@ -46,7 +46,7 @@ export default class SkihoppRenderer {
 
         // Pre-generated visual data
         this._stars = [];
-        this._mountains = [[], [], []]; // 3 parallax layers
+        this._mountains = [[], [], [], []]; // 4 parallax layers
         this._spectators = [];
         this._snowParticles = [];
 
@@ -83,14 +83,15 @@ export default class SkihoppRenderer {
     _generateStars() {
         const rng = seededRandom(42);
         this._stars = [];
-        for (let i = 0; i < 60; i++) {
+        for (let i = 0; i < 90; i++) {
             this._stars.push({
                 x: rng(),
-                y: rng() * 0.55,
+                y: rng() * 0.50,
                 r: 0.5 + rng() * 1.8,
                 a: 0.3 + rng() * 0.7,
                 twinkleSpeed: 0.5 + rng() * 2.0,
                 twinkleOffset: rng() * Math.PI * 2,
+                sparkle: rng() < 0.12, // ~12% of stars get a cross/sparkle shape
             });
         }
     }
@@ -98,12 +99,13 @@ export default class SkihoppRenderer {
     _generateMountains() {
         const rng = seededRandom(1337);
         const layerConfigs = [
-            { baseY: 0.40, variance: 0.12, color: '#0d1530', peaks: 12 },
-            { baseY: 0.48, variance: 0.10, color: '#162040', peaks: 14 },
-            { baseY: 0.55, variance: 0.08, color: '#1d2d50', peaks: 16 },
+            { baseY: 0.38, variance: 0.14, color: '#080e24', peaks: 22 },
+            { baseY: 0.44, variance: 0.11, color: '#0f1a38', peaks: 24 },
+            { baseY: 0.52, variance: 0.09, color: '#1a2848', peaks: 26 },
+            { baseY: 0.58, variance: 0.07, color: '#2a3a5c', peaks: 28 },
         ];
 
-        this._mountains = layerConfigs.map(cfg => {
+        this._mountains = layerConfigs.map((cfg, layerIdx) => {
             const pts = [];
             // Extend well beyond screen width for parallax scrolling
             const count = cfg.peaks;
@@ -111,11 +113,24 @@ export default class SkihoppRenderer {
                 const t = i / count;
                 // Use a wide range so parallax never runs out of mountains
                 pts.push({
-                    x: -0.3 + t * 1.6,
+                    x: -0.4 + t * 1.8,
                     y: cfg.baseY - rng() * cfg.variance,
                 });
             }
-            return { points: pts, color: cfg.color };
+
+            // Generate pine tree positions for the nearest layer
+            let pines = [];
+            if (layerIdx === layerConfigs.length - 1) {
+                for (let i = 0; i < 60; i++) {
+                    pines.push({
+                        t: rng(),            // 0-1 position along ridge
+                        h: 6 + rng() * 10,   // tree height in px
+                        w: 3 + rng() * 4,    // tree width in px
+                    });
+                }
+            }
+
+            return { points: pts, color: cfg.color, pines };
         });
     }
 
@@ -159,14 +174,29 @@ export default class SkihoppRenderer {
     _generateSnowParticles() {
         const rng = seededRandom(999);
         this._snowParticles = [];
-        for (let i = 0; i < 80; i++) {
+        for (let i = 0; i < 100; i++) {
+            // Depth layer: 0 = far background, 1 = near foreground
+            const depth = rng();
+            // Size scales with depth: background 1-2px, foreground 2-4px
+            const r = 1 + depth * 3;
+            // Larger / closer particles fall faster
+            const baseFallSpeed = 0.03 + depth * 0.1;
+            // Larger particles are more opaque
+            const alpha = 0.15 + depth * 0.6;
+            // Whether this particle renders as a snowflake shape (only larger ones)
+            const isFlake = r > 2.5 && rng() < 0.4;
+
             this._snowParticles.push({
                 x: rng(),
                 y: rng(),
-                r: 1 + rng() * 2,
-                speedX: (rng() - 0.5) * 0.15,
-                speedY: 0.05 + rng() * 0.1,
-                alpha: 0.2 + rng() * 0.5,
+                r,
+                depth,
+                baseDriftX: (rng() - 0.5) * 0.08,
+                speedY: baseFallSpeed,
+                alpha,
+                isFlake,
+                wobblePhase: rng() * Math.PI * 2,
+                wobbleSpeed: 0.5 + rng() * 1.5,
             });
         }
     }
@@ -186,6 +216,7 @@ export default class SkihoppRenderer {
     render(ctx, width, height, jumperState, gameState, wind) {
         if (!this._initialized || !this.renderer) return;
 
+        this._wind = wind || { speed: 0, direction: 0 };
         this._time += 1 / 60;
 
         // --- Camera management ---
@@ -298,44 +329,129 @@ export default class SkihoppRenderer {
     // ------------------------------------------------------------------
 
     _drawSky(ctx, w, h) {
+        // Richer sky gradient: very dark top, deep blue middle, slight teal near horizon
         const grad = ctx.createLinearGradient(0, 0, 0, h);
-        grad.addColorStop(0, '#050520');
-        grad.addColorStop(0.4, '#0a0a2e');
-        grad.addColorStop(0.7, '#1a3a6e');
-        grad.addColorStop(1, '#243b6e');
+        grad.addColorStop(0, '#020210');
+        grad.addColorStop(0.25, '#060828');
+        grad.addColorStop(0.45, '#0a1240');
+        grad.addColorStop(0.65, '#0e2a5e');
+        grad.addColorStop(0.80, '#133a5c');
+        grad.addColorStop(0.92, '#1a4a58');
+        grad.addColorStop(1, '#1e5460');
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
 
-        // Aurora borealis
+        // Subtle warm amber/orange glow at horizon
+        const hGlowGrad = ctx.createLinearGradient(0, h * 0.75, 0, h);
+        hGlowGrad.addColorStop(0, 'rgba(255,180,80,0)');
+        hGlowGrad.addColorStop(0.4, 'rgba(255,160,60,0.04)');
+        hGlowGrad.addColorStop(0.7, 'rgba(255,140,40,0.06)');
+        hGlowGrad.addColorStop(1, 'rgba(255,120,30,0.03)');
+        ctx.fillStyle = hGlowGrad;
+        ctx.fillRect(0, h * 0.75, w, h * 0.25);
+
+        // Aurora borealis: 5 overlapping sine waves, vivid green/teal/purple
         const t = (this._time || 0);
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
-        for (let i = 0; i < 3; i++) {
-            const baseY = h * (0.12 + i * 0.06);
+        const auroraLayers = [
+            { baseY: 0.10, color: [64, 255, 128],  alpha: 0.10, freqs: [0.007, 0.013, 0.021], speeds: [0.35, 0.6, 0.25] },
+            { baseY: 0.14, color: [64, 255, 221],  alpha: 0.09, freqs: [0.009, 0.017, 0.006], speeds: [0.45, 0.3, 0.55] },
+            { baseY: 0.18, color: [128, 64, 255],  alpha: 0.08, freqs: [0.006, 0.014, 0.023], speeds: [0.5, 0.7, 0.35] },
+            { baseY: 0.13, color: [64, 255, 180],  alpha: 0.11, freqs: [0.011, 0.019, 0.008], speeds: [0.3, 0.5, 0.65] },
+            { baseY: 0.21, color: [100, 80, 255],  alpha: 0.08, freqs: [0.008, 0.016, 0.025], speeds: [0.55, 0.4, 0.3] },
+        ];
+        for (let i = 0; i < auroraLayers.length; i++) {
+            const al = auroraLayers[i];
+            const baseY = h * al.baseY;
             ctx.beginPath();
             ctx.moveTo(0, baseY);
-            for (let x = 0; x <= w; x += 4) {
-                const wave = Math.sin(x * 0.008 + t * 0.4 + i * 2.1) * 20
-                           + Math.sin(x * 0.015 + t * 0.7 + i) * 10;
+            for (let x = 0; x <= w; x += 3) {
+                const wave = Math.sin(x * al.freqs[0] + t * al.speeds[0] + i * 1.8) * 22
+                           + Math.sin(x * al.freqs[1] + t * al.speeds[1] + i * 0.7) * 14
+                           + Math.sin(x * al.freqs[2] + t * al.speeds[2] + i * 2.5) * 8;
                 ctx.lineTo(x, baseY + wave);
             }
-            ctx.lineTo(w, h * 0.4);
-            ctx.lineTo(0, h * 0.4);
+            ctx.lineTo(w, h * 0.38);
+            ctx.lineTo(0, h * 0.38);
             ctx.closePath();
-            const colors = ['rgba(0,255,128,0.06)', 'rgba(80,200,255,0.04)', 'rgba(180,100,255,0.03)'];
-            ctx.fillStyle = colors[i];
+
+            // Vertical gradient fade for each aurora band
+            const aGrad = ctx.createLinearGradient(0, baseY - 25, 0, h * 0.38);
+            const [r, g, b] = al.color;
+            aGrad.addColorStop(0, `rgba(${r},${g},${b},${(al.alpha * 0.3).toFixed(3)})`);
+            aGrad.addColorStop(0.3, `rgba(${r},${g},${b},${al.alpha.toFixed(3)})`);
+            aGrad.addColorStop(0.7, `rgba(${r},${g},${b},${(al.alpha * 0.5).toFixed(3)})`);
+            aGrad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+            ctx.fillStyle = aGrad;
             ctx.fill();
         }
         ctx.restore();
 
-        // Twinkling stars
+        // Crescent moon in the upper-left portion of the sky
+        const moonX = w * 0.18;
+        const moonY = h * 0.10;
+        const moonR = Math.min(w, h) * 0.030;
+        // Soft glow around the moon
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const moonGlow = ctx.createRadialGradient(moonX, moonY, moonR * 0.5, moonX, moonY, moonR * 4);
+        moonGlow.addColorStop(0, 'rgba(200,220,255,0.12)');
+        moonGlow.addColorStop(0.5, 'rgba(180,200,240,0.04)');
+        moonGlow.addColorStop(1, 'rgba(150,180,220,0)');
+        ctx.fillStyle = moonGlow;
+        ctx.fillRect(moonX - moonR * 5, moonY - moonR * 5, moonR * 10, moonR * 10);
+        ctx.restore();
+        // Crescent: draw bright disc, then clip with a dark disc offset to the right
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(230,235,255,0.9)';
+        ctx.fill();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.beginPath();
+        ctx.arc(moonX + moonR * 0.5, moonY - moonR * 0.15, moonR * 0.85, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0,0,0,1)';
+        ctx.fill();
+        ctx.restore();
+
+        // Twinkling stars with sparkle shapes on bright ones
         for (const s of this._stars) {
             const twinkle = 0.5 + 0.5 * Math.sin(t * s.twinkleSpeed + s.twinkleOffset);
-            const alpha = s.a * (0.4 + 0.6 * twinkle);
-            ctx.beginPath();
-            ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
-            ctx.fill();
+            const alpha = s.a * (0.2 + 0.8 * twinkle);
+            const sx = s.x * w;
+            const sy = s.y * h;
+
+            if (s.sparkle) {
+                // Cross/sparkle shape: 4 radiating lines from center
+                const armLen = s.r * 2.5 + twinkle * 2.0;
+                ctx.save();
+                ctx.strokeStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+                ctx.lineWidth = 0.7;
+                ctx.beginPath();
+                ctx.moveTo(sx, sy - armLen);
+                ctx.lineTo(sx, sy + armLen);
+                ctx.moveTo(sx - armLen, sy);
+                ctx.lineTo(sx + armLen, sy);
+                const diagLen = armLen * 0.55;
+                ctx.moveTo(sx - diagLen, sy - diagLen);
+                ctx.lineTo(sx + diagLen, sy + diagLen);
+                ctx.moveTo(sx + diagLen, sy - diagLen);
+                ctx.lineTo(sx - diagLen, sy + diagLen);
+                ctx.stroke();
+                // Bright center dot
+                ctx.beginPath();
+                ctx.arc(sx, sy, s.r * 0.8, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255,255,255,${Math.min(1, alpha * 1.3).toFixed(2)})`;
+                ctx.fill();
+                ctx.restore();
+            } else {
+                // Regular dot star
+                ctx.beginPath();
+                ctx.arc(sx, sy, s.r, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+                ctx.fill();
+            }
         }
     }
 
@@ -1562,17 +1678,49 @@ export default class SkihoppRenderer {
     // ------------------------------------------------------------------
 
     _drawSnowParticles(ctx, w, h) {
-        const now = Date.now() * 0.001;
+        const t = this._time || 0;
+        const wind = this._wind || { speed: 0, direction: 0 };
+        // Wind influence on horizontal drift: direction in radians, speed in m/s
+        // Normalize to a gentle screen-space factor
+        const windDriftX = Math.cos(wind.direction || 0) * (wind.speed || 0) * 0.012;
 
+        ctx.save();
         for (const p of this._snowParticles) {
-            // Animate position (wrapping)
-            const px = ((p.x + p.speedX * now) % 1 + 1) % 1;
-            const py = ((p.y + p.speedY * now) % 1 + 1) % 1;
+            // Horizontal: base drift + wind (wind affects all, but more for larger particles)
+            const windFactor = 0.5 + p.depth * 0.5;
+            const driftX = p.baseDriftX + windDriftX * windFactor;
+            // Add a gentle wobble
+            const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
 
-            ctx.beginPath();
-            ctx.arc(px * w, py * h, p.r, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,255,255,${p.alpha})`;
-            ctx.fill();
+            // Animate position with wrapping
+            const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
+            const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
+
+            const sx = px * w;
+            const sy = py * h;
+
+            ctx.globalAlpha = p.alpha;
+
+            if (p.isFlake) {
+                // Draw a 6-armed snowflake star
+                const armLen = p.r * 1.2;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 0.6;
+                ctx.beginPath();
+                for (let a = 0; a < 6; a++) {
+                    const angle = (a / 6) * Math.PI * 2;
+                    ctx.moveTo(sx, sy);
+                    ctx.lineTo(sx + Math.cos(angle) * armLen, sy + Math.sin(angle) * armLen);
+                }
+                ctx.stroke();
+            } else {
+                // Simple circular snowflake
+                ctx.beginPath();
+                ctx.arc(sx, sy, p.r, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+            }
         }
+        ctx.restore();
     }
 }
