@@ -333,8 +333,18 @@ export default class SkihoppControls {
   }
 
   _handleReadyTap() {
-    // Do nothing — let the 3-2-1 countdown in SkihoppGame.update() finish naturally.
-    // Tapping during the countdown should not skip it.
+    // If tutorial is showing, advance it
+    const scene = this.game.currentScene;
+    if (scene && scene._showTutorial && scene.tutorialScreen) {
+      scene.tutorialScreen.handleTap();
+      if (scene.tutorialScreen.isComplete()) {
+        scene._showTutorial = false;
+        scene._tutorialShown = true;
+        scene._countdownTimer = 0; // Start countdown after tutorial
+      }
+      return;
+    }
+    // Otherwise do nothing — let the 3-2-1 countdown finish naturally.
   }
 
   /**

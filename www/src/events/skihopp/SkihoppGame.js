@@ -24,6 +24,7 @@ import MenuScreen from '../../ui/MenuScreen.js';
 import HUD from '../../ui/HUD.js';
 import JudgeDisplay from '../../ui/JudgeDisplay.js';
 import Scoreboard from '../../ui/Scoreboard.js';
+import TutorialScreen from '../../ui/TutorialScreen.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -58,6 +59,9 @@ export default class SkihoppGame {
         this.hud = null;
         this.judgeDisplay = null;
         this.scoreboard = null;
+        this.tutorialScreen = null;
+        this._showTutorial = false;
+        this._tutorialShown = false;
 
         // Module references
         this._audio = null;
@@ -182,6 +186,7 @@ export default class SkihoppGame {
         this.hud = new HUD();
         this.judgeDisplay = new JudgeDisplay();
         this.scoreboard = new Scoreboard();
+        this.tutorialScreen = new TutorialScreen();
 
         // ----------------------------------------------------------
         // 10. Initial state is set by Game._init() after scene loads
@@ -207,6 +212,12 @@ export default class SkihoppGame {
         jumperState.wind = this.wind.isHeadwind()
             ? -this.wind.getSpeed()
             : this.wind.getSpeed();
+
+        // Tutorial during READY state
+        if (state === GameState.READY && this._showTutorial) {
+            this.tutorialScreen.update(dt);
+            return; // Don't run countdown while tutorial is showing
+        }
 
         // Countdown timer during READY state
         if (state === GameState.READY) {
@@ -273,11 +284,17 @@ export default class SkihoppGame {
                 break;
 
             case GameState.READY:
-                // Render the 3D scene behind the countdown
+                // Render the 3D scene behind
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
                     speed: this.wind.getSpeed(),
                     direction: this.wind.getDirection(),
                 });
+
+                // Show tutorial overlay if active
+                if (this._showTutorial) {
+                    this.tutorialScreen.render(ctx, width, height);
+                    break;
+                }
 
                 // Draw countdown overlay
                 {
@@ -402,6 +419,12 @@ export default class SkihoppGame {
                 this._landingTimer = 0;
                 this._scoreResult = null;
                 this._scoreAnimationTime = 0;
+
+                // Show tutorial before first jump
+                if (!this._tutorialShown) {
+                    this._showTutorial = true;
+                    this.tutorialScreen.reset();
+                }
 
                 // Stop wind sound from previous run
                 this._safeAudioCall('stopWind');
