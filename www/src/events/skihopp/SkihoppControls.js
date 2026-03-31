@@ -182,11 +182,48 @@ export default class SkihoppControls {
     const cfg = game.config && game.config.skihopp;
     if (cfg) {
       this._angleChangeRate = cfg.flight?.angleChangeRate ?? ANGLE_CHANGE_RATE;
+
+      // Inrun config values
+      this._untuckedSpeedFloor = cfg.inrun?.untuckedSpeedFloor ?? UNTUCKED_SPEED_FLOOR;
+
+      // Takeoff config values
+      this._autoLaunchQuality = cfg.takeoff?.autoLaunchQuality ?? TAKEOFF_AUTO_QUALITY;
+
+      // Flight config values
+      this._defaultAngle = cfg.flight?.defaultAngle ?? BODY_ANGLE_DEFAULT;
+      this._optimalAngle = cfg.flight?.optimalAngle ?? BODY_ANGLE_OPTIMAL;
+      this._autoDriftRate = cfg.flight?.autoDriftRate ?? ANGLE_AUTO_DRIFT;
+
+      // Landing config values
+      this._telemarkWindow = cfg.landing?.telemarkWindow ?? LANDING_WINDOW_MS;
+      this._telemarkAttemptWindow = cfg.landing?.telemarkAttemptWindow ?? LANDING_ATTEMPT_MS;
+    } else {
+      this._untuckedSpeedFloor = UNTUCKED_SPEED_FLOOR;
+      this._autoLaunchQuality = TAKEOFF_AUTO_QUALITY;
+      this._defaultAngle = BODY_ANGLE_DEFAULT;
+      this._optimalAngle = BODY_ANGLE_OPTIMAL;
+      this._autoDriftRate = ANGLE_AUTO_DRIFT;
+      this._telemarkWindow = LANDING_WINDOW_MS;
+      this._telemarkAttemptWindow = LANDING_ATTEMPT_MS;
     }
 
-    // Apply difficulty preset from settings
+    // Apply difficulty preset: prefer config-driven difficulty settings over hardcoded presets
     const diffKey = (game.config && game.config.difficulty) || 'normal';
-    this._difficulty = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
+    const cfgDiff = cfg && cfg.difficulty && cfg.difficulty[diffKey];
+    if (cfgDiff) {
+      // Use config.json difficulty values, falling back to hardcoded preset per field
+      const fallback = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
+      this._difficulty = {
+        takeoffPerfectMs:  cfgDiff.takeoffPerfectMs  ?? fallback.takeoffPerfectMs,
+        takeoffWindowMs:   cfgDiff.takeoffWindowMs   ?? fallback.takeoffWindowMs,
+        landingWindowMs:   cfgDiff.landingWindowMs   ?? fallback.landingWindowMs,
+        landingAttemptMs:  cfgDiff.landingAttemptMs  ?? fallback.landingAttemptMs,
+        autoQuality:       cfgDiff.autoLaunchQuality ?? fallback.autoQuality,
+        untuckedFloor:     cfgDiff.untuckedSpeedFloor ?? fallback.untuckedFloor,
+      };
+    } else {
+      this._difficulty = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
+    }
 
     // Register input listeners
     this._unsubs.push(this._input.onTap(this._onTap.bind(this)));
@@ -470,6 +507,9 @@ export default class SkihoppControls {
       // Do NOT modify js.speed here — physics handles the speed calculation.
     }
     // Not tucked = worse aerodynamics — also handled by physics via isTucked flag.
+    // Expose untucked speed floor so physics can enforce the minimum speed fraction.
+    // Tuck is a bonus, not a requirement: even without holding, player gets floor% of max.
+    js.untuckedSpeedFloor = this._difficulty.untuckedFloor ?? this._untuckedSpeedFloor;
 
     // Visual feedback: glow indicator for tuck state
     const fb = this.game.feedback;
@@ -506,10 +546,10 @@ export default class SkihoppControls {
     const elapsed = now - this._takeoffWindowStart;
     const fb = this.game.feedback;
 
-    // Use difficulty-scaled windows
+    // Use difficulty-scaled windows, with config fallback for auto-launch quality
     const perfectMs = this._difficulty.takeoffPerfectMs;
     const windowMs = this._difficulty.takeoffWindowMs;
-    const autoQ = this._difficulty.autoQuality;
+    const autoQ = this._difficulty.autoQuality ?? this._autoLaunchQuality;
 
     // Calculate takeoff quality based on timing
     if (elapsed <= perfectMs) {

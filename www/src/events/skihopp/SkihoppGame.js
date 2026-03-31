@@ -142,6 +142,7 @@ export default class SkihoppGame {
         // Perfect takeoff flash
         this._perfectFlashAlpha = 0;
         this._perfectFlashTime = 0;
+        this._perfectFlashTimer = 0;
         this._showPerfektText = false;
 
         // Progression results from last jump
@@ -400,8 +401,9 @@ export default class SkihoppGame {
         // Perfect takeoff flash decay
         if (this._perfectFlashAlpha > 0) {
             this._perfectFlashTime += dt;
+            this._perfectFlashTimer += dt;
             this._perfectFlashAlpha = Math.max(0, this._perfectFlashAlpha - dt * 2);
-            if (this._perfectFlashTime >= 0.5) {
+            if (this._perfectFlashTimer >= 0.5) {
                 this._showPerfektText = false;
             }
         }
@@ -632,9 +634,9 @@ export default class SkihoppGame {
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
                     ctx.fillRect(0, 0, width, height);
 
-                    // HOP! screen flash (green-white)
+                    // HOP! screen flash (white)
                     if (this._hopFlashAlpha > 0) {
-                        ctx.fillStyle = `rgba(100, 255, 100, ${this._hopFlashAlpha})`;
+                        ctx.fillStyle = `rgba(255, 255, 255, ${this._hopFlashAlpha})`;
                         ctx.fillRect(0, 0, width, height);
                     }
 
@@ -643,15 +645,15 @@ export default class SkihoppGame {
                     ctx.globalAlpha = fadeAlpha;
 
                     if (isHop) {
-                        ctx.fillStyle = '#00ff44';
-                        ctx.font = 'bold 84px sans-serif';
+                        ctx.fillStyle = '#44ff88';
+                        ctx.font = 'bold 80px sans-serif';
                     } else {
                         ctx.fillStyle = '#ffffff';
                         ctx.font = 'bold 72px sans-serif';
                     }
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.shadowColor = isHop ? 'rgba(0, 80, 0, 0.8)' : 'rgba(0, 0, 0, 0.6)';
+                    ctx.shadowColor = isHop ? 'rgba(0, 100, 50, 0.8)' : 'rgba(0, 0, 0, 0.6)';
                     ctx.shadowBlur = isHop ? 16 : 8;
                     ctx.fillText(countdownText, 0, 0);
                     ctx.restore();
@@ -905,6 +907,7 @@ export default class SkihoppGame {
                 if (jumperState.takeoffQuality > 0.9) {
                     this._perfectFlashAlpha = 1.0;
                     this._perfectFlashTime = 0;
+                    this._perfectFlashTimer = 0;
                     this._showPerfektText = true;
                     this._safeAudioCall('playPerfectTakeoff');
                 }

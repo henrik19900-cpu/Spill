@@ -2415,14 +2415,14 @@ export default class SkihoppRenderer {
     _drawSpeedLines(ctx, js) {
         if (!js) return;
         const speedKmh = (js.speed || 0) * 3.6;
-        if (speedKmh <= 70) return;
+        if (speedKmh <= 65) return; // ~18 m/s threshold
 
         const r = this.renderer;
         const sp = r.worldToScreen(js.x, js.y);
         const ppm = r.ppm;
 
-        // 3 streaks at 70 km/h, up to 5 at 90+ km/h
-        const numStreaks = Math.min(5, 3 + Math.floor((speedKmh - 70) / 10));
+        // 3 streaks at 65 km/h, up to 5 at 85+ km/h
+        const numStreaks = Math.min(5, 3 + Math.floor((speedKmh - 65) / 10));
         const t = this._time;
 
         ctx.save();
@@ -2435,7 +2435,7 @@ export default class SkihoppRenderer {
             const phase = ((t * 8 + i * 1.7) % 1);
             // Start behind the jumper, slide further back
             const startOffset = (0.5 + phase * 1.5) * ppm;
-            const streakLen = (0.8 + (speedKmh - 70) / 80) * ppm;
+            const streakLen = (0.8 + (speedKmh - 65) / 80) * ppm;
 
             const sx = sp.x + startOffset;
             const sy = sp.y + yOffset - 0.3 * ppm;
@@ -2443,7 +2443,7 @@ export default class SkihoppRenderer {
             const ey = sy + streakLen * 0.15;
 
             // Fade based on phase (appear then disappear)
-            const alpha = Math.sin(phase * Math.PI) * 0.4 * Math.min(1, (speedKmh - 70) / 20);
+            const alpha = Math.sin(phase * Math.PI) * 0.4 * Math.min(1, (speedKmh - 65) / 20);
 
             ctx.globalAlpha = alpha;
             ctx.strokeStyle = '#ffffff';
