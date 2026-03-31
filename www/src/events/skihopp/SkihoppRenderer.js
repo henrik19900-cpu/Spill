@@ -492,13 +492,21 @@ export default class SkihoppRenderer {
         // --- Camera management ---
         this._updateCamera(jumperState, gameState, 1 / 60);
 
-        // Camera shake from vibration/landing
+        // Camera shake from vibration/landing + cinematic rotation
         const vib = jumperState.vibration || 0;
-        if (vib > 0.01) {
-            const shakeX = (Math.random() - 0.5) * vib * 4;
-            const shakeY = (Math.random() - 0.5) * vib * 4;
+        const hasRotation = Math.abs(this._cameraRotation || 0) > 0.0001;
+        if (vib > 0.01 || hasRotation) {
+            const shakeX = vib > 0.01 ? (Math.random() - 0.5) * vib * 4 : 0;
+            const shakeY = vib > 0.01 ? (Math.random() - 0.5) * vib * 4 : 0;
             ctx.save();
-            ctx.translate(shakeX, shakeY);
+            if (hasRotation) {
+                ctx.translate(width / 2, height / 2);
+                ctx.rotate(this._cameraRotation);
+                ctx.translate(-width / 2, -height / 2);
+            }
+            if (vib > 0.01) {
+                ctx.translate(shakeX, shakeY);
+            }
         }
 
         // --- Detect state transitions for particle effects ---
@@ -575,8 +583,8 @@ export default class SkihoppRenderer {
         // Premium: lens flare from floodlights
         try { this._drawLensFlare(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawLensFlare error:', e); }
 
-        // Restore camera shake transform
-        if ((jumperState.vibration || 0) > 0.01) {
+        // Restore camera shake/rotation transform
+        if ((jumperState.vibration || 0) > 0.01 || Math.abs(this._cameraRotation || 0) > 0.0001) {
             ctx.restore();
         }
 
@@ -591,13 +599,47 @@ export default class SkihoppRenderer {
     // Camera
     // ------------------------------------------------------------------
 
+    /**
+     * Cubic ease-in-out for smooth camera transitions.
+     * @param {number} t - value in [0, 1]
+     * @returns {number} eased value in [0, 1]
+     */
+    _easeInOutCubic(t) {
+        if (t < 0) return 0;
+        if (t > 1) return 1;
+        return t < 0.5
+            ? 4 * t * t * t
+            : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
     _updateCamera(jumperState, gameState, dt) {
         const r = this.renderer;
         if (!r || !this.hill) return;
         let targetZoom, targetX, targetY;
-        // Very smooth transitions across all states (lerp speed 2)
         let followSpeed = 2;
         let zoomSpeed = 2;
+
+        // Track phase transitions for cinematic timing
+        if (this._cameraPrevPhase !== gameState) {
+            this._cameraPhaseTime = 0;
+            if (gameState === GameState.TAKEOFF) {
+                this._takeoffZoomPulse = 0.2;
+            }
+            if (gameState === GameState.LANDING) {
+                this._landingZoomHit = true;
+            }
+            if (gameState === GameState.SCORE) {
+                this._scoreStartX = jumperState.x;
+                this._scoreStartY = jumperState.y;
+            }
+            this._cameraPrevPhase = gameState;
+        }
+        this._cameraPhaseTime += dt;
+
+        // Decay takeoff pulse timer
+        if (this._takeoffZoomPulse > 0) {
+            this._takeoffZoomPulse = Math.max(0, this._takeoffZoomPulse - dt);
+        }
 
         switch (gameState) {
             case GameState.MENU:
@@ -610,47 +652,123 @@ export default class SkihoppRenderer {
                 targetZoom = 0.7;
                 followSpeed = 2;
                 zoomSpeed = 2;
+                this._cameraRotation = 0;
                 break;
             }
             case GameState.INRUN: {
-                // Follow jumper closely, slightly ahead so track is visible
-                // Lead the jumper by a few meters downhill
-                targetX = jumperState.x + 5;
-                // Slightly above to show surrounding area
+                // CINEMATIC INRUN: start wide, gradually zoom in as speed builds.
+                // Subtle forward bias - camera slightly ahead of jumper.
+                const speed = jumperState.speed || 0;
+                const maxSpeed = 26; // matches SkihoppPhysics maxSpeed
+                const speedRatio = Math.min(speed / maxSpeed, 1);
+                const zoomEased = this._easeInOutCubic(speedRatio);
+
+                // Zoom ramps from 1.5 (wide) to 3.0 (tight) with speed
+                targetZoom = 1.5 + 1.5 * zoomEased;
+
+                // Forward bias increases with speed (3m to 8m ahead)
+                const leadDistance = 3 + 5 * zoomEased;
+                targetX = jumperState.x + leadDistance;
                 targetY = jumperState.y - 2;
-                // Tight zoom on the jumper during inrun
-                targetZoom = 2.5;
-                // Fast follow so camera catches up quickly at inrun start
+
                 followSpeed = 5;
                 zoomSpeed = 3;
+                this._cameraRotation = 0;
                 break;
             }
             case GameState.TAKEOFF: {
-                // Dramatic launch moment: slight zoom in, centred on jumper
+                // CINEMATIC TAKEOFF: 0.2s zoom-in pulse (zoom * 1.1) for impact
                 targetX = jumperState.x + 3;
                 targetY = jumperState.y - 2;
-                targetZoom = 3.0;
-                followSpeed = 2;
-                zoomSpeed = 2;
+
+                const pulseT = this._takeoffZoomPulse / 0.2; // 1 at start, 0 at end
+                const pulseEased = this._easeInOutCubic(pulseT);
+                targetZoom = 3.0 * (1 + 0.1 * pulseEased);
+
+                followSpeed = 6;
+                zoomSpeed = 8;
+                this._cameraRotation = 0;
                 break;
             }
             case GameState.FLIGHT: {
-                // Smoothly pull back to show the full flight arc
-                // Keep camera ahead and above so landing area stays visible
+                // CINEMATIC FLIGHT: dynamic zoom based on height, gentle rotation
+                const height = Math.max(0, -(jumperState.y || 0));
+                const heightFactor = Math.min(height / 20, 1);
+                const heightEased = this._easeInOutCubic(heightFactor);
+
+                // Zoom out more the higher the jumper goes (1.4 to 0.9)
+                targetZoom = 1.4 - 0.5 * heightEased;
+
+                // Keep camera ahead and above; more offset when higher
                 targetX = jumperState.x + 12;
-                targetY = jumperState.y - 8;
-                targetZoom = 1.2;
-                followSpeed = 2;
+                targetY = jumperState.y - 6 - 4 * heightEased;
+
+                followSpeed = 2.5;
                 zoomSpeed = 2;
+
+                // Gentle rotation following flight angle (max 2 degrees)
+                const vx = jumperState.vx || 0;
+                const vy = jumperState.vy || 0;
+                if (Math.abs(vx) > 0.1 || Math.abs(vy) > 0.1) {
+                    const flightAngle = Math.atan2(vy, vx);
+                    const maxRot = 2 * Math.PI / 180;
+                    const targetRot = Math.max(-maxRot, Math.min(maxRot, flightAngle * 0.3));
+                    const rotFactor = 1 - Math.exp(-2 * dt);
+                    this._cameraRotation += (targetRot - this._cameraRotation) * rotFactor;
+                }
                 break;
             }
             case GameState.LANDING: {
-                // Quick zoom to show the telemark landing clearly
+                // CINEMATIC LANDING: quick zoom in on impact, then bounce back
+                const landT = this._cameraPhaseTime;
+                const impactForce = jumperState.impactForce || Math.abs(jumperState.vy || 0) * 2;
+
+                if (landT < 0.15) {
+                    // Quick zoom IN to 2.5 on impact (first 150ms)
+                    const hitEased = this._easeInOutCubic(landT / 0.15);
+                    targetZoom = 2.0 + 0.5 * hitEased;
+                    zoomSpeed = 12;
+                } else if (landT < 0.5) {
+                    // Bounce back slightly (150ms-500ms)
+                    const bounceT = (landT - 0.15) / 0.35;
+                    const bounceEased = this._easeInOutCubic(bounceT);
+                    targetZoom = 2.5 - 0.3 * bounceEased;
+                    zoomSpeed = 6;
+                } else {
+                    // Settle
+                    targetZoom = 2.2;
+                    zoomSpeed = 3;
+                }
+
                 targetX = jumperState.x + 2;
                 targetY = jumperState.y - 1.5;
-                targetZoom = 2.0;
-                followSpeed = 2;
-                zoomSpeed = 2;
+                followSpeed = 5;
+
+                // Enhanced camera shake proportional to impact force
+                if (this._landingZoomHit && landT < 0.3) {
+                    const shakeMag = Math.min(impactForce * 0.5, 6);
+                    const shakeDecay = 1 - this._easeInOutCubic(landT / 0.3);
+                    r.cameraX += (Math.random() - 0.5) * shakeMag * shakeDecay * dt;
+                    r.cameraY += (Math.random() - 0.5) * shakeMag * shakeDecay * dt;
+                }
+                if (landT > 0.3) this._landingZoomHit = false;
+
+                // Ease rotation back to zero
+                this._cameraRotation *= (1 - 5 * dt);
+                break;
+            }
+            case GameState.SCORE: {
+                // CINEMATIC SCORE: slow drift to side, gentle zoom out
+                const scoreT = this._cameraPhaseTime;
+                const driftEased = this._easeInOutCubic(Math.min(scoreT / 3, 1));
+
+                targetX = this._scoreStartX + 8 * driftEased;
+                targetY = this._scoreStartY - 3 * driftEased;
+                targetZoom = 2.2 - 1.0 * driftEased;
+
+                followSpeed = 1.5;
+                zoomSpeed = 1.5;
+                this._cameraRotation *= (1 - 3 * dt);
                 break;
             }
             default:
@@ -659,6 +777,7 @@ export default class SkihoppRenderer {
                 targetZoom = 1.5;
                 followSpeed = 2;
                 zoomSpeed = 2;
+                this._cameraRotation = 0;
         }
 
         r.smoothFollow(targetX, targetY, dt, followSpeed);
@@ -1485,6 +1604,38 @@ export default class SkihoppRenderer {
         iceGrad.addColorStop(1, '#d0e8ff');
         ctx.fillStyle = iceGrad;
         ctx.fill();
+
+        // --- Ice texture: subtle horizontal streaks of lighter blue ---
+        ctx.save();
+        if (!this._iceStreaks) {
+            const iceRng = seededRandom(3030);
+            this._iceStreaks = [];
+            for (let i = 0; i < 18; i++) {
+                this._iceStreaks.push({
+                    tNorm: iceRng(),
+                    offsetY: (iceRng() - 0.5) * 0.6,
+                    alpha: 0.12 + iceRng() * 0.18,
+                    width: 0.5 + iceRng() * 1.0,
+                    color: iceRng() < 0.5 ? '#e8f4ff' : '#d0ecff',
+                });
+            }
+        }
+        for (const streak of this._iceStreaks) {
+            const idx = Math.floor(streak.tNorm * (inrunPts.length - 10));
+            if (idx < 0 || idx + 8 >= inrunPts.length) continue;
+            ctx.globalAlpha = streak.alpha;
+            ctx.strokeStyle = streak.color;
+            ctx.lineWidth = streak.width;
+            ctx.beginPath();
+            for (let j = 0; j < 8; j++) {
+                const pt = inrunPts[idx + j];
+                const sp = r.worldToScreen(pt.x, pt.y + streak.offsetY);
+                if (j === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
 
         // Icy glare streaks
         ctx.save();

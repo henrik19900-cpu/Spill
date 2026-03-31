@@ -71,14 +71,31 @@ export default class Renderer {
     }
 
     /**
-     * Smoothly interpolate zoom toward a target value.
+     * Cubic ease-in-out helper for smooth transitions.
+     * @param {number} t - value in [0, 1]
+     * @returns {number} eased value in [0, 1]
+     */
+    _easeInOutCubic(t) {
+        if (t < 0) return 0;
+        if (t > 1) return 1;
+        return t < 0.5
+            ? 4 * t * t * t
+            : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
+    /**
+     * Smoothly interpolate zoom toward a target value using cubic easing.
      * @param {number} targetZoom
      * @param {number} dt
      * @param {number} speed
      */
     smoothZoom(targetZoom, dt, speed = 3) {
-        const factor = 1 - Math.exp(-speed * dt);
-        this.zoom += (targetZoom - this.zoom) * factor;
+        const diff = targetZoom - this.zoom;
+        // Use cubic easing on the exponential factor for smoother acceleration
+        const rawFactor = 1 - Math.exp(-speed * dt);
+        // Map the raw factor through cubic ease for non-linear smoothness
+        const factor = this._easeInOutCubic(rawFactor / 0.5) * 0.5;
+        this.zoom += diff * (factor || rawFactor);
         this._recalcScale();
     }
 

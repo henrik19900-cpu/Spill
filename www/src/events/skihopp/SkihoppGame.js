@@ -378,9 +378,19 @@ export default class SkihoppGame {
 
         // Slowmotion support via game feedback
         const fb = this.game.feedback;
-        if (fb && fb.slowMotion && performance.now() < fb.slowMotion.until) {
+        const isSlowmo = fb && fb.slowMotion && performance.now() < fb.slowMotion.until;
+        if (isSlowmo) {
             dt *= fb.slowMotion.factor;
         }
+        this._slowmoActive = !!isSlowmo;
+        if (isSlowmo) {
+            this._slowmoTextAlpha = Math.min(1, (this._slowmoTextAlpha || 0) + dt * 8);
+        } else {
+            this._slowmoTextAlpha = Math.max(0, (this._slowmoTextAlpha || 0) - dt * 4);
+        }
+
+        // Update screen shakes
+        this._updateShakes(dt);
 
         // Fade transition: decrease alpha each frame
         if (this._fadeAlpha > 0) {
@@ -1214,6 +1224,179 @@ export default class SkihoppGame {
                 ctx.shadowBlur = 0;
                 ctx.fillText(p.subtext, width / 2, panelY + panelH * 0.7);
             }
+        }
+
+        ctx.restore();
+    }
+
+    // ------------------------------------------------------------------
+    // Screen shake system
+    // ------------------------------------------------------------------
+
+    _addShake(intensity, duration) {
+        this._shakes.push({ intensity, duration, elapsed: 0 });
+    }
+
+    _updateShakes(dt) {
+        for (let i = this._shakes.length - 1; i >= 0; i--) {
+            this._shakes[i].elapsed += dt;
+            if (this._shakes[i].elapsed >= this._shakes[i].duration) {
+                this._shakes.splice(i, 1);
+            }
+        }
+    }
+
+    _getShakeOffset() {
+        let sx = 0, sy = 0;
+        for (const s of this._shakes) {
+            const remaining = 1 - s.elapsed / s.duration;
+            const mag = s.intensity * remaining;
+            sx += (Math.random() * 2 - 1) * mag;
+            sy += (Math.random() * 2 - 1) * mag;
+        }
+        return { x: sx, y: sy };
+    }
+
+    // ------------------------------------------------------------------
+    // Post-jump stats overlay
+    // ------------------------------------------------------------------
+
+    _renderPostJumpStats(ctx, width, height) {
+        const stats = this._postJumpStats;
+        if (!stats) return;
+
+        const t = this._postJumpStatsTimer;
+        const d = this._postJumpStatsDuration;
+        let alpha;
+        if (t < 0.4) alpha = t / 0.4;
+        else if (t > d - 0.4) alpha = Math.max(0, (d - t) / 0.4);
+        else alpha = 1;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+        ctx.fillRect(0, 0, width, height);
+
+        const panelW = Math.min(400, width * 0.8);
+        const panelH = 260;
+        const px = (width - panelW) / 2;
+        const py = (height - panelH) / 2;
+
+        ctx.fillStyle = 'rgba(20, 25, 40, 0.95)';
+        ctx.strokeStyle = '#4488ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(px, py, panelW, panelH, 12);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#4488ff';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('HOPPSTATISTIKK', width / 2, py + 30);
+
+        const rows = [
+            { label: 'Maks h\u00f8yde', value: `${stats.maxHeight.toFixed(1)} m`, best: this._personalBests.maxHeight, key: 'maxHeight' },
+            { label: 'Toppfart', value: `${stats.topSpeed.toFixed(1)} km/t`, best: this._personalBests.topSpeed, key: 'topSpeed' },
+            { label: 'Flygetid', value: `${stats.flightTime.toFixed(2)} s`, best: this._personalBests.flightTime, key: 'flightTime' },
+        ];
+
+        const startY = py + 70;
+        const rowH = 52;
+        for (let i = 0; i < rows.length; i++) {
+            const ry = startY + i * rowH;
+            const r = rows[i];
+            const isNewBest = r.key === 'maxHeight' ? stats.maxHeight > r.best
+                : r.key === 'topSpeed' ? stats.topSpeed > r.best
+                : stats.flightTime > r.best;
+
+            ctx.fillStyle = '#aabbcc';
+            ctx.font = '16px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(r.label, px + 24, ry);
+
+            ctx.fillStyle = isNewBest ? '#FFD700' : '#ffffff';
+            ctx.font = 'bold 22px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(r.value, px + panelW - 24, ry);
+
+            const bestVal = r.key === 'flightTime' ? r.best.toFixed(2) + ' s'
+                : r.key === 'topSpeed' ? r.best.toFixed(1) + ' km/t'
+                : r.best.toFixed(1) + ' m';
+            ctx.fillStyle = isNewBest ? '#FFD700' : '#667788';
+            ctx.font = '13px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(isNewBest ? 'NY PERS!' : `Pers: ${bestVal}`, px + panelW - 24, ry + 20);
+        }
+
+        ctx.restore();
+    }
+
+    // ------------------------------------------------------------------
+    // Combo / streak rendering
+    // ------------------------------------------------------------------
+
+    _renderComboText(ctx, width, height) {
+        if (this._comboTextTimer <= 0 || this._comboTextValue < 2) return;
+
+        const t = this._comboTextTimer;
+        const alpha = t < 0.5 ? t / 0.5 : (t > 1.5 ? Math.max(0, (2 - t) / 0.5) : 1);
+        const scale = 1 + 0.2 * Math.sin(t * 6);
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(width / 2, height * 0.22);
+        ctx.scale(scale, scale);
+
+        ctx.fillStyle = '#ff8844';
+        ctx.font = 'bold 36px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = 'rgba(255, 100, 0, 0.6)';
+        ctx.shadowBlur = 12;
+
+        let text = `Streak x${this._comboTextValue}!`;
+        if (this._comboTextValue >= 3) {
+            text += ` +${(this._comboTextValue - 1) * 10}% XP`;
+        }
+        ctx.fillText(text, 0, 0);
+        ctx.restore();
+    }
+
+    // ------------------------------------------------------------------
+    // Woosh transition rendering
+    // ------------------------------------------------------------------
+
+    _renderWooshTransition(ctx, width, height) {
+        if (!this._wooshActive) return;
+        const p = this._wooshProgress;
+
+        ctx.save();
+        const bandWidth = width * 0.35;
+        const leadEdge = p * (width + bandWidth * 2) - bandWidth;
+
+        ctx.fillStyle = '#0a0e1a';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(Math.max(0, leadEdge - bandWidth), 0);
+        ctx.lineTo(Math.max(0, leadEdge - bandWidth - 40), height);
+        ctx.lineTo(0, height);
+        ctx.closePath();
+        ctx.fill();
+
+        if (leadEdge > 0 && leadEdge - bandWidth < width) {
+            const grad = ctx.createLinearGradient(
+                leadEdge - bandWidth, 0, leadEdge, 0
+            );
+            grad.addColorStop(0, 'rgba(10, 14, 26, 0)');
+            grad.addColorStop(0.3, 'rgba(40, 80, 160, 0.4)');
+            grad.addColorStop(0.5, 'rgba(80, 140, 255, 0.6)');
+            grad.addColorStop(0.7, 'rgba(40, 80, 160, 0.4)');
+            grad.addColorStop(1, 'rgba(10, 14, 26, 0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(leadEdge - bandWidth, 0, bandWidth, height);
         }
 
         ctx.restore();
