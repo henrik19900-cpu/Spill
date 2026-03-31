@@ -2710,6 +2710,8 @@ export default class SkihoppRenderer {
         const r = this.renderer;
         const t = this._time;
         const jumperX = js.x;
+        const cw = r.width || 400;
+        const ch = r.height || 900;
 
         for (const spec of this._spectators) {
             // Distance from jumper x to spectator
@@ -2726,6 +2728,8 @@ export default class SkihoppRenderer {
             const intensity = (wavePhase - 0.3) / 0.7; // 0-1
 
             const sp = r.worldToScreen(spec.x, spec.y);
+            // Skip off-screen spectators
+            if (sp.x < -50 || sp.x > cw + 50 || sp.y < -80 || sp.y > ch + 20) continue;
             const ppm = r.ppm;
             const h = spec.h * ppm;
             const legLen = h * 0.35;
