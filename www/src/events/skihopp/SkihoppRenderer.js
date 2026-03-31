@@ -346,6 +346,26 @@ export default class SkihoppRenderer {
         this._initialized = true;
     }
 
+    /**
+     * Update the hill reference and regenerate hill-dependent visuals.
+     * Called when the player selects a different hill from the menu.
+     * @param {import('./Hill.js').default} hill
+     */
+    setHill(hill) {
+        this.hill = hill;
+        // Regenerate visuals that depend on hill geometry
+        this._generateMountains();
+        this._generateSpectators();
+        this._generateSnowParticles();
+        // Reset particle effects from previous hill
+        this._particles = new ParticlePool(500);
+        this._trailFrameCounter = 0;
+        this._windStreaks = [];
+        this._impactRipples = [];
+        this._milestoneFlashes = [];
+        this._passedMilestones.clear();
+    }
+
     // ------------------------------------------------------------------
     // Data generation (called once in init)
     // ------------------------------------------------------------------
@@ -596,6 +616,7 @@ export default class SkihoppRenderer {
         // Premium: dynamic lighting spotlight during flight
         try { this._drawDynamicLighting(ctx, width, height, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawDynamicLighting error:', e); }
 
+        this._lastJumperX = jumperState ? jumperState.x : 0;
         try { this._drawSpectators(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawSpectators error:', e); }
         try { this._drawCrowdWaveEffect(ctx, jumperState, gameState); } catch (e) { console.warn('[SkihoppRenderer] _drawCrowdWaveEffect error:', e); }
         try { this._drawJumperShadow(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawJumperShadow error:', e); }
@@ -622,9 +643,9 @@ export default class SkihoppRenderer {
         // Premium: impact ripples on landing
         try { this._drawImpactRipple(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawImpactRipple error:', e); }
 
-        try { this._drawCelebrationParticles(ctx, 1 / 60); } catch (e) { console.warn('[SkihoppRenderer] _drawCelebrationParticles error:', e); }
+        // Celebration particles now handled by unified _particles system
         try { this._drawMilestoneFlashes(ctx, jumperState, gameState); } catch (e) { console.warn('[SkihoppRenderer] _drawMilestoneFlashes error:', e); }
-        try { this._drawEffectParticles(ctx, 1 / 60); } catch (e) { console.warn('[SkihoppRenderer] _drawEffectParticles error:', e); }
+        try { this._particles.render(ctx, (x, y) => this.renderer.worldToScreen(x, y), this._time); } catch (e) { console.warn('[SkihoppRenderer] _particles.render error:', e); }
         try { this._drawSnowParticles(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawSnowParticles error:', e); }
 
         // Wind streaks during flight
@@ -1292,51 +1313,112 @@ export default class SkihoppRenderer {
         // --- Pine trees at varying distances along the ground ---
         this._drawSnowGroundTrees(ctx, w, h);
 
-        // --- Sparkle dots that twinkle over time ---
-        // Cache sparkle seeded random data
+        // --- Sparkle dots that twinkle over time (enhanced: more visible, faster) ---
         if (!this._snowGroundSparkles) {
             const rng2 = seededRandom(4040);
             this._snowGroundSparkles = [];
-            for (let i = 0; i < 70; i++) {
+            for (let i = 0; i < 120; i++) {
                 const wxNorm = rng2();
                 const wyOff = 1 + rng2() * 14;
-                const freq = 1.2 + rng2() * 2.5;
+                const freq = 2.5 + rng2() * 5.0;
                 const phase = rng2() * 6.28;
-                const dotR = 0.8 + rng2() * 1.0;
-                this._snowGroundSparkles.push({ wxNorm, wyOff, freq, phase, dotR });
+                const dotR = 1.0 + rng2() * 1.5;
+                const starSize = rng2() < 0.3;
+                this._snowGroundSparkles.push({ wxNorm, wyOff, freq, phase, dotR, starSize });
             }
         }
         const t = this._time || 0;
         ctx.save();
         ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 0.4;
+        ctx.lineWidth = 0.5;
         for (let i = 0; i < this._snowGroundSparkles.length; i++) {
             const sd = this._snowGroundSparkles[i];
             const raw = Math.sin(t * sd.freq + sd.phase);
-            if (raw < 0.3) continue;
+            if (raw < 0.1) continue;
             const wx = xStart + sd.wxNorm * xRange;
             const wy = this.hill.getHeightAtDistance(wx) + sd.wyOff;
             const sp = r.worldToScreen(wx, wy);
             if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) continue;
-            const intensity = (raw - 0.3) / 0.7;
-            ctx.globalAlpha = 0.25 * intensity * intensity;
+            const intensity = (raw - 0.1) / 0.9;
+            ctx.globalAlpha = 0.45 * intensity * intensity;
             ctx.beginPath();
-            ctx.arc(sp.x, sp.y, sd.dotR, 0, Math.PI * 2);
+            ctx.arc(sp.x, sp.y, sd.dotR * (0.7 + 0.3 * intensity), 0, Math.PI * 2);
             ctx.fill();
-            // Add a tiny cross-star on the brightest sparkles
-            if (intensity > 0.7) {
-                ctx.globalAlpha = 0.15 * intensity;
-                const cr = sd.dotR * 2.5;
+            // Cross-star on brighter sparkles
+            if (intensity > 0.5 || sd.starSize) {
+                ctx.globalAlpha = 0.3 * intensity;
+                const cr = sd.dotR * 3.0;
                 ctx.beginPath();
                 ctx.moveTo(sp.x - cr, sp.y);
                 ctx.lineTo(sp.x + cr, sp.y);
                 ctx.moveTo(sp.x, sp.y - cr);
                 ctx.lineTo(sp.x, sp.y + cr);
                 ctx.stroke();
+                // Diagonal cross for extra sparkle
+                if (intensity > 0.75) {
+                    ctx.globalAlpha = 0.15 * intensity;
+                    const dr = cr * 0.7;
+                    ctx.beginPath();
+                    ctx.moveTo(sp.x - dr, sp.y - dr);
+                    ctx.lineTo(sp.x + dr, sp.y + dr);
+                    ctx.moveTo(sp.x + dr, sp.y - dr);
+                    ctx.lineTo(sp.x - dr, sp.y + dr);
+                    ctx.stroke();
+                }
             }
         }
         ctx.restore();
+
+        // --- Wavy terrain bumps in the snow ---
+        ctx.save();
+        if (!this._snowBumps) {
+            const bumpRng = seededRandom(9191);
+            this._snowBumps = [];
+            for (let i = 0; i < 20; i++) {
+                const wxNorm = bumpRng();
+                const wyOff = 3 + bumpRng() * 18;
+                const bumpLen = 10 + bumpRng() * 30;
+                const amplitude = 0.3 + bumpRng() * 0.5;
+                const freq2 = 0.3 + bumpRng() * 0.4;
+                const phase2 = bumpRng() * 6.28;
+                this._snowBumps.push({ wxNorm, wyOff, bumpLen, amplitude, freq2, phase2 });
+            }
+        }
+        ctx.lineCap = 'round';
+        for (const bump of this._snowBumps) {
+            const baseWx = xStart + bump.wxNorm * xRange;
+            const baseWy = this.hill.getHeightAtDistance(baseWx) + bump.wyOff;
+            ctx.globalAlpha = 0.12;
+            ctx.strokeStyle = '#f4faff';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            for (let j = 0; j <= 16; j++) {
+                const rx = baseWx + (j / 16) * bump.bumpLen;
+                const ry = baseWy + Math.sin(j * bump.freq2 + bump.phase2) * bump.amplitude;
+                const sp = r.worldToScreen(rx, ry);
+                if (j === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+            // Shadow below bump
+            ctx.globalAlpha = 0.05;
+            ctx.strokeStyle = '#8099bb';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            for (let j = 0; j <= 16; j++) {
+                const rx = baseWx + (j / 16) * bump.bumpLen;
+                const ry = baseWy + Math.sin(j * bump.freq2 + bump.phase2) * bump.amplitude + 0.4;
+                const sp = r.worldToScreen(rx, ry);
+                if (j === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // --- Small hut/building near the outrun ---
+        this._drawOutrunHut(ctx, w, h);
 
         // --- Original pine trees along the hill sides ---
         this._drawPineTrees(ctx, w, h);
@@ -1345,7 +1427,106 @@ export default class SkihoppRenderer {
         this._drawCrowdArea(ctx, w, h);
     }
 
-    /** Draw 10-15 recognizable pine trees at varying distances along the snowy ground. */
+    /** Draw a small hut/building near the outrun area. */
+    _drawOutrunHut(ctx, w, h) {
+        if (!this.hill) return;
+        const r = this.renderer;
+        const landingPts = this.hill.getLandingPoints();
+        if (!landingPts || landingPts.length === 0) return;
+        const last = landingPts[landingPts.length - 1];
+        const hutX = last.x - 8;
+        const hutBaseY = this.hill.getHeightAtDistance(hutX) + 6;
+        const t = this._time || 0;
+
+        const base = r.worldToScreen(hutX, hutBaseY);
+        const hutW = 18;
+        const hutH = 14;
+        const roofH = 7;
+
+        // Hut body (warm wood brown)
+        const bodyGrad = ctx.createLinearGradient(base.x - hutW / 2, base.y - hutH, base.x + hutW / 2, base.y);
+        bodyGrad.addColorStop(0, '#5a3a1a');
+        bodyGrad.addColorStop(1, '#4a2e12');
+        ctx.fillStyle = bodyGrad;
+        ctx.fillRect(base.x - hutW / 2, base.y - hutH, hutW, hutH);
+
+        // Door
+        ctx.fillStyle = '#3a2008';
+        ctx.fillRect(base.x - 2, base.y - 7, 5, 7);
+
+        // Window with warm glow
+        const winX = base.x + hutW * 0.15;
+        const winY = base.y - hutH + 3;
+        const winW2 = 5;
+        const winH2 = 4;
+        ctx.fillStyle = '#2a1808';
+        ctx.fillRect(winX - 0.5, winY - 0.5, winW2 + 1, winH2 + 1);
+        const flicker = 0.85 + 0.15 * Math.sin(t * 2.5 + 1.3);
+        ctx.fillStyle = 'rgb(' + Math.floor(255 * flicker) + ',' + Math.floor(190 * flicker) + ',' + Math.floor(60 * flicker) + ')';
+        ctx.fillRect(winX, winY, winW2, winH2);
+        // Window glow
+        ctx.save();
+        ctx.globalAlpha = 0.2 * flicker;
+        const glowR = 8;
+        const glowG = ctx.createRadialGradient(winX + winW2 / 2, winY + winH2 / 2, 1, winX + winW2 / 2, winY + winH2 / 2, glowR);
+        glowG.addColorStop(0, 'rgba(255,200,80,0.6)');
+        glowG.addColorStop(1, 'rgba(255,200,80,0)');
+        ctx.fillStyle = glowG;
+        ctx.fillRect(winX - glowR, winY - glowR, winW2 + glowR * 2, winH2 + glowR * 2);
+        ctx.restore();
+
+        // Roof (triangle, dark with snow cap)
+        ctx.fillStyle = '#2a1a0a';
+        ctx.beginPath();
+        ctx.moveTo(base.x - hutW / 2 - 3, base.y - hutH);
+        ctx.lineTo(base.x, base.y - hutH - roofH);
+        ctx.lineTo(base.x + hutW / 2 + 3, base.y - hutH);
+        ctx.closePath();
+        ctx.fill();
+        // Snow on roof
+        ctx.fillStyle = 'rgba(230,240,255,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(base.x - hutW / 2 - 1, base.y - hutH - 0.5);
+        ctx.lineTo(base.x, base.y - hutH - roofH + 1);
+        ctx.lineTo(base.x + hutW / 2 + 1, base.y - hutH - 0.5);
+        ctx.lineTo(base.x + hutW / 2 - 1, base.y - hutH + 1.5);
+        ctx.lineTo(base.x - hutW / 2 + 1, base.y - hutH + 1.5);
+        ctx.closePath();
+        ctx.fill();
+
+        // Chimney
+        const chimX = base.x + hutW * 0.2;
+        const chimW = 3;
+        const chimH = 6;
+        ctx.fillStyle = '#443322';
+        ctx.fillRect(chimX, base.y - hutH - roofH * 0.5, chimW, chimH);
+        // Snow on chimney top
+        ctx.fillStyle = 'rgba(230,240,255,0.8)';
+        ctx.fillRect(chimX - 0.5, base.y - hutH - roofH * 0.5 - 1.5, chimW + 1, 2);
+        // Smoke wisps
+        ctx.save();
+        ctx.globalAlpha = 0.15;
+        ctx.strokeStyle = '#cccccc';
+        ctx.lineWidth = 1;
+        ctx.lineCap = 'round';
+        for (let s = 0; s < 3; s++) {
+            const smokeY = base.y - hutH - roofH * 0.5 - 3 - s * 4;
+            const drift = Math.sin(t * 1.2 + s * 2) * 3;
+            ctx.beginPath();
+            ctx.moveTo(chimX + chimW / 2, smokeY + 2);
+            ctx.quadraticCurveTo(chimX + chimW / 2 + drift, smokeY - 1, chimX + chimW / 2 + drift * 1.5, smokeY - 4);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // Snow around base
+        ctx.fillStyle = 'rgba(230,240,255,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(base.x, base.y + 1, hutW * 0.7, 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** Draw pine trees in 3 sizes (small/medium/large) with snow on branches. */
     _drawSnowGroundTrees(ctx, w, h) {
         if (!this.hill) return;
         const r = this.renderer;
@@ -1354,16 +1535,19 @@ export default class SkihoppRenderer {
         const xStart = profile[0].x;
         const xRange = profile[profile.length - 1].x - xStart;
 
+        const sizes = ['small', 'medium', 'large'];
         const trees = [];
-        const treeCount = 12;
+        const treeCount = 18;
         for (let i = 0; i < treeCount; i++) {
             const wx = xStart + rng() * xRange;
             const wy = this.hill.getHeightAtDistance(wx);
-            // Place trees behind the hill surface (larger offsetY = further behind)
             const distance = rng(); // 0 = far, 1 = near
             const offsetY = 6 + (1 - distance) * 20 + rng() * 5;
-            const treeH = 2.5 + distance * 4 + rng() * 2; // far trees smaller
-            trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng() });
+            const sizeIdx = Math.floor(rng() * 3);
+            const sizeLabel = sizes[sizeIdx];
+            const baseH = sizeLabel === 'small' ? 1.8 : sizeLabel === 'medium' ? 3.5 : 5.5;
+            const treeH = baseH + distance * 2 + rng() * 1.5;
+            trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng(), size: sizeLabel });
         }
 
         // Sort: far trees first (drawn behind near trees)
@@ -1916,6 +2100,7 @@ export default class SkihoppRenderer {
         if (!this.hill) return;
         const r = this.renderer;
         const landingPts = this.hill.getLandingPoints();
+        const t = this._time || 0;
 
         for (let dist = 50; dist <= 140; dist += 10) {
             let closest = null;
@@ -1933,23 +2118,56 @@ export default class SkihoppRenderer {
             const angle = this.hill.getAngleAtDistance(closest.x) * Math.PI / 180;
             const nx = -Math.sin(angle);
             const ny = Math.cos(angle);
-            const markerLen = 6;
+            const markerLen = 8;
 
             // Green perpendicular line
             ctx.beginPath();
             ctx.moveTo(sp.x - nx * markerLen, sp.y + ny * markerLen);
             ctx.lineTo(sp.x + nx * markerLen, sp.y - ny * markerLen);
             ctx.strokeStyle = '#33bb33';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2.5;
             ctx.stroke();
 
-            // Distance number
+            // Pennant flag icon at each 10m mark
+            const flagBaseX = sp.x + nx * (markerLen + 1);
+            const flagBaseY = sp.y - ny * (markerLen + 1);
+            const flagTopX = flagBaseX + nx * 10;
+            const flagTopY = flagBaseY - ny * 10;
+            // Flag pole
+            ctx.beginPath();
+            ctx.moveTo(flagBaseX, flagBaseY);
+            ctx.lineTo(flagTopX, flagTopY);
+            ctx.strokeStyle = '#33bb33';
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+            // Pennant triangle
+            const pennantW = 5;
+            const wave = Math.sin(t * 3 + dist * 0.5) * 1.5;
+            const perpX = ny;
+            const perpY = nx;
+            ctx.beginPath();
+            ctx.moveTo(flagTopX, flagTopY);
+            ctx.lineTo(flagTopX + perpX * pennantW + wave, flagTopY + perpY * pennantW);
+            ctx.lineTo(flagTopX + nx * (-4), flagTopY - ny * (-4));
+            ctx.closePath();
+            ctx.fillStyle = dist % 20 === 0 ? '#ff4444' : '#33bb33';
+            ctx.fill();
+
+            // Distance number (larger, 14px, with dark outline for readability)
             ctx.save();
-            ctx.font = 'bold 10px sans-serif';
-            ctx.fillStyle = '#33bb33';
+            ctx.font = 'bold 14px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
-            ctx.fillText(String(dist), sp.x + nx * (markerLen + 2), sp.y - ny * (markerLen + 2) - 2);
+            const textX = flagTopX + nx * 3;
+            const textY = flagTopY - ny * 3 - 2;
+            // Dark outline
+            ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+            ctx.lineWidth = 3;
+            ctx.lineJoin = 'round';
+            ctx.strokeText(String(dist) + 'm', textX, textY);
+            // Green fill
+            ctx.fillStyle = '#44dd44';
+            ctx.fillText(String(dist) + 'm', textX, textY);
             ctx.restore();
         }
     }
@@ -1965,36 +2183,58 @@ export default class SkihoppRenderer {
         const ny = Math.cos(angle);
         const lineLen = 14;
 
-        // Thick perpendicular line
+        // Outer glow (shadow blur for true glow effect)
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 18;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(sp.x - nx * lineLen, sp.y + ny * lineLen);
+        ctx.lineTo(sp.x + nx * lineLen, sp.y - ny * lineLen);
+        ctx.stroke();
+        // Second pass for stronger glow
+        ctx.shadowBlur = 30;
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.moveTo(sp.x - nx * lineLen, sp.y + ny * lineLen);
+        ctx.lineTo(sp.x + nx * lineLen, sp.y - ny * lineLen);
+        ctx.stroke();
+        ctx.restore();
+
+        // Core bright line on top
+        ctx.beginPath();
+        ctx.moveTo(sp.x - nx * lineLen, sp.y + ny * lineLen);
+        ctx.lineTo(sp.x + nx * lineLen, sp.y - ny * lineLen);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(sp.x - nx * lineLen, sp.y + ny * lineLen);
         ctx.lineTo(sp.x + nx * lineLen, sp.y - ny * lineLen);
         ctx.strokeStyle = color;
         ctx.lineWidth = 4;
-        ctx.stroke();
-
-        // Glow effect
         ctx.save();
-        ctx.globalAlpha = 0.3;
-        ctx.lineWidth = 8;
-        ctx.beginPath();
-        ctx.moveTo(sp.x - nx * lineLen, sp.y + ny * lineLen);
-        ctx.lineTo(sp.x + nx * lineLen, sp.y - ny * lineLen);
-        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.85;
         ctx.stroke();
         ctx.restore();
 
-        // Label with background
+        // Label with glowing background
         ctx.save();
-        ctx.font = 'bold 13px sans-serif';
+        ctx.font = 'bold 14px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        const labelX = sp.x + nx * (lineLen + 4);
-        const labelY = sp.y - ny * (lineLen + 4) - 3;
+        const labelX = sp.x + nx * (lineLen + 6);
+        const labelY = sp.y - ny * (lineLen + 6) - 3;
         const metrics = ctx.measureText(label);
-        const pad = 3;
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(labelX - metrics.width / 2 - pad, labelY - 12 - pad, metrics.width + pad * 2, 14 + pad);
+        const pad = 4;
+        // Glowing label background
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(labelX - metrics.width / 2 - pad, labelY - 14 - pad, metrics.width + pad * 2, 16 + pad * 2);
+        ctx.shadowBlur = 0;
         ctx.fillStyle = color;
         ctx.fillText(label, labelX, labelY);
         ctx.restore();
@@ -2647,6 +2887,11 @@ export default class SkihoppRenderer {
         const t = this._time || 0;
         const cw = r.width || 400;
         const ch = r.height || 900;
+        const gameState = this._prevGameState;
+        const jumperX = this._lastJumperX || 0;
+
+        // --- Commentator booth (elevated platform with window) ---
+        this._drawCommentatorBooth(ctx);
 
         for (const spec of this._spectators) {
             const sp = r.worldToScreen(spec.x, spec.y);
@@ -2662,30 +2907,62 @@ export default class SkihoppRenderer {
             const lineW = Math.max(1, h * 0.06);
             ctx.lineCap = 'round';
 
+            // --- Landing celebration: all jump up briefly ---
+            let jumpOffset = 0;
+            if (gameState === 'LANDING' || gameState === 4) {
+                const landT = this._cameraPhaseTime || 0;
+                if (landT < 0.8) {
+                    const jumpPhase = Math.sin(landT * 8 + spec.wavePhase * 0.5);
+                    jumpOffset = Math.max(0, jumpPhase) * h * 0.15;
+                }
+            }
+
+            // --- Mexican wave during FLIGHT ---
+            let waveArmOverride = false;
+            let waveIntensity = 0;
+            if (gameState === 'FLIGHT' || gameState === 3) {
+                const dx = spec.x - jumperX;
+                const waveDelay = dx * 0.15;
+                const wavePh = Math.sin(t * 4 - waveDelay);
+                if (wavePh > 0.3) {
+                    waveIntensity = (wavePh - 0.3) / 0.7;
+                    waveArmOverride = true;
+                    jumpOffset = waveIntensity * h * 0.08;
+                }
+            }
+
             // Feet position = base (integer coords to avoid sub-pixel AA)
-            const feetY = sp.y | 0;
+            const feetY = (sp.y - jumpOffset) | 0;
             const spx = sp.x | 0;
             const hipY = (feetY - legLen) | 0;
             const shoulderY = (hipY - bodyLen) | 0;
             const headCenterY = (shoulderY - headR) | 0;
 
+            // --- Feet/boots (small rectangles) ---
+            ctx.fillStyle = '#1a1a2a';
+            ctx.fillRect(spx - (h * 0.12) | 0, feetY - 1, h * 0.08, 2);
+            ctx.fillRect(spx + (h * 0.04) | 0, feetY - 1, h * 0.08, 2);
+
             // --- Leg lines (two lines from hip spreading down to feet) ---
             ctx.strokeStyle = spec.bodyColor;
             ctx.lineWidth = lineW;
-            // Left leg
+            // Left leg with knee bend
+            const kneeY = (hipY + legLen * 0.5) | 0;
             ctx.beginPath();
             ctx.moveTo(spx, hipY);
-            ctx.lineTo(spx - (h * 0.1) | 0, feetY);
+            ctx.lineTo((spx - h * 0.05) | 0, kneeY);
+            ctx.lineTo((spx - h * 0.1) | 0, feetY);
             ctx.stroke();
-            // Right leg
+            // Right leg with knee bend
             ctx.beginPath();
             ctx.moveTo(spx, hipY);
-            ctx.lineTo(spx + (h * 0.1) | 0, feetY);
+            ctx.lineTo((spx + h * 0.05) | 0, kneeY);
+            ctx.lineTo((spx + h * 0.1) | 0, feetY);
             ctx.stroke();
 
             // --- Body line (vertical from hip to shoulder) ---
             ctx.strokeStyle = spec.bodyColor;
-            ctx.lineWidth = lineW * 1.2;
+            ctx.lineWidth = lineW * 1.4;
             ctx.beginPath();
             ctx.moveTo(spx, hipY);
             ctx.lineTo(spx, shoulderY);
@@ -2695,23 +2972,36 @@ export default class SkihoppRenderer {
             ctx.strokeStyle = spec.bodyColor;
             ctx.lineWidth = lineW;
 
-            if (spec.action === 'wave') {
-                // Left arm waves: angle varies with time
+            if (waveArmOverride) {
+                // Mexican wave: both arms raise proportional to intensity
+                const armAngle = -Math.PI / 2 - waveIntensity * 0.5;
+                const laX = (spx + Math.cos(armAngle - 0.3) * armLen) | 0;
+                const laY = (shoulderY + Math.sin(armAngle - 0.3) * armLen) | 0;
+                ctx.beginPath();
+                ctx.moveTo(spx, shoulderY);
+                ctx.lineTo(laX, laY);
+                ctx.stroke();
+                const raX = (spx + Math.cos(armAngle + 0.3) * armLen) | 0;
+                const raY = (shoulderY + Math.sin(armAngle + 0.3) * armLen) | 0;
+                ctx.beginPath();
+                ctx.moveTo(spx, shoulderY);
+                ctx.lineTo(raX, raY);
+                ctx.stroke();
+            } else if (spec.action === 'wave') {
                 const waveAngle = Math.sin(t * spec.waveSpeed + spec.wavePhase) * 0.7;
-                const leftArmAngle = -1.2 + waveAngle; // swings around upper-left
+                const leftArmAngle = -1.2 + waveAngle;
                 const lax = (spx + Math.cos(leftArmAngle) * armLen) | 0;
                 const lay = (shoulderY + Math.sin(leftArmAngle) * armLen) | 0;
                 ctx.beginPath();
                 ctx.moveTo(spx, shoulderY);
                 ctx.lineTo(lax, lay);
                 ctx.stroke();
-                // Right arm relaxed down
                 ctx.beginPath();
                 ctx.moveTo(spx, shoulderY);
                 ctx.lineTo((spx + armLen * 0.7) | 0, (shoulderY + armLen * 0.6) | 0);
                 ctx.stroke();
             } else if (spec.action === 'flag') {
-                // Right arm up holding flag
+                // Right arm up holding Norwegian flag
                 const flagArmEndX = (spx + armLen * 0.15) | 0;
                 const flagArmEndY = (shoulderY - armLen * 0.9) | 0;
                 ctx.beginPath();
@@ -2721,24 +3011,38 @@ export default class SkihoppRenderer {
                 // Flag pole
                 ctx.strokeStyle = '#664422';
                 ctx.lineWidth = Math.max(0.8, lineW * 0.6);
-                const poleTopY = flagArmEndY - h * 0.2;
+                const poleTopY = flagArmEndY - h * 0.25;
                 ctx.beginPath();
                 ctx.moveTo(flagArmEndX, flagArmEndY);
                 ctx.lineTo(flagArmEndX, poleTopY);
                 ctx.stroke();
-                // Flag rectangle
-                const flagW = h * 0.18;
-                const flagH = h * 0.1;
-                const wave = Math.sin(t * 3 + spec.wavePhase) * flagW * 0.08;
-                ctx.fillStyle = spec.flagColor;
+                // Norwegian flag (red bg, blue cross with white border)
+                const flagW = h * 0.22;
+                const flagH2 = h * 0.14;
+                const fw = Math.sin(t * 3 + spec.wavePhase) * flagW * 0.06;
+                const fx = flagArmEndX;
+                const fy = poleTopY;
+                // Red background
+                ctx.fillStyle = '#ef2b2d';
                 ctx.beginPath();
-                ctx.moveTo(flagArmEndX, poleTopY);
-                ctx.lineTo(flagArmEndX + flagW + wave, poleTopY + flagH * 0.2);
-                ctx.lineTo(flagArmEndX + flagW - wave, poleTopY + flagH);
-                ctx.lineTo(flagArmEndX, poleTopY + flagH * 0.8);
+                ctx.moveTo(fx, fy);
+                ctx.lineTo(fx + flagW + fw, fy + flagH2 * 0.15);
+                ctx.lineTo(fx + flagW - fw, fy + flagH2);
+                ctx.lineTo(fx, fy + flagH2 * 0.85);
                 ctx.closePath();
                 ctx.fill();
-                // Left arm relaxed down
+                // White cross
+                ctx.fillStyle = '#ffffff';
+                const crossW = flagW * 0.12;
+                const crossX = fx + flagW * 0.33;
+                ctx.fillRect(crossX - crossW, fy, crossW * 2, flagH2);
+                ctx.fillRect(fx, fy + flagH2 * 0.38, flagW, flagH2 * 0.24);
+                // Blue cross (thinner)
+                ctx.fillStyle = '#002868';
+                const bcW = crossW * 0.5;
+                ctx.fillRect(crossX - bcW, fy, bcW * 2, flagH2);
+                ctx.fillRect(fx, fy + flagH2 * 0.42, flagW, flagH2 * 0.16);
+                // Left arm relaxed
                 ctx.strokeStyle = spec.bodyColor;
                 ctx.lineWidth = lineW;
                 ctx.beginPath();
@@ -2746,29 +3050,147 @@ export default class SkihoppRenderer {
                 ctx.lineTo((spx - armLen * 0.7) | 0, (shoulderY + armLen * 0.6) | 0);
                 ctx.stroke();
             } else {
-                // Still: both arms relaxed at sides
+                // Still: both arms relaxed at sides with slight bend
                 ctx.beginPath();
                 ctx.moveTo(spx, shoulderY);
-                ctx.lineTo((spx - armLen * 0.7) | 0, (shoulderY + armLen * 0.6) | 0);
+                ctx.quadraticCurveTo(
+                    (spx - armLen * 0.5) | 0, (shoulderY + armLen * 0.2) | 0,
+                    (spx - armLen * 0.6) | 0, (shoulderY + armLen * 0.55) | 0
+                );
                 ctx.stroke();
                 ctx.beginPath();
                 ctx.moveTo(spx, shoulderY);
-                ctx.lineTo((spx + armLen * 0.7) | 0, (shoulderY + armLen * 0.6) | 0);
+                ctx.quadraticCurveTo(
+                    (spx + armLen * 0.5) | 0, (shoulderY + armLen * 0.2) | 0,
+                    (spx + armLen * 0.6) | 0, (shoulderY + armLen * 0.55) | 0
+                );
                 ctx.stroke();
             }
 
-            // --- Head (circle) ---
+            // --- Head (circle with skin tone) ---
             ctx.fillStyle = '#ffccaa';
             ctx.beginPath();
             ctx.arc(spx, headCenterY, headR, 0, Math.PI * 2);
             ctx.fill();
-
-            // --- Colored hat (small circle sitting on top of head) ---
-            ctx.fillStyle = spec.hatColor;
+            // Eyes (tiny dots)
+            ctx.fillStyle = '#222';
             ctx.beginPath();
-            ctx.arc(spx, (headCenterY - headR * 0.9) | 0, headR * 0.55, 0, Math.PI * 2);
+            ctx.arc(spx - headR * 0.3, headCenterY - headR * 0.15, headR * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(spx + headR * 0.3, headCenterY - headR * 0.15, headR * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+
+            // --- Colored beanie hat (rounded rectangle on top of head) ---
+            ctx.fillStyle = spec.hatColor;
+            const hatW = headR * 1.3;
+            const hatH = headR * 0.8;
+            const hatY = headCenterY - headR - hatH * 0.5;
+            // Main beanie body
+            ctx.beginPath();
+            ctx.arc(spx, hatY, hatW * 0.55, Math.PI, 0);
+            ctx.lineTo(spx + hatW * 0.55, headCenterY - headR * 0.5);
+            ctx.lineTo(spx - hatW * 0.55, headCenterY - headR * 0.5);
+            ctx.closePath();
+            ctx.fill();
+            // Beanie fold/brim
+            ctx.fillStyle = spec.hatColor;
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(spx - hatW * 0.6, headCenterY - headR * 0.55, hatW * 1.2, headR * 0.2);
+            ctx.globalAlpha = 1.0;
+            // Pompom on top
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(spx, hatY - hatW * 0.35, headR * 0.2, 0, Math.PI * 2);
             ctx.fill();
         }
+    }
+
+    /** Draw an elevated commentator booth near the landing area. */
+    _drawCommentatorBooth(ctx) {
+        if (!this.hill) return;
+        const r = this.renderer;
+        const kp = this.hill.getKPointPosition();
+        if (!kp) return;
+        const t = this._time || 0;
+
+        const boothX = kp.x - 5;
+        const surfaceY = this.hill.getHeightAtDistance(boothX);
+        const boothBaseY = surfaceY + 5;
+
+        const base = r.worldToScreen(boothX, boothBaseY);
+        const platformH = 20;
+        const boothW = 22;
+        const boothH = 12;
+
+        // Support legs (steel)
+        ctx.strokeStyle = '#556677';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(base.x - boothW * 0.35, base.y);
+        ctx.lineTo(base.x - boothW * 0.25, base.y - platformH);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(base.x + boothW * 0.35, base.y);
+        ctx.lineTo(base.x + boothW * 0.25, base.y - platformH);
+        ctx.stroke();
+        // Cross brace
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(base.x - boothW * 0.3, base.y - platformH * 0.5);
+        ctx.lineTo(base.x + boothW * 0.3, base.y - platformH * 0.7);
+        ctx.stroke();
+
+        // Platform
+        ctx.fillStyle = '#3a4a5a';
+        ctx.fillRect(base.x - boothW / 2, base.y - platformH - 2, boothW, 3);
+
+        // Booth body
+        const boothTopY = base.y - platformH - 2 - boothH;
+        const boothGrad = ctx.createLinearGradient(base.x - boothW / 2, boothTopY, base.x + boothW / 2, boothTopY);
+        boothGrad.addColorStop(0, '#3a4858');
+        boothGrad.addColorStop(0.5, '#4a5868');
+        boothGrad.addColorStop(1, '#354050');
+        ctx.fillStyle = boothGrad;
+        ctx.fillRect(base.x - boothW / 2, boothTopY, boothW, boothH);
+
+        // Large window (panoramic)
+        const winMargin = 2;
+        const winY2 = boothTopY + 2;
+        const winH3 = boothH - 5;
+        const winW3 = boothW - winMargin * 2;
+        ctx.fillStyle = '#1a2535';
+        ctx.fillRect(base.x - winW3 / 2, winY2, winW3, winH3);
+        // Window reflection/glow
+        const flicker = 0.9 + 0.1 * Math.sin(t * 1.5);
+        ctx.fillStyle = 'rgba(180,220,255,' + (0.15 * flicker).toFixed(2) + ')';
+        ctx.fillRect(base.x - winW3 / 2, winY2, winW3 * 0.6, winH3 * 0.5);
+
+        // Roof
+        ctx.fillStyle = '#2a3545';
+        ctx.fillRect(base.x - boothW / 2 - 2, boothTopY - 2, boothW + 4, 3);
+        // Snow on roof
+        ctx.fillStyle = 'rgba(230,240,255,0.7)';
+        ctx.fillRect(base.x - boothW / 2 - 1, boothTopY - 3, boothW + 2, 2);
+
+        // Antenna/satellite dish
+        ctx.strokeStyle = '#667';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(base.x + boothW * 0.3, boothTopY - 2);
+        ctx.lineTo(base.x + boothW * 0.3, boothTopY - 10);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(base.x + boothW * 0.3, boothTopY - 10, 3, -0.5, 0.8);
+        ctx.stroke();
+
+        // "PRESS" or "TV" label
+        ctx.save();
+        ctx.font = 'bold 7px sans-serif';
+        ctx.fillStyle = '#aabbcc';
+        ctx.textAlign = 'center';
+        ctx.fillText('TV', base.x, boothTopY + boothH - 2);
+        ctx.restore();
     }
 
     // ------------------------------------------------------------------
@@ -2828,93 +3250,9 @@ export default class SkihoppRenderer {
         ctx.globalAlpha = 1.0;
     }
 
-    /**
-     * Spawn white particles at takeoff point (0,0) when entering FLIGHT.
-     */
-    _spawnTakeoffParticles() {
-        const rng = seededRandom(Math.floor(this._time * 1000));
-        for (let i = 0; i < 20; i++) {
-            const angle = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 0.8;
-            const speed = 1.5 + rng() * 3;
-            this._takeoffParticles.push({
-                x: (rng() - 0.5) * 1.0,
-                y: rng() * 0.3,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed,
-                life: 1.0,
-                maxLife: 0.6 + rng() * 0.6,
-                size: 1 + rng() * 2,
-            });
-        }
-    }
 
-    /**
-     * Spawn snow cloud particles at the landing point.
-     */
-    _spawnLandingParticles(x, y, impactForce) {
-        const count = Math.floor(10 + Math.min(30, impactForce * 3));
-        const rng = seededRandom(Math.floor(this._time * 1000) + 7);
-        for (let i = 0; i < count; i++) {
-            const angle = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.2;
-            const speed = 0.8 + rng() * 2.5;
-            this._landingParticles.push({
-                x: x + (rng() - 0.5) * 2,
-                y: y,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed,
-                life: 1.0,
-                maxLife: 0.8 + rng() * 1.0,
-                size: 2 + rng() * 4,
-            });
-        }
-    }
 
-    /**
-     * Update and draw takeoff and landing particle effects.
-     */
-    _drawEffectParticles(ctx, dt) {
-        const r = this.renderer;
-        const gravity = 4.0;
 
-        // Helper to update and draw a particle array
-        const processParticles = (particles, colorFn) => {
-            // Compact dead particles using swap-and-pop (O(1) per removal)
-            let writeIdx = 0;
-            for (let i = 0; i < particles.length; i++) {
-                const p = particles[i];
-                p.life -= dt / p.maxLife;
-                if (p.life <= 0) continue;
-                p.vy += gravity * dt;
-                p.x += p.vx * dt;
-                p.y += p.vy * dt;
-                if (writeIdx !== i) particles[writeIdx] = p;
-                writeIdx++;
-
-                const sp = r.worldToScreen(p.x, p.y);
-                const alpha = Math.max(0, p.life);
-
-                ctx.globalAlpha = alpha;
-                ctx.fillStyle = colorFn(alpha);
-                ctx.beginPath();
-                ctx.arc(sp.x | 0, sp.y | 0, p.size, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            particles.length = writeIdx;
-        };
-
-        // Single save/restore for both particle systems
-        ctx.save();
-        // Takeoff particles: white
-        processParticles(this._takeoffParticles, (a) =>
-            `rgba(255,255,255,${a.toFixed(2)})`
-        );
-
-        // Landing particles: slight blue tint for snow
-        processParticles(this._landingParticles, (a) =>
-            `rgba(220,235,255,${a.toFixed(2)})`
-        );
-        ctx.restore();
-    }
 
     /**
      * Draw semi-transparent wind streaks during flight.
@@ -3086,86 +3424,7 @@ export default class SkihoppRenderer {
         ctx.restore();
     }
 
-    /**
-     * 3. Perfect landing celebration: spawn golden sparkle particles.
-     */
-    _spawnCelebrationParticles(x, y) {
-        const rng = seededRandom(Math.floor(this._time * 1000) + 42);
-        const count = 15 + Math.floor(rng() * 6); // 15-20 particles
-        for (let i = 0; i < count; i++) {
-            const angle = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.4;
-            const speed = 1.0 + rng() * 2.5;
-            this._celebrationParticles.push({
-                x: x + (rng() - 0.5) * 2,
-                y: y - rng() * 0.5,
-                vx: Math.cos(angle) * speed * 0.5,
-                vy: -0.5 - rng() * 2.0, // float upward
-                life: 1.0,
-                maxLife: 0.8 + rng() * 0.8,
-                size: 1.5 + rng() * 2.5,
-                sparklePhase: rng() * Math.PI * 2,
-                hue: 40 + rng() * 20, // gold hue variation (40-60)
-            });
-        }
-    }
 
-    /**
-     * 3. Perfect landing celebration: update and draw golden sparkle particles
-     *    that float upward and fade.
-     */
-    _drawCelebrationParticles(ctx, dt) {
-        const r = this.renderer;
-        const t = this._time;
-
-        for (let i = this._celebrationParticles.length - 1; i >= 0; i--) {
-            const p = this._celebrationParticles[i];
-            p.life -= dt / p.maxLife;
-            if (p.life <= 0) {
-                this._celebrationParticles.splice(i, 1);
-                continue;
-            }
-
-            // Float upward, slight horizontal drift
-            p.x += p.vx * dt;
-            p.y += p.vy * dt;
-            p.vy -= 0.5 * dt; // gentle upward acceleration
-
-            const sp = r.worldToScreen(p.x, p.y);
-            const alpha = Math.max(0, p.life);
-            const twinkle = 0.5 + 0.5 * Math.sin(t * 12 + p.sparklePhase);
-
-            ctx.globalAlpha = alpha * twinkle;
-
-            // Golden glow
-            const gR = 255;
-            const gG = (200 + p.hue * 0.5) | 0;
-            const gB = (50 + (1 - alpha) * 80) | 0;
-            ctx.fillStyle = `rgb(${gR},${gG},${gB})`;
-
-            // Draw a 4-point star shape
-            const sz = p.size * (0.8 + twinkle * 0.4);
-            const spxi = sp.x | 0;
-            const spyi = sp.y | 0;
-            ctx.beginPath();
-            ctx.moveTo(spxi, spyi - sz * 1.5);
-            ctx.lineTo(spxi + sz * 0.4, spyi - sz * 0.4);
-            ctx.lineTo(spxi + sz * 1.5, spyi);
-            ctx.lineTo(spxi + sz * 0.4, spyi + sz * 0.4);
-            ctx.lineTo(spxi, spyi + sz * 1.5);
-            ctx.lineTo(spxi - sz * 0.4, spyi + sz * 0.4);
-            ctx.lineTo(spxi - sz * 1.5, spyi);
-            ctx.lineTo(spxi - sz * 0.4, spyi - sz * 0.4);
-            ctx.closePath();
-            ctx.fill();
-
-            // Bright center dot
-            ctx.globalAlpha = alpha;
-            ctx.fillStyle = '#fffde0';
-            ctx.beginPath();
-            ctx.arc(spxi, spyi, sz * 0.3, 0, Math.PI * 2);
-            ctx.fill();
-        }
-    }
 
     /**
      * 4. Distance milestones: check if jumper passed 100m, 120m (K-point), or 140m.

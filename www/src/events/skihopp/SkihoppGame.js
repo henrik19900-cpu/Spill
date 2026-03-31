@@ -453,13 +453,18 @@ export default class SkihoppGame {
         }
 
         // Wind updates continuously (even on menu for ambient feel)
-        this.wind.update(dt);
+        if (this.wind) {
+            this.wind.update(dt);
+        }
 
         // Feed wind speed into jumper state so physics can use it
+        if (!this.jumper) return;
         const jumperState = this.jumper.getState();
-        jumperState.wind = this.wind.isHeadwind()
-            ? -this.wind.getSpeed()
-            : this.wind.getSpeed();
+        if (this.wind) {
+            jumperState.wind = this.wind.isHeadwind()
+                ? -this.wind.getSpeed()
+                : this.wind.getSpeed();
+        }
 
         // Tutorial during READY state
         if (state === GameState.READY && this._showTutorial) {
@@ -498,15 +503,19 @@ export default class SkihoppGame {
         if (state === GameState.INRUN || state === GameState.TAKEOFF ||
             state === GameState.FLIGHT || state === GameState.LANDING) {
 
-            try {
-                this.controls.update(dt);
-            } catch (e) {
-                console.error('[SkihoppGame] controls.update() error:', e);
+            if (this.controls) {
+                try {
+                    this.controls.update(dt);
+                } catch (e) {
+                    console.error('[SkihoppGame] controls.update() error:', e);
+                }
             }
-            try {
-                this.physics.update(dt);
-            } catch (e) {
-                console.error('[SkihoppGame] physics.update() error:', e);
+            if (this.physics) {
+                try {
+                    this.physics.update(dt);
+                } catch (e) {
+                    console.error('[SkihoppGame] physics.update() error:', e);
+                }
             }
         }
 
@@ -544,6 +553,43 @@ export default class SkihoppGame {
             this._scoreAnimationTime += dt;
         }
 
+        // Combo text timer decay
+        if (this._comboTextTimer > 0) {
+            this._comboTextTimer -= dt;
+        }
+
+        // Post-jump stats overlay timer (shown during SCORE, after judge animation)
+        if (state === GameState.SCORE && this._postJumpStats) {
+            const judgeAnimDone = this._scoreAnimationTime >= SCORE_ANIMATION_DURATION;
+            if (judgeAnimDone) {
+                this._postJumpStatsTimer += dt;
+                if (this._postJumpStatsTimer >= this._postJumpStatsDuration) {
+                    this._postJumpStats = null;
+                    this._postJumpStatsTimer = 0;
+                    this.game.setState(GameState.RESULTS);
+                }
+            }
+        }
+
+        // Track max height and top speed during active phases
+        if (state === GameState.INRUN || state === GameState.TAKEOFF) {
+            const spd = this.jumper.getState().speed || 0;
+            if (spd > this._trackTopSpeed) this._trackTopSpeed = spd;
+        }
+        if (state === GameState.FLIGHT) {
+            const hag = this.jumper.getState().heightAboveGround || 0;
+            if (hag > this._trackMaxHeight) this._trackMaxHeight = hag;
+        }
+
+        // Woosh transition animation
+        if (this._wooshActive) {
+            this._wooshProgress += dt * 2.5;
+            if (this._wooshProgress >= 1) {
+                this._wooshActive = false;
+                this._wooshProgress = 0;
+            }
+        }
+
         // Popup queue processing (achievements & records)
         if (this._currentPopup) {
             this._currentPopup.timer += dt;
@@ -569,8 +615,23 @@ export default class SkihoppGame {
      * @param {number} height
      */
     render(ctx, width, height) {
+        if (!this.game) return;
         const state = this.game.getState();
+        if (!this.jumper) return;
         const jumperState = this.jumper.getState();
+
+        // --- PREMIUM: Screen shake offset ---
+        const shake = this._getShakeOffset();
+        const hasShake = shake.x !== 0 || shake.y !== 0;
+        if (hasShake) {
+            ctx.save();
+            ctx.translate(shake.x, shake.y);
+        }
+
+        // --- PREMIUM: Slowmo desaturation filter ---
+        if (this._slowmoActive) {
+            try { ctx.filter = 'saturate(0.7)'; } catch (_e) { /* filter unsupported */ }
+        }
 
         switch (state) {
             case GameState.MENU:
@@ -610,8 +671,8 @@ export default class SkihoppGame {
             case GameState.READY:
                 // Render the 3D scene behind with camera pan progress
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                    speed: this.wind.getSpeed(),
-                    direction: this.wind.getDirection(),
+                    speed: this._getWindSpeed(),
+                    direction: this._getWindDirection(),
                     cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
                     cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
                 });
@@ -674,8 +735,8 @@ export default class SkihoppGame {
             case GameState.LANDING: {
                 // Render the 3D scene
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                    speed: this.wind.getSpeed(),
-                    direction: this.wind.getDirection(),
+                    speed: this._getWindSpeed(),
+                    direction: this._getWindDirection(),
                 });
 
                 // Edge-approaching warning overlay (pulsing border glow)
@@ -716,28 +777,30 @@ export default class SkihoppGame {
                 // During inrun, distance is remaining-to-table (not useful for display)
                 let displayDistance = 0;
                 if (state === GameState.FLIGHT || state === GameState.TAKEOFF) {
-                    displayDistance = this.hill.getSurfaceDistanceAtX
+                    displayDistance = (this.hill && this.hill.getSurfaceDistanceAtX)
                         ? this.hill.getSurfaceDistanceAtX(Math.max(0, jumperState.x))
                         : jumperState.x;
                 } else if (state === GameState.LANDING) {
                     displayDistance = jumperState.landingDistance;
                 }
+                if (this.hud) {
                 this.hud.render(ctx, width, height, {
                     speed: jumperState.speed,
                     distance: displayDistance,
                     bodyAngle: jumperState.bodyAngle,
-                    windSpeed: this.wind.getSpeed(),
-                    windDirection: this.wind.getDirection(),
+                    windSpeed: this._getWindSpeed(),
+                    windDirection: this._getWindDirection(),
                     phase: state,
                     takeoffQuality: jumperState.takeoffQuality,
                     landingQuality: jumperState.landingQuality,
-                    kPoint: this.hill.kPoint,
+                    kPoint: (this.hill && this.hill.kPoint) || 0,
                     feedback: this.game.feedback || {},
                     heightAboveGround: jumperState.heightAboveGround || 0,
                     isTucked: jumperState.isTucked || false,
                     edgeWarning: this._edgeWarningActive && state === GameState.INRUN,
                     edgeWarningPulse: this._edgeWarningActive ? Math.sin(this._edgeWarningTime * 12) : 0,
                 });
+                }
 
                 // Landing: show distance text during the 1.5s hold period
                 if (state === GameState.LANDING && jumperState.landingDistance > 0) {
@@ -762,15 +825,15 @@ export default class SkihoppGame {
             case GameState.SCORE:
                 // Frozen scene behind the score overlay
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                    speed: this.wind.getSpeed(),
-                    direction: this.wind.getDirection(),
+                    speed: this._getWindSpeed(),
+                    direction: this._getWindDirection(),
                 });
 
                 // JudgeDisplay._renderBackground provides its own dim overlay,
                 // so no additional dimming is needed here.
 
                 // Judge display with animation
-                if (this._scoreResult) {
+                if (this._scoreResult && this.judgeDisplay) {
                     const progress = Math.min(1, this._scoreAnimationTime / SCORE_ANIMATION_DURATION);
                     this.judgeDisplay.render(ctx, width, height, {
                         judges: this._scoreResult.judges,
@@ -779,8 +842,8 @@ export default class SkihoppGame {
                         windComp: this._scoreResult.windCompensation,
                         totalPoints: this._scoreResult.totalPoints,
                         distance: this._scoreResult.distance,
-                        kPoint: this.hill.kPoint || 120,
-                        hillName: this.hill.name || 'Storbakke',
+                        kPoint: (this.hill && this.hill.kPoint) || 120,
+                        hillName: (this.hill && this.hill.name) || 'Storbakke',
                         rating: this._scoreResult.rating,
                         ratingTier: this._scoreResult.ratingTier,
                         bestDistance: this._bestDistance,
@@ -790,6 +853,7 @@ export default class SkihoppGame {
                 break;
 
             case GameState.RESULTS: {
+                if (!this.scoreboard) break;
                 // Find the index of the latest jump (tagged with _latest)
                 const latestIdx = this._jumpResults.findIndex(j => j._latest);
                 this.scoreboard.render(ctx, width, height, {
@@ -811,6 +875,41 @@ export default class SkihoppGame {
             default:
                 break;
         }
+
+        // --- PREMIUM: Reset slowmo filter ---
+        if (this._slowmoActive) {
+            try { ctx.filter = 'none'; } catch (_e) { /* unsupported */ }
+        }
+
+        // --- PREMIUM: Close screen shake translation ---
+        if (hasShake) {
+            ctx.restore();
+        }
+
+        // --- PREMIUM: Slow-mo indicator text ---
+        if (this._slowmoTextAlpha > 0) {
+            ctx.save();
+            ctx.globalAlpha = this._slowmoTextAlpha * 0.8;
+            ctx.fillStyle = '#88ccff';
+            ctx.font = 'bold 18px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'top';
+            ctx.shadowColor = 'rgba(50, 120, 200, 0.7)';
+            ctx.shadowBlur = 8;
+            ctx.fillText('SLOW-MO', width - 20, 20);
+            ctx.restore();
+        }
+
+        // --- PREMIUM: Combo streak text ---
+        this._renderComboText(ctx, width, height);
+
+        // --- PREMIUM: Post-jump stats overlay ---
+        if (state === GameState.SCORE && this._postJumpStats) {
+            this._renderPostJumpStats(ctx, width, height);
+        }
+
+        // --- PREMIUM: Woosh transition ---
+        this._renderWooshTransition(ctx, width, height);
 
         // Fade transition overlay
         if (this._fadeAlpha > 0) {
@@ -834,6 +933,7 @@ export default class SkihoppGame {
      * @param {string} prevState - previous GameState value
      */
     onStateChange(newState, prevState) {
+        if (!this.jumper) return;
         const jumperState = this.jumper.getState();
 
         switch (newState) {
@@ -849,7 +949,7 @@ export default class SkihoppGame {
 
                 // Fast reset of all game systems
                 this.jumper.reset(this.hill);
-                this.physics.reset();
+                if (this.physics) this.physics.reset();
                 this._resetFlightTracking();
                 this._countdownTimer = 0;
                 this._landingTimer = 0;
@@ -860,6 +960,21 @@ export default class SkihoppGame {
                 this._scoreToResultsFade = 0;
                 this._edgeWarningActive = false;
                 this._edgeWarningTime = 0;
+
+                // --- PREMIUM: Reset per-jump tracking ---
+                this._trackMaxHeight = 0;
+                this._trackTopSpeed = 0;
+                this._trackFlightStartTime = 0;
+                this._trackFlightEndTime = 0;
+                this._shakes = [];
+                this._postJumpStats = null;
+                this._postJumpStatsTimer = 0;
+
+                // --- PREMIUM: Woosh transition on restart ---
+                if (prevState === GameState.RESULTS || prevState === GameState.SCORE) {
+                    this._wooshActive = true;
+                    this._wooshProgress = 0;
+                }
 
                 // Show tutorial only before the very first jump
                 if (!this._tutorialShown) {
@@ -909,6 +1024,8 @@ export default class SkihoppGame {
                 this._edgeWarningTime = 0;
                 // Swoosh sound at the table edge
                 this._safeAudioCall('playSwoosh');
+                // --- PREMIUM: Screen shake on takeoff ---
+                this._addShake(3, 0.2);
                 break;
 
             case GameState.FLIGHT:
@@ -919,7 +1036,11 @@ export default class SkihoppGame {
                     this._perfectFlashTimer = 0;
                     this._showPerfektText = true;
                     this._safeAudioCall('playPerfectTakeoff');
+                    // --- PREMIUM: Perfect timing shake ---
+                    this._addShake(2, 0.15);
                 }
+                // --- PREMIUM: Record flight start time ---
+                this._trackFlightStartTime = performance.now();
                 break;
 
             case GameState.LANDING:
@@ -931,9 +1052,36 @@ export default class SkihoppGame {
                 // Finalise flight stability on jumper state
                 jumperState.flightStability = this._calculateFinalStability();
 
+                // --- PREMIUM: Record flight end time ---
+                this._trackFlightEndTime = performance.now();
+
                 // Track best distance
                 if (jumperState.landingDistance > this._bestDistance) {
                     this._bestDistance = jumperState.landingDistance;
+                }
+
+                // --- PREMIUM: Screen shake on landing ---
+                {
+                    const landQ = jumperState.landingQuality || 0;
+                    if (landQ > 0.7) {
+                        this._addShake(4, 0.3);   // good landing
+                    } else {
+                        this._addShake(8, 0.5);   // hard landing
+                    }
+                }
+
+                // --- PREMIUM: Combo / streak system ---
+                {
+                    const kPt = (this.hill && this.hill.kPoint) || 120;
+                    if (jumperState.landingDistance >= kPt) {
+                        this._comboCount++;
+                        if (this._comboCount >= 2) {
+                            this._comboTextValue = this._comboCount;
+                            this._comboTextTimer = 2.0;
+                        }
+                    } else {
+                        this._comboCount = 0;
+                    }
                 }
 
                 // Stop slide (safety), play landing thud + crowd eruption
@@ -942,7 +1090,7 @@ export default class SkihoppGame {
                 // Crowd eruption: louder for longer jumps
                 {
                     const landDist = jumperState.landingDistance || 0;
-                    const kPt = this.hill.kPoint || 120;
+                    const kPt = (this.hill && this.hill.kPoint) || 120;
                     const cheerIntensity = Math.min(1.0, 0.3 + 0.7 * (landDist / kPt));
                     this._safeAudioCall('playCrowdCheer', cheerIntensity);
                 }
@@ -953,17 +1101,34 @@ export default class SkihoppGame {
                 this._safeAudioCall('stopWind');
 
                 // Calculate score
-                this._scoreResult = this.scoringSystem.calculateScore({
+                this._scoreResult = this.scoringSystem ? this.scoringSystem.calculateScore({
                     distance: jumperState.landingDistance,
                     takeoffQuality: jumperState.takeoffQuality,
                     flightStability: jumperState.flightStability,
                     landingQuality: jumperState.landingQuality,
-                    windSpeed: this.wind.getSpeed(),
-                    windDirection: this.wind.getDirection(),
-                    gate: this.hill.defaultGate,
-                });
+                    windSpeed: this._getWindSpeed(),
+                    windDirection: this._getWindDirection(),
+                    gate: this.hill ? this.hill.defaultGate : 20,
+                }) : null;
 
                 this._scoreAnimationTime = 0;
+
+                // --- PREMIUM: Build post-jump stats ---
+                {
+                    const flightMs = this._trackFlightEndTime - this._trackFlightStartTime;
+                    const flightTime = Math.max(0, flightMs / 1000);
+                    const stats = {
+                        maxHeight: this._trackMaxHeight,
+                        topSpeed: this._trackTopSpeed,
+                        flightTime: flightTime,
+                    };
+                    this._postJumpStats = stats;
+                    this._postJumpStatsTimer = 0;
+                    // Update personal bests
+                    if (stats.maxHeight > this._personalBests.maxHeight) this._personalBests.maxHeight = stats.maxHeight;
+                    if (stats.topSpeed > this._personalBests.topSpeed) this._personalBests.topSpeed = stats.topSpeed;
+                    if (stats.flightTime > this._personalBests.flightTime) this._personalBests.flightTime = stats.flightTime;
+                }
 
                 // Progression tracking
                 if (this.progression) {
@@ -973,7 +1138,16 @@ export default class SkihoppGame {
                         this._scoreResult.totalPoints,
                         jumperState.landingQuality
                     );
-                    this.progression.addXP(this._scoreResult.totalPoints * 0.5);
+                    // --- PREMIUM: Combo XP bonus ---
+                    let xpMultiplier = 1.0;
+                    if (this._comboCount >= 3) {
+                        xpMultiplier = 1.0 + (this._comboCount - 1) * 0.1;
+                    }
+                    this.progression.addXP(this._scoreResult.totalPoints * 0.5 * xpMultiplier);
+                    // Store combo in progression if supported
+                    if (this._comboCount >= 2 && typeof this.progression.setStreak === 'function') {
+                        this.progression.setStreak(this._comboCount);
+                    }
                     const newUnlocks = this.progression.checkUnlocks();
                     const newAchievements = this.progression.checkAchievements({
                         distance: jumperState.landingDistance,
@@ -1073,7 +1247,7 @@ export default class SkihoppGame {
 
                 // Full reset when returning to menu
                 this.jumper.reset(this.hill);
-                this.physics.reset();
+                if (this.physics) this.physics.reset();
                 this._resetFlightTracking();
                 this._countdownTimer = 0;
                 this._landingTimer = 0;
@@ -1444,7 +1618,7 @@ export default class SkihoppGame {
     // ------------------------------------------------------------------
 
     _updateAudio(state) {
-        if (!this._audio) return;
+        if (!this._audio || !this.jumper || !this.hill) return;
 
         const jumperState = this.jumper.getState();
         const kPoint = this.hill.kPoint || 120;
@@ -1522,6 +1696,16 @@ export default class SkihoppGame {
         }
     }
 
+    /** Safe wind speed accessor — returns 0 if wind is unavailable. */
+    _getWindSpeed() {
+        return this.wind ? this.wind.getSpeed() : 0;
+    }
+
+    /** Safe wind direction accessor — returns 0 if wind is unavailable. */
+    _getWindDirection() {
+        return this.wind ? this.wind.getDirection() : 0;
+    }
+
     // ------------------------------------------------------------------
     // Hill selection
     // ------------------------------------------------------------------
@@ -1549,7 +1733,7 @@ export default class SkihoppGame {
 
         // Reset jumper on new hill
         this.jumper.reset(this.hill);
-        this.physics.reset();
+        if (this.physics) this.physics.reset();
     }
 
     // ------------------------------------------------------------------
@@ -1598,5 +1782,14 @@ export default class SkihoppGame {
         this.hillSelectScreen = null;
         this.statsScreen = null;
         this.settingsScreen = null;
+
+        // PREMIUM cleanup
+        this._shakes = [];
+        this._comboCount = 0;
+        this._comboTextTimer = 0;
+        this._postJumpStats = null;
+        this._wooshActive = false;
+        this._wooshProgress = 0;
+        this._personalBests = { maxHeight: 0, topSpeed: 0, flightTime: 0 };
     }
 }
