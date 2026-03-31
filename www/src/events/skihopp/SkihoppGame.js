@@ -549,6 +549,43 @@ export default class SkihoppGame {
             this._scoreAnimationTime += dt;
         }
 
+        // Combo text timer decay
+        if (this._comboTextTimer > 0) {
+            this._comboTextTimer -= dt;
+        }
+
+        // Post-jump stats overlay timer (shown during SCORE, after judge animation)
+        if (state === GameState.SCORE && this._postJumpStats) {
+            const judgeAnimDone = this._scoreAnimationTime >= SCORE_ANIMATION_DURATION;
+            if (judgeAnimDone) {
+                this._postJumpStatsTimer += dt;
+                if (this._postJumpStatsTimer >= this._postJumpStatsDuration) {
+                    this._postJumpStats = null;
+                    this._postJumpStatsTimer = 0;
+                    this.game.setState(GameState.RESULTS);
+                }
+            }
+        }
+
+        // Track max height and top speed during active phases
+        if (state === GameState.INRUN || state === GameState.TAKEOFF) {
+            const spd = this.jumper.getState().speed || 0;
+            if (spd > this._trackTopSpeed) this._trackTopSpeed = spd;
+        }
+        if (state === GameState.FLIGHT) {
+            const hag = this.jumper.getState().heightAboveGround || 0;
+            if (hag > this._trackMaxHeight) this._trackMaxHeight = hag;
+        }
+
+        // Woosh transition animation
+        if (this._wooshActive) {
+            this._wooshProgress += dt * 2.5;
+            if (this._wooshProgress >= 1) {
+                this._wooshActive = false;
+                this._wooshProgress = 0;
+            }
+        }
+
         // Popup queue processing (achievements & records)
         if (this._currentPopup) {
             this._currentPopup.timer += dt;

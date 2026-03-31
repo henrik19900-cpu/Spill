@@ -817,69 +817,342 @@ export default class AudioManager {
 
   /**
    * Gentle low drone for the menu screen -- 100Hz sine with slow LFO.
+   * (Legacy method -- calls playMenuMusic for backward compatibility.)
    */
   playMenuAmbience() {
     try {
-      this._ensureContext();
-      if (!this.ctx) return;
-
-      // Already playing -- do nothing
-      if (this._menuOsc) return;
-
-      const now = this.ctx.currentTime;
-
-      // Main drone oscillator
-      const osc = this.ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = 100;
-
-      // Slow LFO to modulate the drone gain
-      const lfo = this.ctx.createOscillator();
-      lfo.type = 'sine';
-      lfo.frequency.value = 0.3; // slow wobble
-
-      const lfoGain = this.ctx.createGain();
-      lfoGain.gain.value = 0.04; // subtle modulation depth
-
-      // Main gain
-      const gain = this.ctx.createGain();
-      gain.gain.value = 0.08;
-
-      // LFO -> gain modulation
-      lfo.connect(lfoGain);
-      lfoGain.connect(gain.gain);
-
-      this._chain(osc, gain, this._masterGain);
-
-      osc.start(now);
-      lfo.start(now);
-
-      this._menuOsc = osc;
-      this._menuLfo = lfo;
-      this._menuGain = gain;
+      this.playMenuMusic();
     } catch (e) {
       console.warn('AudioManager.playMenuAmbience error:', e);
     }
   }
 
   /**
-   * Stop the menu ambience with a short fade-out.
+   * Stop the menu ambience.
+   * (Legacy method -- calls stopMenuMusic for backward compatibility.)
    */
   stopMenuAmbience() {
     try {
-      if (!this._menuOsc || !this.ctx) return;
+      this.stopMenuMusic();
+    } catch (e) {
+      console.warn('AudioManager.stopMenuAmbience error:', e);
+    }
+  }
+
+  /**
+   * Premium ambient Nordic music loop for the menu screen.
+   * Layers 3 oscillators for a rich, atmospheric soundscape:
+   *   1) Deep 80Hz sine drone with slow 0.1Hz LFO on volume
+   *   2) Mid pad: 220Hz + 330Hz (perfect fifth) triangle waves, very quiet
+   *   3) High shimmer: 880Hz sine with random volume gates (twinkling)
+   * Overall very quiet and atmospheric.
+   */
+  playMenuMusic() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+
+      // Already playing -- do nothing
+      if (this._menuMusicNodes) return;
+
       const now = this.ctx.currentTime;
-      this._menuGain.gain.linearRampToValueAtTime(0, now + 0.3);
-      this._menuOsc.stop(now + 0.35);
-      this._menuLfo.stop(now + 0.35);
+      const nodes = [];
+
+      // Master gain for all menu music layers (very quiet overall)
+      const musicGain = this.ctx.createGain();
+      musicGain.gain.setValueAtTime(0, now);
+      musicGain.gain.linearRampToValueAtTime(1.0, now + 2.0); // 2s fade in
+      musicGain.connect(this._masterGain);
+
+      // --- Layer 1: Deep drone (80Hz sine with slow 0.1Hz LFO on volume) ---
+      const drone = this.ctx.createOscillator();
+      drone.type = 'sine';
+      drone.frequency.value = 80;
+
+      const droneLfo = this.ctx.createOscillator();
+      droneLfo.type = 'sine';
+      droneLfo.frequency.value = 0.1; // very slow breathing
+
+      const droneLfoGain = this.ctx.createGain();
+      droneLfoGain.gain.value = 0.035; // modulation depth
+
+      const droneGain = this.ctx.createGain();
+      droneGain.gain.value = 0.07; // base volume, quiet
+
+      // LFO modulates drone volume
+      droneLfo.connect(droneLfoGain);
+      droneLfoGain.connect(droneGain.gain);
+
+      this._chain(drone, droneGain, musicGain);
+
+      drone.start(now);
+      droneLfo.start(now);
+      nodes.push(drone, droneLfo);
+
+      // --- Layer 2: Mid pad (220Hz + 330Hz perfect fifth, triangle) ---
+      const pad1 = this.ctx.createOscillator();
+      pad1.type = 'triangle';
+      pad1.frequency.value = 220;
+
+      const pad1Gain = this.ctx.createGain();
+      pad1Gain.gain.value = 0.025; // very quiet
+
+      this._chain(pad1, pad1Gain, musicGain);
+      pad1.start(now);
+      nodes.push(pad1);
+
+      const pad2 = this.ctx.createOscillator();
+      pad2.type = 'triangle';
+      pad2.frequency.value = 330;
+
+      const pad2Gain = this.ctx.createGain();
+      pad2Gain.gain.value = 0.02; // even quieter
+
+      this._chain(pad2, pad2Gain, musicGain);
+      pad2.start(now);
+      nodes.push(pad2);
+
+      // --- Layer 3: High shimmer (880Hz sine with random twinkling) ---
+      const shimmer = this.ctx.createOscillator();
+      shimmer.type = 'sine';
+      shimmer.frequency.value = 880;
+
+      const shimmerGain = this.ctx.createGain();
+      shimmerGain.gain.value = 0; // starts silent, will be gated randomly
+
+      this._chain(shimmer, shimmerGain, musicGain);
+      shimmer.start(now);
+      nodes.push(shimmer);
+
+      // Random volume gates for twinkling effect
+      const shimmerInterval = setInterval(() => {
+        try {
+          if (!this.ctx || this.ctx.state !== 'running') return;
+          const t = this.ctx.currentTime;
+          if (Math.random() < 0.4) {
+            // Twinkle on
+            const vol = 0.01 + Math.random() * 0.025;
+            shimmerGain.gain.setValueAtTime(vol, t);
+            shimmerGain.gain.exponentialRampToValueAtTime(0.001, t + 0.15 + Math.random() * 0.25);
+          }
+        } catch (_) { /* context may be closed */ }
+      }, 200);
+
+      this._menuMusicNodes = nodes;
+      this._menuMusicGain = musicGain;
+      this._menuShimmerInterval = shimmerInterval;
+
+      // Also keep legacy refs for backward compat with destroy()
+      this._menuOsc = drone;
+      this._menuLfo = droneLfo;
+      this._menuGain = droneGain;
+    } catch (e) {
+      console.warn('AudioManager.playMenuMusic error:', e);
+    }
+  }
+
+  /**
+   * Fade out and stop menu music over 1 second.
+   */
+  stopMenuMusic() {
+    try {
+      if (!this._menuMusicNodes || !this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Clear shimmer interval
+      if (this._menuShimmerInterval) {
+        clearInterval(this._menuShimmerInterval);
+        this._menuShimmerInterval = null;
+      }
+
+      // Fade out over 1 second
+      if (this._menuMusicGain) {
+        this._menuMusicGain.gain.linearRampToValueAtTime(0, now + 1.0);
+      }
+
+      // Stop all oscillators after fade
+      const stopTime = now + 1.05;
+      this._menuMusicNodes.forEach(node => {
+        try { node.stop(stopTime); } catch (_) { /* already stopped */ }
+      });
+
+      this._menuMusicNodes = null;
+      this._menuMusicGain = null;
       this._menuOsc = null;
       this._menuLfo = null;
       this._menuGain = null;
     } catch (e) {
-      console.warn('AudioManager.stopMenuAmbience error:', e);
+      console.warn('AudioManager.stopMenuMusic error:', e);
+      if (this._menuShimmerInterval) {
+        clearInterval(this._menuShimmerInterval);
+        this._menuShimmerInterval = null;
+      }
+      this._menuMusicNodes = null;
+      this._menuMusicGain = null;
       this._menuOsc = null;
       this._menuLfo = null;
       this._menuGain = null;
+    }
+  }
+
+  /**
+   * Low rumbling crowd murmur before takeoff.
+   * Filtered noise with 300Hz bandpass and modulated volume for tension.
+   */
+  playCrowdAnticipation() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const duration = 4.0;
+
+      // Noise source
+      const noiseBuf = this._createNoise(duration);
+      const noiseSrc = this.ctx.createBufferSource();
+      noiseSrc.buffer = noiseBuf;
+
+      // 300Hz bandpass for low crowd murmur character
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 300;
+      bp.Q.value = 0.8;
+
+      // Volume modulation via LFO for organic "murmur" feel
+      const lfo = this.ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.value = 1.5; // subtle pulsing
+
+      const lfoGain = this.ctx.createGain();
+      lfoGain.gain.value = 0.06;
+
+      const mainGain = this.ctx.createGain();
+      mainGain.gain.setValueAtTime(0.001, now);
+      mainGain.gain.linearRampToValueAtTime(0.15, now + 0.8);
+      mainGain.gain.setValueAtTime(0.15, now + duration * 0.7);
+      mainGain.gain.linearRampToValueAtTime(0.0, now + duration);
+
+      // LFO modulates volume
+      lfo.connect(lfoGain);
+      lfoGain.connect(mainGain.gain);
+
+      this._chain(noiseSrc, bp, mainGain, this._masterGain);
+
+      noiseSrc.start(now);
+      noiseSrc.stop(now + duration);
+      lfo.start(now);
+      lfo.stop(now + duration);
+    } catch (e) {
+      console.warn('AudioManager.playCrowdAnticipation error:', e);
+    }
+  }
+
+  /**
+   * Slow-motion activation effect -- a deep "whooom" sound.
+   * 100Hz sine with slow attack and 0.5s decay for cinematic feel.
+   */
+  playSlowmoEffect() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Deep "whooom" oscillator
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(100, now);
+      osc.frequency.exponentialRampToValueAtTime(60, now + 0.6);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.4, now + 0.15); // slow attack
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.65); // 0.5s decay
+
+      // Low-pass filter for warmth
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 200;
+      lp.Q.value = 1.0;
+
+      this._chain(osc, lp, gain, this._masterGain);
+
+      // Sub-bass layer for extra weight
+      const sub = this.ctx.createOscillator();
+      sub.type = 'sine';
+      sub.frequency.setValueAtTime(50, now);
+      sub.frequency.exponentialRampToValueAtTime(30, now + 0.6);
+
+      const subGain = this.ctx.createGain();
+      subGain.gain.setValueAtTime(0.001, now);
+      subGain.gain.linearRampToValueAtTime(0.25, now + 0.1);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+      this._chain(sub, subGain, this._masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.7);
+      sub.start(now);
+      sub.stop(now + 0.55);
+    } catch (e) {
+      console.warn('AudioManager.playSlowmoEffect error:', e);
+    }
+  }
+
+  /**
+   * Countdown beep for 3-2-1-HOP sequence.
+   * @param {number} number - 3, 2, or 1 for countdown tones; 0 for "HOP"
+   */
+  playCountdownBeep(number) {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      if (number > 0) {
+        // 3, 2, 1: 600Hz sine, 100ms, low volume
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 600;
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.setValueAtTime(0.2, now + 0.07);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+        this._chain(osc, gain, this._masterGain);
+
+        osc.start(now);
+        osc.stop(now + 0.12);
+      } else {
+        // "HOP" (0): 800Hz + 1200Hz sine chord, 200ms, louder
+        const osc1 = this.ctx.createOscillator();
+        osc1.type = 'sine';
+        osc1.frequency.value = 800;
+
+        const gain1 = this.ctx.createGain();
+        gain1.gain.setValueAtTime(0.35, now);
+        gain1.gain.setValueAtTime(0.35, now + 0.12);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+        this._chain(osc1, gain1, this._masterGain);
+
+        const osc2 = this.ctx.createOscillator();
+        osc2.type = 'sine';
+        osc2.frequency.value = 1200;
+
+        const gain2 = this.ctx.createGain();
+        gain2.gain.setValueAtTime(0.25, now);
+        gain2.gain.setValueAtTime(0.25, now + 0.12);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+        this._chain(osc2, gain2, this._masterGain);
+
+        osc1.start(now);
+        osc1.stop(now + 0.22);
+        osc2.start(now);
+        osc2.stop(now + 0.22);
+      }
+    } catch (e) {
+      console.warn('AudioManager.playCountdownBeep error:', e);
     }
   }
 
@@ -947,16 +1220,27 @@ export default class AudioManager {
       this._crowdFilter = null;
     }
 
-    // Stop menu ambience if playing
-    if (this._menuOsc) {
+    // Stop menu music if playing
+    if (this._menuShimmerInterval) {
+      clearInterval(this._menuShimmerInterval);
+      this._menuShimmerInterval = null;
+    }
+    if (this._menuMusicNodes) {
+      this._menuMusicNodes.forEach(node => {
+        try { node.stop(); } catch (_) { /* already stopped */ }
+      });
+      this._menuMusicNodes = null;
+      this._menuMusicGain = null;
+    } else if (this._menuOsc) {
+      // Legacy fallback
       try {
         this._menuOsc.stop();
         this._menuLfo.stop();
       } catch (_) { /* already stopped */ }
-      this._menuOsc = null;
-      this._menuLfo = null;
-      this._menuGain = null;
     }
+    this._menuOsc = null;
+    this._menuLfo = null;
+    this._menuGain = null;
 
     // Close context
     if (this.ctx) {
