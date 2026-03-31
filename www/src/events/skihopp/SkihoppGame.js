@@ -467,7 +467,7 @@ export default class SkihoppGame {
         }
 
         // Tutorial during READY state
-        if (state === GameState.READY && this._showTutorial) {
+        if (state === GameState.READY && this._showTutorial && this.tutorialScreen) {
             this.tutorialScreen.update(dt);
             return; // Don't run countdown while tutorial is showing
         }
@@ -664,7 +664,9 @@ export default class SkihoppGame {
                         hillName: this.hill ? this.hill.name : null,
                         achievements: this.progression ? this.progression.getAchievements() : [],
                     };
-                    this.menuScreen.render(ctx, width, height, menuData);
+                    if (this.menuScreen) {
+                        this.menuScreen.render(ctx, width, height, menuData);
+                    }
                 }
                 break;
 
@@ -983,7 +985,7 @@ export default class SkihoppGame {
                 }
 
                 // Show tutorial only before the very first jump
-                if (!this._tutorialShown) {
+                if (!this._tutorialShown && this.tutorialScreen) {
                     this._showTutorial = true;
                     this.tutorialScreen.reset();
                 }
