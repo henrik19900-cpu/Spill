@@ -267,10 +267,11 @@ export default class SkihoppControls {
       // Reset angle inertia on entering flight
       this._angleVelocity = 0;
       this._flightTouched = false;
-      // Start at near-optimal angle so untouched flights are decent
+      // Start at near-optimal angle (from config) so untouched flights are decent
+      const startAngle = this._defaultAngle ?? BODY_ANGLE_DEFAULT;
       if (this._jumperState) {
-        this._jumperState.bodyAngle = BODY_ANGLE_DEFAULT;
-        this._jumperState.targetAngle = BODY_ANGLE_DEFAULT;
+        this._jumperState.bodyAngle = startAngle;
+        this._jumperState.targetAngle = startAngle;
       }
     }
 
@@ -600,9 +601,9 @@ export default class SkihoppControls {
     const elapsed = now - this._landingWindowStart;
     const fb = this.game.feedback;
 
-    // Use difficulty-scaled landing window
-    const landingMs = this._difficulty.landingWindowMs;
-    const attemptMs = this._difficulty.landingAttemptMs;
+    // Use difficulty-scaled landing window, with config fallback
+    const landingMs = this._difficulty.landingWindowMs ?? this._telemarkWindow;
+    const attemptMs = this._difficulty.landingAttemptMs ?? this._telemarkAttemptWindow;
 
     // Telemark landing quality (difficulty-scaled window)
     if (elapsed <= landingMs * 0.4) {
@@ -703,7 +704,21 @@ export default class SkihoppControls {
 
     // -- Re-read difficulty each frame in case settings changed mid-game --
     const diffKey = (this.game.config && this.game.config.difficulty) || 'normal';
-    this._difficulty = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
+    const cfgSkihopp = this.game.config && this.game.config.skihopp;
+    const cfgDiff = cfgSkihopp && cfgSkihopp.difficulty && cfgSkihopp.difficulty[diffKey];
+    if (cfgDiff) {
+      const fallback = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
+      this._difficulty = {
+        takeoffPerfectMs:  cfgDiff.takeoffPerfectMs  ?? fallback.takeoffPerfectMs,
+        takeoffWindowMs:   cfgDiff.takeoffWindowMs   ?? fallback.takeoffWindowMs,
+        landingWindowMs:   cfgDiff.landingWindowMs   ?? fallback.landingWindowMs,
+        landingAttemptMs:  cfgDiff.landingAttemptMs  ?? fallback.landingAttemptMs,
+        autoQuality:       cfgDiff.autoLaunchQuality ?? fallback.autoQuality,
+        untuckedFloor:     cfgDiff.untuckedSpeedFloor ?? fallback.untuckedFloor,
+      };
+    } else {
+      this._difficulty = DIFFICULTY_PRESETS[diffKey] || DIFFICULTY_PRESETS.normal;
+    }
 
     // -- TAKEOFF: ring animation + auto-launch --
     if (state === GameState.TAKEOFF) {
@@ -794,18 +809,22 @@ export default class SkihoppControls {
     }
 
     // Auto-assist: if player isn't touching, slowly drift toward optimal angle
+    // Uses config-driven optimal angle and drift rate
+    const optAngle = this._optimalAngle ?? BODY_ANGLE_OPTIMAL;
+    const driftRate = this._autoDriftRate ?? ANGLE_AUTO_DRIFT;
+
     if (!isTouching && !this._flightTouched) {
       // Player hasn't touched at all during flight - drift toward optimal
-      const optDiff = BODY_ANGLE_OPTIMAL - js.targetAngle;
+      const optDiff = optAngle - js.targetAngle;
       if (Math.abs(optDiff) > 0.5) {
-        js.targetAngle += Math.sign(optDiff) * ANGLE_AUTO_DRIFT * dt;
+        js.targetAngle += Math.sign(optDiff) * driftRate * dt;
         js.targetAngle = clamp(js.targetAngle, BODY_ANGLE_MIN, BODY_ANGLE_MAX);
       }
     } else if (!isTouching && this._flightTouched) {
       // Player touched earlier but released - gentle drift toward optimal
-      const optDiff = BODY_ANGLE_OPTIMAL - js.targetAngle;
+      const optDiff = optAngle - js.targetAngle;
       if (Math.abs(optDiff) > 1.0) {
-        js.targetAngle += Math.sign(optDiff) * ANGLE_AUTO_DRIFT * 0.5 * dt;
+        js.targetAngle += Math.sign(optDiff) * driftRate * 0.5 * dt;
         js.targetAngle = clamp(js.targetAngle, BODY_ANGLE_MIN, BODY_ANGLE_MAX);
       }
     }

@@ -149,25 +149,9 @@ export default class SkihoppGame {
         this._newUnlocks = [];
         this._newAchievements = [];
 
-        // Achievement notification queue & popup state
+        // Achievement / record notification queue & popup state
         this._achievementQueue = [];
-        this._achievementPopup = {
-            active: false,
-            achievement: null,
-            timer: 0,
-            duration: 2.5,
-            slideIn: 0.3,
-            slideOut: 0.3,
-        };
-
-        // New record notification state
-        this._newRecordPopup = {
-            active: false,
-            distance: 0,
-            timer: 0,
-            duration: 3.0,
-            pulsePhase: 0,
-        };
+        this._currentPopup = null; // { text, subtext, type, timer, duration }
 
         // Optional UI screens for sub-menus
         this.hillSelectScreen = null;
@@ -524,29 +508,15 @@ export default class SkihoppGame {
             this._scoreAnimationTime += dt;
         }
 
-        // Achievement popup processing
-        if (this._achievementPopup.active) {
-            this._achievementPopup.timer += dt;
-            if (this._achievementPopup.timer >= this._achievementPopup.duration) {
-                this._achievementPopup.active = false;
-                this._achievementPopup.achievement = null;
-                this._achievementPopup.timer = 0;
+        // Popup queue processing (achievements & records)
+        if (this._currentPopup) {
+            this._currentPopup.timer += dt;
+            if (this._currentPopup.timer >= this._currentPopup.duration) {
+                this._currentPopup = null;
             }
         } else if (this._achievementQueue.length > 0) {
-            // Pop next achievement from queue and start showing it
-            const next = this._achievementQueue.shift();
-            this._achievementPopup.active = true;
-            this._achievementPopup.achievement = next;
-            this._achievementPopup.timer = 0;
-        }
-
-        // New record popup processing
-        if (this._newRecordPopup.active) {
-            this._newRecordPopup.timer += dt;
-            this._newRecordPopup.pulsePhase += dt;
-            if (this._newRecordPopup.timer >= this._newRecordPopup.duration) {
-                this._newRecordPopup.active = false;
-            }
+            this._currentPopup = this._achievementQueue.shift();
+            this._currentPopup.timer = 0;
         }
 
         // Audio: wind sound proportional to speed

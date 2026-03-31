@@ -707,9 +707,9 @@ export default class SkihoppRenderer {
      */
     _getProfileScreen() {
         const r = this.renderer;
-        if (this._cachedCameraX === r.cameraX &&
-            this._cachedCameraY === r.cameraY &&
-            this._cachedZoom === r.zoom) {
+        if (Math.abs(this._cachedCameraX - r.cameraX) < 0.1 &&
+            Math.abs(this._cachedCameraY - r.cameraY) < 0.1 &&
+            Math.abs(this._cachedZoom - r.zoom) < 0.1) {
             return this._cachedProfileScreen;
         }
         const profile = this.hill.getProfile();
@@ -2746,8 +2746,12 @@ export default class SkihoppRenderer {
         const flakeCos = [1, 0.5, -0.5, -1, -0.5, 0.5];
         const flakeSin = [0, 0.866025, 0.866025, 0, -0.866025, -0.866025];
 
-        // First pass: batch all regular (non-flake) circles
+        // First pass: batch regular (non-flake) circles by quantized radius
+        // Group into buckets by rounded radius to batch same-size particles
         ctx.fillStyle = '#ffffff';
+        // Sort particles into alpha groups (quantize to 10 levels) to reduce state changes
+        // Use a simpler approach: batch all same-alpha particles into one path
+        const alphaBuckets = new Array(10);
         for (let i = 0; i < particles.length; i++) {
             const p = particles[i];
             if (p.isFlake) continue;
@@ -2756,11 +2760,21 @@ export default class SkihoppRenderer {
             const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
             const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
             const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
-            const sx = px * w;
-            const sy = py * h;
-            ctx.globalAlpha = p.alpha;
+            const sx = (px * w) | 0;
+            const sy = (py * h) | 0;
+            const bucket = (p.alpha * 10) | 0;
+            if (!alphaBuckets[bucket]) alphaBuckets[bucket] = [];
+            alphaBuckets[bucket].push(sx, sy, p.r);
+        }
+        for (let b = 0; b < 10; b++) {
+            const arr = alphaBuckets[b];
+            if (!arr || arr.length === 0) continue;
+            ctx.globalAlpha = (b + 0.5) / 10;
             ctx.beginPath();
-            ctx.arc(sx, sy, p.r, 0, Math.PI * 2);
+            for (let j = 0; j < arr.length; j += 3) {
+                ctx.moveTo(arr[j] + arr[j + 2], arr[j + 1]);
+                ctx.arc(arr[j], arr[j + 1], arr[j + 2], 0, Math.PI * 2);
+            }
             ctx.fill();
         }
 
@@ -2775,8 +2789,8 @@ export default class SkihoppRenderer {
             const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
             const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
             const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
-            const sx = px * w;
-            const sy = py * h;
+            const sx = (px * w) | 0;
+            const sy = (py * h) | 0;
             const armLen = p.r * 1.2;
             ctx.globalAlpha = p.alpha;
             ctx.beginPath();

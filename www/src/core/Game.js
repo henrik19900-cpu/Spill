@@ -322,9 +322,9 @@ export class Game {
         this._lastLoopError = msg;
       }
 
-      // If 3+ consecutive errors, stop trying and show error screen
-      if (this._consecutiveLoopErrors >= 3) {
-        console.error('[Game] 3 consecutive loop errors – showing error screen.');
+      // If 5+ consecutive errors, stop trying and show error screen
+      if (this._consecutiveLoopErrors >= 5) {
+        console.error('[Game] 5 consecutive loop errors – showing error screen.');
         this._errorScreenActive = true;
       }
     }
@@ -388,15 +388,30 @@ export class Game {
       }
     } catch (err) {
       console.error('[Game] render() error:', err);
-      // Attempt to show an inline error so the screen is never blank
+      // Show a simple inline error screen so the canvas is never blank
       try {
-        this._renderErrorScreen();
-      } catch (_ignored) {
-        // Last resort: at least fill the canvas with a color
-        try {
-          ctx.fillStyle = '#1a1a2e';
-          ctx.fillRect(0, 0, width, height);
-        } catch (_e) { /* nothing more we can do */ }
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(0, 0, width, height);
+        ctx.fillStyle = '#ff4444';
+        ctx.font = '18px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Noe gikk galt', width/2, height/2 - 20);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '14px sans-serif';
+        ctx.fillText('Tap for å prøve igjen', width/2, height/2 + 20);
+      } catch (_ignored) { /* nothing more we can do */ }
+
+      // On next tap, attempt to restart by going back to the menu
+      if (!this._renderErrorTapBound) {
+        this._renderErrorTapBound = true;
+        const handler = () => {
+          this.canvas.removeEventListener('click', handler);
+          this.canvas.removeEventListener('touchstart', handler);
+          this._renderErrorTapBound = false;
+          try { this.setState(GameState.MENU); } catch (_e) { /* ignore */ }
+        };
+        this.canvas.addEventListener('click', handler);
+        this.canvas.addEventListener('touchstart', handler);
       }
     }
   }
