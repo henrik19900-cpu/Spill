@@ -598,10 +598,12 @@ export default class SkihoppGame {
                 break;
 
             case GameState.READY:
-                // Render the 3D scene behind
+                // Render the 3D scene behind with camera pan progress
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
                     speed: this.wind.getSpeed(),
                     direction: this.wind.getDirection(),
+                    cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
+                    cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
                 });
 
                 // Show tutorial overlay if active
