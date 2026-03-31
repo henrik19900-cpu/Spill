@@ -664,7 +664,9 @@ export default class SkihoppGame {
                         hillName: this.hill ? this.hill.name : null,
                         achievements: this.progression ? this.progression.getAchievements() : [],
                     };
-                    this.menuScreen.render(ctx, width, height, menuData);
+                    if (this.menuScreen) {
+                        this.menuScreen.render(ctx, width, height, menuData);
+                    }
                 }
                 break;
 
