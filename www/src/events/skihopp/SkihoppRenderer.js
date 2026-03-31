@@ -35,6 +35,236 @@ function lerp(a, b, t) {
 }
 
 // ---------------------------------------------------------------------------
+// ParticlePool - lightweight particle system for visual effects
+// ---------------------------------------------------------------------------
+
+class ParticlePool {
+    constructor(maxSize = 500) {
+        this.particles = [];
+        this.maxSize = maxSize;
+    }
+
+    /**
+     * Spawn a single particle.
+     * @param {Object} config  {x, y, vx, vy, life, maxLife, size, color, gravity, drag, type}
+     *   type: 'circle' | 'star' | 'snowflake' | 'spark' | 'trail'
+     */
+    spawn(config) {
+        if (this.particles.length >= this.maxSize) return;
+        this.particles.push({
+            x: 0, y: 0,
+            vx: 0, vy: 0,
+            life: 1, maxLife: 1,
+            size: 2,
+            color: '#ffffff',
+            gravity: 4,
+            drag: 1,
+            type: 'circle',
+            age: 0,
+            prevX: config.x ?? 0,
+            prevY: config.y ?? 0,
+            sparklePhase: Math.random() * Math.PI * 2,
+            ...config,
+        });
+    }
+
+    /**
+     * Spawn `count` particles in a random burst around a centre point.
+     * @param {number} count
+     * @param {Object} config  - same as spawn(), plus optional spread, speedMin, speedMax
+     */
+    spawnBurst(count, config) {
+        const spread = config.spread ?? Math.PI * 1.2;
+        const baseAngle = config.baseAngle ?? -Math.PI / 2;
+        const speedMin = config.speedMin ?? 1.0;
+        const speedMax = config.speedMax ?? 3.5;
+        const sizeMin = config.sizeMin ?? 1;
+        const sizeMax = config.sizeMax ?? 4;
+        const lifeMin = config.lifeMin ?? 0.6;
+        const lifeMax = config.lifeMax ?? 1.4;
+        const posSpread = config.posSpread ?? 2;
+
+        for (let i = 0; i < count; i++) {
+            if (this.particles.length >= this.maxSize) return;
+            const angle = baseAngle + (Math.random() - 0.5) * spread;
+            const speed = speedMin + Math.random() * (speedMax - speedMin);
+            const sz = sizeMin + Math.random() * (sizeMax - sizeMin);
+            const ml = lifeMin + Math.random() * (lifeMax - lifeMin);
+            this.spawn({
+                x: (config.x || 0) + (Math.random() - 0.5) * posSpread,
+                y: (config.y || 0) + (Math.random() - 0.5) * posSpread * 0.3,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: 1,
+                maxLife: ml,
+                size: sz,
+                color: config.color || '#ffffff',
+                gravity: config.gravity ?? 4,
+                drag: config.drag ?? 1,
+                type: config.type || 'circle',
+            });
+        }
+    }
+
+    /**
+     * Advance all particles by dt seconds. Dead particles are compacted out.
+     */
+    update(dt) {
+        let writeIdx = 0;
+        for (let i = 0; i < this.particles.length; i++) {
+            const p = this.particles[i];
+            p.life -= dt / p.maxLife;
+            if (p.life <= 0) continue;
+
+            p.age += dt;
+            p.prevX = p.x;
+            p.prevY = p.y;
+
+            p.vy += p.gravity * dt;
+            p.vx *= Math.pow(p.drag, dt);
+            p.vy *= Math.pow(p.drag, dt);
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+
+            if (writeIdx !== i) this.particles[writeIdx] = p;
+            writeIdx++;
+        }
+        this.particles.length = writeIdx;
+    }
+
+    /**
+     * Batch-render all particles.
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {Function} worldToScreen  (x, y) => {x, y}
+     * @param {number} time             global clock for twinkle effects
+     */
+    render(ctx, worldToScreen, time) {
+        if (this.particles.length === 0) return;
+
+        ctx.save();
+
+        for (let i = 0; i < this.particles.length; i++) {
+            const p = this.particles[i];
+            const sp = worldToScreen(p.x, p.y);
+            const alpha = Math.max(0, p.life);
+
+            ctx.globalAlpha = alpha;
+
+            switch (p.type) {
+                case 'star':
+                    this._renderStar(ctx, sp, p, alpha, time);
+                    break;
+                case 'spark':
+                    this._renderSpark(ctx, sp, p, alpha, worldToScreen);
+                    break;
+                case 'snowflake':
+                    this._renderSnowflake(ctx, sp, p, alpha, time);
+                    break;
+                case 'trail':
+                    this._renderTrail(ctx, sp, p, alpha);
+                    break;
+                default:
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+            }
+        }
+
+        ctx.restore();
+    }
+
+    /** 4-point star shape */
+    _renderStar(ctx, sp, p, alpha, time) {
+        const twinkle = 0.5 + 0.5 * Math.sin(time * 12 + p.sparklePhase);
+        ctx.globalAlpha = alpha * twinkle;
+        ctx.fillStyle = p.color;
+        const sz = p.size * (0.8 + twinkle * 0.4);
+
+        ctx.beginPath();
+        ctx.moveTo(sp.x, sp.y - sz * 1.5);
+        ctx.lineTo(sp.x + sz * 0.4, sp.y - sz * 0.4);
+        ctx.lineTo(sp.x + sz * 1.5, sp.y);
+        ctx.lineTo(sp.x + sz * 0.4, sp.y + sz * 0.4);
+        ctx.lineTo(sp.x, sp.y + sz * 1.5);
+        ctx.lineTo(sp.x - sz * 0.4, sp.y + sz * 0.4);
+        ctx.lineTo(sp.x - sz * 1.5, sp.y);
+        ctx.lineTo(sp.x - sz * 0.4, sp.y - sz * 0.4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#fffde0';
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, sz * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** Bright dot with short trailing line */
+    _renderSpark(ctx, sp, p, alpha, worldToScreen) {
+        const prev = worldToScreen(p.prevX, p.prevY);
+
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(1, p.size * 0.5);
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(sp.x, sp.y);
+        ctx.stroke();
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = alpha * 0.6;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, p.size * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** 6-arm snowflake shape */
+    _renderSnowflake(ctx, sp, p, alpha, time) {
+        const rot = time * 0.5 + p.sparklePhase;
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(0.5, p.size * 0.25);
+        ctx.lineCap = 'round';
+
+        const armLen = p.size * 1.2;
+        ctx.beginPath();
+        for (let a = 0; a < 6; a++) {
+            const angle = rot + (a * Math.PI) / 3;
+            const ax = sp.x + Math.cos(angle) * armLen;
+            const ay = sp.y + Math.sin(angle) * armLen;
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(ax, ay);
+
+            const bx = sp.x + Math.cos(angle) * armLen * 0.6;
+            const by = sp.y + Math.sin(angle) * armLen * 0.6;
+            const branchLen = armLen * 0.35;
+            ctx.moveTo(bx, by);
+            ctx.lineTo(bx + Math.cos(angle + 0.5) * branchLen, by + Math.sin(angle + 0.5) * branchLen);
+            ctx.moveTo(bx, by);
+            ctx.lineTo(bx + Math.cos(angle - 0.5) * branchLen, by + Math.sin(angle - 0.5) * branchLen);
+        }
+        ctx.stroke();
+    }
+
+    /** Fading trail dot (used for jumper flight trail) */
+    _renderTrail(ctx, sp, p, alpha) {
+        ctx.globalAlpha = alpha * 0.4;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SkihoppRenderer
 // ---------------------------------------------------------------------------
 
@@ -50,15 +280,14 @@ export default class SkihoppRenderer {
         this._spectators = [];
         this._snowParticles = [];
 
-        // Visual polish effect particles
-        this._takeoffParticles = [];
-        this._landingParticles = [];
+        // Unified particle system (replaces _takeoffParticles, _landingParticles, _celebrationParticles)
+        this._particles = new ParticlePool(500);
+        this._trailFrameCounter = 0;
         this._windStreaks = [];
         this._prevGameState = null;
 
         // Game juice effect state
         this._takeoffFlash = null;          // { x, y, startTime }
-        this._celebrationParticles = [];    // golden sparkle particles
         this._milestoneFlashes = [];        // { distance, startTime }
         this._passedMilestones = new Set(); // track which milestones already triggered
 
@@ -263,33 +492,93 @@ export default class SkihoppRenderer {
         // --- Camera management ---
         this._updateCamera(jumperState, gameState, 1 / 60);
 
-        // Camera shake from vibration/landing
+        // Camera shake from vibration/landing + cinematic rotation
         const vib = jumperState.vibration || 0;
-        if (vib > 0.01) {
-            const shakeX = (Math.random() - 0.5) * vib * 4;
-            const shakeY = (Math.random() - 0.5) * vib * 4;
+        const hasRotation = Math.abs(this._cameraRotation || 0) > 0.0001;
+        if (vib > 0.01 || hasRotation) {
+            const shakeX = vib > 0.01 ? (Math.random() - 0.5) * vib * 4 : 0;
+            const shakeY = vib > 0.01 ? (Math.random() - 0.5) * vib * 4 : 0;
             ctx.save();
-            ctx.translate(shakeX, shakeY);
+            if (hasRotation) {
+                ctx.translate(width / 2, height / 2);
+                ctx.rotate(this._cameraRotation);
+                ctx.translate(-width / 2, -height / 2);
+            }
+            if (vib > 0.01) {
+                ctx.translate(shakeX, shakeY);
+            }
         }
 
         // --- Detect state transitions for particle effects ---
         if (this._prevGameState !== gameState) {
             if (gameState === GameState.FLIGHT && this._prevGameState === GameState.TAKEOFF) {
-                this._spawnTakeoffParticles();
+                // Takeoff spark burst
+                this._particles.spawnBurst(25, {
+                    type: 'spark', color: '#ffffff',
+                    x: jumperState.x, y: jumperState.y,
+                    speedMin: 1.5, speedMax: 4.5, spread: Math.PI * 0.8,
+                    sizeMin: 1, sizeMax: 3, lifeMin: 0.4, lifeMax: 0.8,
+                    gravity: 3, drag: 0.95,
+                });
+                // Perfect takeoff: golden stars
+                if ((jumperState.takeoffQuality || 0) > 0.85) {
+                    this._particles.spawnBurst(20, {
+                        type: 'star', color: '#ffd700',
+                        x: jumperState.x, y: jumperState.y,
+                        speedMin: 0.8, speedMax: 2.5, spread: Math.PI * 1.4,
+                        sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.7, lifeMax: 1.2,
+                        gravity: -0.5, drag: 0.97,
+                    });
+                }
                 this._triggerTakeoffFlash(jumperState.x, jumperState.y);
                 this._passedMilestones.clear();
+                this._trailFrameCounter = 0;
             }
             if (gameState === GameState.LANDING && this._prevGameState === GameState.FLIGHT) {
                 const impactForce = Math.abs(jumperState.vy || 0) * 2;
-                this._spawnLandingParticles(jumperState.x, jumperState.y, impactForce);
+                const snowCount = Math.floor(15 + Math.min(30, impactForce * 3));
+                // Landing snowflake burst
+                this._particles.spawnBurst(snowCount, {
+                    type: 'snowflake', color: '#e0f0ff',
+                    x: jumperState.x, y: jumperState.y,
+                    speedMin: 0.8, speedMax: 3.0, spread: Math.PI * 1.2,
+                    sizeMin: 2, sizeMax: 5, lifeMin: 0.8, lifeMax: 1.6,
+                    gravity: 2, drag: 0.92, posSpread: 3,
+                });
                 // Spawn impact ripples on landing
                 this._impactRipples.push({ x: jumperState.x, y: jumperState.y, startTime: this._time });
+                // Perfect telemark: green stars
                 if ((jumperState.landingQuality || 0) > 0.8) {
-                    this._spawnCelebrationParticles(jumperState.x, jumperState.y);
+                    this._particles.spawnBurst(15, {
+                        type: 'star', color: '#44ff88',
+                        x: jumperState.x, y: jumperState.y - 0.5,
+                        speedMin: 0.5, speedMax: 2.0, spread: Math.PI * 1.4,
+                        sizeMin: 1.5, sizeMax: 3.0, lifeMin: 0.8, lifeMax: 1.4,
+                        gravity: -0.8, drag: 0.96,
+                    });
                 }
             }
             this._prevGameState = gameState;
         }
+
+        // --- Continuous trail behind jumper during flight ---
+        if (gameState === GameState.FLIGHT && jumperState) {
+            this._trailFrameCounter++;
+            if (this._trailFrameCounter % 3 === 0) {
+                this._particles.spawn({
+                    type: 'trail', color: '#c8deff',
+                    x: jumperState.x, y: jumperState.y,
+                    vx: (Math.random() - 0.5) * 0.2,
+                    vy: (Math.random() - 0.5) * 0.1,
+                    life: 1, maxLife: 0.5,
+                    size: 1.5 + Math.random(),
+                    gravity: 0.3, drag: 0.98,
+                });
+            }
+        }
+
+        // --- Update particle system ---
+        this._particles.update(1 / 60);
 
         // --- Track distance milestones during flight ---
         if (gameState === GameState.FLIGHT) {
@@ -303,9 +592,18 @@ export default class SkihoppRenderer {
         try { this._drawMountains(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawMountains error:', e); }
         try { this._drawSnowGround(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawSnowGround error:', e); }
         try { this._drawHillSurface(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawHillSurface error:', e); }
+
+        // Premium: dynamic lighting spotlight during flight
+        try { this._drawDynamicLighting(ctx, width, height, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawDynamicLighting error:', e); }
+
         try { this._drawSpectators(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawSpectators error:', e); }
         try { this._drawCrowdWaveEffect(ctx, jumperState, gameState); } catch (e) { console.warn('[SkihoppRenderer] _drawCrowdWaveEffect error:', e); }
         try { this._drawJumperShadow(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawJumperShadow error:', e); }
+
+        // Premium: heat distortion during fast inrun
+        if (gameState === GameState.INRUN) {
+            try { this._drawHeatDistortion(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawHeatDistortion error:', e); }
+        }
 
         // Speed lines behind jumper during inrun
         if (gameState === GameState.INRUN) {
@@ -313,7 +611,17 @@ export default class SkihoppRenderer {
         }
 
         try { this._drawJumper(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawJumper error:', e); }
+
+        // Premium: trajectory ghost line during flight
+        if (gameState === GameState.FLIGHT) {
+            try { this._drawTrajectoryGhost(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawTrajectoryGhost error:', e); }
+        }
+
         try { this._drawTakeoffFlash(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawTakeoffFlash error:', e); }
+
+        // Premium: impact ripples on landing
+        try { this._drawImpactRipple(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawImpactRipple error:', e); }
+
         try { this._drawCelebrationParticles(ctx, 1 / 60); } catch (e) { console.warn('[SkihoppRenderer] _drawCelebrationParticles error:', e); }
         try { this._drawMilestoneFlashes(ctx, jumperState, gameState); } catch (e) { console.warn('[SkihoppRenderer] _drawMilestoneFlashes error:', e); }
         try { this._drawEffectParticles(ctx, 1 / 60); } catch (e) { console.warn('[SkihoppRenderer] _drawEffectParticles error:', e); }
@@ -324,10 +632,16 @@ export default class SkihoppRenderer {
             try { this._drawWindStreaks(ctx, width, height, wind); } catch (e) { console.warn('[SkihoppRenderer] _drawWindStreaks error:', e); }
         }
 
-        // Restore camera shake transform
-        if ((jumperState.vibration || 0) > 0.01) {
+        // Premium: lens flare from floodlights
+        try { this._drawLensFlare(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawLensFlare error:', e); }
+
+        // Restore camera shake/rotation transform
+        if ((jumperState.vibration || 0) > 0.01 || Math.abs(this._cameraRotation || 0) > 0.0001) {
             ctx.restore();
         }
+
+        // Premium: depth of field edge blur
+        try { this._drawDepthOfField(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawDepthOfField error:', e); }
 
         // Vignette overlay (drawn last, outside camera shake)
         try { this._drawVignette(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawVignette error:', e); }
@@ -337,13 +651,47 @@ export default class SkihoppRenderer {
     // Camera
     // ------------------------------------------------------------------
 
+    /**
+     * Cubic ease-in-out for smooth camera transitions.
+     * @param {number} t - value in [0, 1]
+     * @returns {number} eased value in [0, 1]
+     */
+    _easeInOutCubic(t) {
+        if (t < 0) return 0;
+        if (t > 1) return 1;
+        return t < 0.5
+            ? 4 * t * t * t
+            : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    }
+
     _updateCamera(jumperState, gameState, dt) {
         const r = this.renderer;
         if (!r || !this.hill) return;
         let targetZoom, targetX, targetY;
-        // Very smooth transitions across all states (lerp speed 2)
         let followSpeed = 2;
         let zoomSpeed = 2;
+
+        // Track phase transitions for cinematic timing
+        if (this._cameraPrevPhase !== gameState) {
+            this._cameraPhaseTime = 0;
+            if (gameState === GameState.TAKEOFF) {
+                this._takeoffZoomPulse = 0.2;
+            }
+            if (gameState === GameState.LANDING) {
+                this._landingZoomHit = true;
+            }
+            if (gameState === GameState.SCORE) {
+                this._scoreStartX = jumperState.x;
+                this._scoreStartY = jumperState.y;
+            }
+            this._cameraPrevPhase = gameState;
+        }
+        this._cameraPhaseTime += dt;
+
+        // Decay takeoff pulse timer
+        if (this._takeoffZoomPulse > 0) {
+            this._takeoffZoomPulse = Math.max(0, this._takeoffZoomPulse - dt);
+        }
 
         switch (gameState) {
             case GameState.MENU:
@@ -356,47 +704,123 @@ export default class SkihoppRenderer {
                 targetZoom = 0.7;
                 followSpeed = 2;
                 zoomSpeed = 2;
+                this._cameraRotation = 0;
                 break;
             }
             case GameState.INRUN: {
-                // Follow jumper closely, slightly ahead so track is visible
-                // Lead the jumper by a few meters downhill
-                targetX = jumperState.x + 5;
-                // Slightly above to show surrounding area
+                // CINEMATIC INRUN: start wide, gradually zoom in as speed builds.
+                // Subtle forward bias - camera slightly ahead of jumper.
+                const speed = jumperState.speed || 0;
+                const maxSpeed = 26; // matches SkihoppPhysics maxSpeed
+                const speedRatio = Math.min(speed / maxSpeed, 1);
+                const zoomEased = this._easeInOutCubic(speedRatio);
+
+                // Zoom ramps from 1.5 (wide) to 3.0 (tight) with speed
+                targetZoom = 1.5 + 1.5 * zoomEased;
+
+                // Forward bias increases with speed (3m to 8m ahead)
+                const leadDistance = 3 + 5 * zoomEased;
+                targetX = jumperState.x + leadDistance;
                 targetY = jumperState.y - 2;
-                // Tight zoom on the jumper during inrun
-                targetZoom = 2.5;
-                // Fast follow so camera catches up quickly at inrun start
+
                 followSpeed = 5;
                 zoomSpeed = 3;
+                this._cameraRotation = 0;
                 break;
             }
             case GameState.TAKEOFF: {
-                // Dramatic launch moment: slight zoom in, centred on jumper
+                // CINEMATIC TAKEOFF: 0.2s zoom-in pulse (zoom * 1.1) for impact
                 targetX = jumperState.x + 3;
                 targetY = jumperState.y - 2;
-                targetZoom = 3.0;
-                followSpeed = 2;
-                zoomSpeed = 2;
+
+                const pulseT = this._takeoffZoomPulse / 0.2; // 1 at start, 0 at end
+                const pulseEased = this._easeInOutCubic(pulseT);
+                targetZoom = 3.0 * (1 + 0.1 * pulseEased);
+
+                followSpeed = 6;
+                zoomSpeed = 8;
+                this._cameraRotation = 0;
                 break;
             }
             case GameState.FLIGHT: {
-                // Smoothly pull back to show the full flight arc
-                // Keep camera ahead and above so landing area stays visible
+                // CINEMATIC FLIGHT: dynamic zoom based on height, gentle rotation
+                const height = Math.max(0, -(jumperState.y || 0));
+                const heightFactor = Math.min(height / 20, 1);
+                const heightEased = this._easeInOutCubic(heightFactor);
+
+                // Zoom out more the higher the jumper goes (1.4 to 0.9)
+                targetZoom = 1.4 - 0.5 * heightEased;
+
+                // Keep camera ahead and above; more offset when higher
                 targetX = jumperState.x + 12;
-                targetY = jumperState.y - 8;
-                targetZoom = 1.2;
-                followSpeed = 2;
+                targetY = jumperState.y - 6 - 4 * heightEased;
+
+                followSpeed = 2.5;
                 zoomSpeed = 2;
+
+                // Gentle rotation following flight angle (max 2 degrees)
+                const vx = jumperState.vx || 0;
+                const vy = jumperState.vy || 0;
+                if (Math.abs(vx) > 0.1 || Math.abs(vy) > 0.1) {
+                    const flightAngle = Math.atan2(vy, vx);
+                    const maxRot = 2 * Math.PI / 180;
+                    const targetRot = Math.max(-maxRot, Math.min(maxRot, flightAngle * 0.3));
+                    const rotFactor = 1 - Math.exp(-2 * dt);
+                    this._cameraRotation += (targetRot - this._cameraRotation) * rotFactor;
+                }
                 break;
             }
             case GameState.LANDING: {
-                // Quick zoom to show the telemark landing clearly
+                // CINEMATIC LANDING: quick zoom in on impact, then bounce back
+                const landT = this._cameraPhaseTime;
+                const impactForce = jumperState.impactForce || Math.abs(jumperState.vy || 0) * 2;
+
+                if (landT < 0.15) {
+                    // Quick zoom IN to 2.5 on impact (first 150ms)
+                    const hitEased = this._easeInOutCubic(landT / 0.15);
+                    targetZoom = 2.0 + 0.5 * hitEased;
+                    zoomSpeed = 12;
+                } else if (landT < 0.5) {
+                    // Bounce back slightly (150ms-500ms)
+                    const bounceT = (landT - 0.15) / 0.35;
+                    const bounceEased = this._easeInOutCubic(bounceT);
+                    targetZoom = 2.5 - 0.3 * bounceEased;
+                    zoomSpeed = 6;
+                } else {
+                    // Settle
+                    targetZoom = 2.2;
+                    zoomSpeed = 3;
+                }
+
                 targetX = jumperState.x + 2;
                 targetY = jumperState.y - 1.5;
-                targetZoom = 2.0;
-                followSpeed = 2;
-                zoomSpeed = 2;
+                followSpeed = 5;
+
+                // Enhanced camera shake proportional to impact force
+                if (this._landingZoomHit && landT < 0.3) {
+                    const shakeMag = Math.min(impactForce * 0.5, 6);
+                    const shakeDecay = 1 - this._easeInOutCubic(landT / 0.3);
+                    r.cameraX += (Math.random() - 0.5) * shakeMag * shakeDecay * dt;
+                    r.cameraY += (Math.random() - 0.5) * shakeMag * shakeDecay * dt;
+                }
+                if (landT > 0.3) this._landingZoomHit = false;
+
+                // Ease rotation back to zero
+                this._cameraRotation *= (1 - 5 * dt);
+                break;
+            }
+            case GameState.SCORE: {
+                // CINEMATIC SCORE: slow drift to side, gentle zoom out
+                const scoreT = this._cameraPhaseTime;
+                const driftEased = this._easeInOutCubic(Math.min(scoreT / 3, 1));
+
+                targetX = this._scoreStartX + 8 * driftEased;
+                targetY = this._scoreStartY - 3 * driftEased;
+                targetZoom = 2.2 - 1.0 * driftEased;
+
+                followSpeed = 1.5;
+                zoomSpeed = 1.5;
+                this._cameraRotation *= (1 - 3 * dt);
                 break;
             }
             default:
@@ -405,6 +829,7 @@ export default class SkihoppRenderer {
                 targetZoom = 1.5;
                 followSpeed = 2;
                 zoomSpeed = 2;
+                this._cameraRotation = 0;
         }
 
         r.smoothFollow(targetX, targetY, dt, followSpeed);
@@ -1232,6 +1657,38 @@ export default class SkihoppRenderer {
         ctx.fillStyle = iceGrad;
         ctx.fill();
 
+        // --- Ice texture: subtle horizontal streaks of lighter blue ---
+        ctx.save();
+        if (!this._iceStreaks) {
+            const iceRng = seededRandom(3030);
+            this._iceStreaks = [];
+            for (let i = 0; i < 18; i++) {
+                this._iceStreaks.push({
+                    tNorm: iceRng(),
+                    offsetY: (iceRng() - 0.5) * 0.6,
+                    alpha: 0.12 + iceRng() * 0.18,
+                    width: 0.5 + iceRng() * 1.0,
+                    color: iceRng() < 0.5 ? '#e8f4ff' : '#d0ecff',
+                });
+            }
+        }
+        for (const streak of this._iceStreaks) {
+            const idx = Math.floor(streak.tNorm * (inrunPts.length - 10));
+            if (idx < 0 || idx + 8 >= inrunPts.length) continue;
+            ctx.globalAlpha = streak.alpha;
+            ctx.strokeStyle = streak.color;
+            ctx.lineWidth = streak.width;
+            ctx.beginPath();
+            for (let j = 0; j < 8; j++) {
+                const pt = inrunPts[idx + j];
+                const sp = r.worldToScreen(pt.x, pt.y + streak.offsetY);
+                if (j === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
+
         // Icy glare streaks
         ctx.save();
         ctx.globalAlpha = 0.25;
@@ -1248,7 +1705,59 @@ export default class SkihoppRenderer {
         }
         ctx.restore();
 
-        // --- Landing slope: white snow surface ---
+        // --- Track rails: two dark parallel lines with glossy shine ---
+        const railOffset = 0.35;
+        for (const side of [-1, 1]) {
+            ctx.beginPath();
+            first = true;
+            for (let i = 0; i < inrunPts.length; i += 2) {
+                const pt = inrunPts[i];
+                const sp = r.worldToScreen(pt.x, pt.y + side * railOffset);
+                if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.strokeStyle = '#1a2233';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+            // Shine highlight on rail
+            ctx.save();
+            ctx.beginPath();
+            first = true;
+            for (let i = 0; i < inrunPts.length; i += 2) {
+                const pt = inrunPts[i];
+                const sp = r.worldToScreen(pt.x, pt.y + side * railOffset - 0.05);
+                if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.globalAlpha = 0.4;
+            ctx.strokeStyle = '#aaccee';
+            ctx.lineWidth = 0.6;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // --- Table edge: warm amber glow ---
+        ctx.save();
+        ctx.shadowColor = '#ffaa33';
+        ctx.shadowBlur = 12;
+        ctx.strokeStyle = '#ffcc44';
+        ctx.lineWidth = 3.5;
+        const teUp = r.worldToScreen(0, -wallThickness - 0.5);
+        const teDown = r.worldToScreen(0, wallThickness + 0.5);
+        ctx.beginPath();
+        ctx.moveTo(teUp.x, teUp.y);
+        ctx.lineTo(teDown.x, teDown.y);
+        ctx.stroke();
+        ctx.shadowBlur = 20;
+        ctx.globalAlpha = 0.4;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(teUp.x, teUp.y);
+        ctx.lineTo(teDown.x, teDown.y);
+        ctx.stroke();
+        ctx.restore();
+
+        // --- Landing slope: white snow surface with noise texture ---
         ctx.beginPath();
         first = true;
         for (const pt of landingPts) {
@@ -1262,8 +1771,40 @@ export default class SkihoppRenderer {
         ctx.lineTo(landLastS.x, landLastS.y + thickness);
         ctx.lineTo(landFirstS.x, landFirstS.y + thickness);
         ctx.closePath();
-        ctx.fillStyle = '#ffffff';
+        const snowGrad = ctx.createLinearGradient(0, landFirstS.y, 0, landFirstS.y + thickness);
+        snowGrad.addColorStop(0, '#fafeff');
+        snowGrad.addColorStop(0.3, '#f0f6fc');
+        snowGrad.addColorStop(1, '#dde8f2');
+        ctx.fillStyle = snowGrad;
         ctx.fill();
+
+        // Snow noise texture (subtle random dots on landing slope)
+        ctx.save();
+        if (!this._snowNoiseDots) {
+            const noiseRng = seededRandom(7171);
+            this._snowNoiseDots = [];
+            for (let i = 0; i < 200; i++) {
+                this._snowNoiseDots.push({
+                    tNorm: noiseRng(),
+                    offY: noiseRng() * 2.0,
+                    dotR: 0.5 + noiseRng() * 1.2,
+                    bright: noiseRng() < 0.5,
+                });
+            }
+        }
+        for (const dot of this._snowNoiseDots) {
+            const idx = Math.floor(dot.tNorm * (landingPts.length - 1));
+            if (idx < 0 || idx >= landingPts.length) continue;
+            const pt = landingPts[idx];
+            const sp = r.worldToScreen(pt.x, pt.y + dot.offY);
+            if (sp.x < -10 || sp.x > w + 10 || sp.y < -10 || sp.y > h + 10) continue;
+            ctx.globalAlpha = dot.bright ? 0.12 : 0.06;
+            ctx.fillStyle = dot.bright ? '#ffffff' : '#c8d8e8';
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, dot.dotR, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
 
         // Shadow strip just below surface edge
         ctx.beginPath();
@@ -2841,4 +3382,370 @@ export default class SkihoppRenderer {
         }
         ctx.restore();
     }
+    // ------------------------------------------------------------------
+    // Premium Visual Effects
+    // ------------------------------------------------------------------
+
+    /**
+     * Lens flare effect from floodlight positions.
+     * Draws hexagonal bokeh shapes and light streaks using screen composite.
+     */
+    _drawLensFlare(ctx, w, h) {
+        if (!this.hill || !this.renderer) return;
+        const r = this.renderer;
+        const kp = this.hill.getKPointPosition();
+        const hs = this.hill.getHSPointPosition();
+        if (!kp || !hs) return;
+
+        const t = this._time || 0;
+
+        // Floodlight positions (same as _drawFloodlights)
+        const polePositions = [
+            { x: kp.x * 0.3, side: 1 },
+            { x: kp.x * 0.65, side: -1 },
+            { x: kp.x * 1.0, side: 1 },
+            { x: hs.x * 0.9, side: -1 },
+        ];
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+
+        for (const pole of polePositions) {
+            const surfaceY = this.hill.getHeightAtDistance(pole.x);
+            const poleTopY = surfaceY + pole.side * 6 - 18;
+            const top = r.worldToScreen(pole.x, poleTopY);
+
+            // Skip if off-screen
+            if (top.x < -50 || top.x > w + 50 || top.y < -50 || top.y > h + 50) continue;
+
+            // Subtle pulsing flare intensity
+            const pulse = 0.7 + 0.3 * Math.sin(t * 1.5 + pole.x * 0.1);
+
+            // Central soft glow
+            const glowR = 35 * pulse;
+            const glowGrad = ctx.createRadialGradient(top.x, top.y, 0, top.x, top.y, glowR);
+            glowGrad.addColorStop(0, `rgba(255,255,230,${(0.15 * pulse).toFixed(3)})`);
+            glowGrad.addColorStop(0.5, `rgba(255,250,200,${(0.06 * pulse).toFixed(3)})`);
+            glowGrad.addColorStop(1, 'rgba(255,250,200,0)');
+            ctx.fillStyle = glowGrad;
+            ctx.beginPath();
+            ctx.arc(top.x, top.y, glowR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Light streak (horizontal anamorphic flare)
+            const streakLen = 50 * pulse;
+            const streakGrad = ctx.createLinearGradient(
+                top.x - streakLen, top.y, top.x + streakLen, top.y
+            );
+            streakGrad.addColorStop(0, 'rgba(255,250,220,0)');
+            streakGrad.addColorStop(0.3, `rgba(255,250,220,${(0.04 * pulse).toFixed(3)})`);
+            streakGrad.addColorStop(0.5, `rgba(255,255,240,${(0.08 * pulse).toFixed(3)})`);
+            streakGrad.addColorStop(0.7, `rgba(255,250,220,${(0.04 * pulse).toFixed(3)})`);
+            streakGrad.addColorStop(1, 'rgba(255,250,220,0)');
+            ctx.fillStyle = streakGrad;
+            ctx.fillRect(top.x - streakLen, top.y - 1.5, streakLen * 2, 3);
+
+            // 2-3 hexagonal bokeh ghosts along a line from flare to center
+            const cx = w / 2;
+            const cy = h / 2;
+            const dx = cx - top.x;
+            const dy = cy - top.y;
+            const bokehPositions = [0.3, 0.55, 0.8];
+            const bokehSizes = [8, 12, 6];
+            const bokehAlphas = [0.03, 0.04, 0.025];
+
+            for (let bi = 0; bi < bokehPositions.length; bi++) {
+                const bx = top.x + dx * bokehPositions[bi];
+                const by = top.y + dy * bokehPositions[bi];
+                const bSize = bokehSizes[bi] * pulse;
+                const bAlpha = bokehAlphas[bi] * pulse;
+
+                // Draw hexagon
+                ctx.globalAlpha = bAlpha;
+                ctx.fillStyle = `rgba(200,220,255,1)`;
+                ctx.beginPath();
+                for (let hi = 0; hi < 6; hi++) {
+                    const angle = (hi / 6) * Math.PI * 2 - Math.PI / 6;
+                    const hx = bx + Math.cos(angle) * bSize;
+                    const hy = by + Math.sin(angle) * bSize;
+                    if (hi === 0) ctx.moveTo(hx, hy);
+                    else ctx.lineTo(hx, hy);
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        ctx.restore();
+    }
+
+    /**
+     * Dynamic spotlight that follows the jumper during flight.
+     * Lights up the snow surface below with a radial gradient.
+     */
+    _drawDynamicLighting(ctx, w, h, jumperState) {
+        if (!jumperState || !this.renderer || !this.hill) return;
+        const phase = jumperState.phase;
+        if (phase !== GameState.FLIGHT && phase !== 'FLIGHT') return;
+
+        const r = this.renderer;
+        const surfaceY = this.hill.getHeightAtDistance(jumperState.x);
+        const heightAbove = Math.max(0, surfaceY - jumperState.y);
+
+        // Only show when jumper is airborne
+        if (heightAbove < 0.5) return;
+
+        // Spotlight on the snow surface below the jumper
+        const groundSp = r.worldToScreen(jumperState.x, surfaceY);
+        const jumperSp = r.worldToScreen(jumperState.x, jumperState.y);
+
+        // Radius grows with height (wider spread from higher up)
+        const spotRadius = Math.min(120, 30 + heightAbove * 8);
+        const intensity = Math.min(0.12, 0.04 + heightAbove * 0.005);
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+
+        // Main spotlight on ground
+        const spotGrad = ctx.createRadialGradient(
+            groundSp.x, groundSp.y, 0,
+            groundSp.x, groundSp.y, spotRadius
+        );
+        spotGrad.addColorStop(0, `rgba(200,220,255,${intensity.toFixed(3)})`);
+        spotGrad.addColorStop(0.4, `rgba(180,200,240,${(intensity * 0.5).toFixed(3)})`);
+        spotGrad.addColorStop(0.7, `rgba(150,180,220,${(intensity * 0.2).toFixed(3)})`);
+        spotGrad.addColorStop(1, 'rgba(150,180,220,0)');
+        ctx.fillStyle = spotGrad;
+        ctx.beginPath();
+        ctx.arc(groundSp.x, groundSp.y, spotRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Subtle glow around jumper
+        const jumperGlow = 20;
+        const jGrad = ctx.createRadialGradient(
+            jumperSp.x, jumperSp.y, 0,
+            jumperSp.x, jumperSp.y, jumperGlow
+        );
+        jGrad.addColorStop(0, 'rgba(220,240,255,0.06)');
+        jGrad.addColorStop(0.5, 'rgba(200,220,255,0.02)');
+        jGrad.addColorStop(1, 'rgba(200,220,255,0)');
+        ctx.fillStyle = jGrad;
+        ctx.beginPath();
+        ctx.arc(jumperSp.x, jumperSp.y, jumperGlow, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    /**
+     * Predicted trajectory ghost line during flight.
+     * Draws a faint dotted arc ahead of the jumper showing estimated landing.
+     */
+    _drawTrajectoryGhost(ctx, jumperState) {
+        if (!jumperState || !this.renderer || !this.hill) return;
+        const r = this.renderer;
+
+        const vx = jumperState.vx || 0;
+        const vy = jumperState.vy || 0;
+        const gravity = 9.81;
+
+        // Skip if barely moving
+        if (Math.abs(vx) < 0.5) return;
+
+        ctx.save();
+        ctx.globalAlpha = 0.2;
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.setLineDash([4, 6]);
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = 'round';
+
+        ctx.beginPath();
+        let started = false;
+        const dt = 0.08; // time step for prediction
+        const steps = 30;  // predict ~2.4 seconds ahead
+
+        for (let i = 1; i <= steps; i++) {
+            const t = i * dt;
+            // Simple projectile: x = x0 + vx*t, y = y0 + vy*t + 0.5*g*t^2
+            const px = jumperState.x + vx * t;
+            const py = jumperState.y + vy * t + 0.5 * gravity * t * t;
+
+            // Check if we hit the hill surface
+            const surfaceY = this.hill.getHeightAtDistance(px);
+            if (py >= surfaceY) break;
+
+            const sp = r.worldToScreen(px, py);
+            if (!started) {
+                ctx.moveTo(sp.x, sp.y);
+                started = true;
+            } else {
+                ctx.lineTo(sp.x, sp.y);
+            }
+        }
+
+        if (started) {
+            ctx.stroke();
+        }
+
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    /**
+     * Expanding concentric ripple rings on landing impact (like stone in water, but snow).
+     * 3 rings, expanding and fading over 0.5s.
+     */
+    _drawImpactRipple(ctx) {
+        if (this._impactRipples.length === 0) return;
+        const r = this.renderer;
+        const duration = 0.5;
+
+        ctx.save();
+        ctx.lineWidth = 1.5;
+
+        // Clean up expired ripples while iterating
+        let writeIdx = 0;
+        for (let i = 0; i < this._impactRipples.length; i++) {
+            const ripple = this._impactRipples[i];
+            const elapsed = this._time - ripple.startTime;
+            if (elapsed > duration) continue;
+
+            // Keep this ripple
+            if (writeIdx !== i) this._impactRipples[writeIdx] = ripple;
+            writeIdx++;
+
+            const progress = elapsed / duration;
+            const sp = r.worldToScreen(ripple.x, ripple.y);
+            const ppm = r.ppm;
+
+            // 3 concentric rings with staggered expansion
+            for (let ring = 0; ring < 3; ring++) {
+                const ringDelay = ring * 0.08;
+                const ringProgress = Math.max(0, (elapsed - ringDelay) / (duration - ringDelay));
+                if (ringProgress <= 0 || ringProgress >= 1) continue;
+
+                // Expand outward
+                const maxRadius = (2.0 + ring * 1.5) * ppm;
+                const radius = maxRadius * ringProgress;
+
+                // Fade out as they expand -- fast ease-out
+                const alpha = (1 - ringProgress) * (1 - ringProgress) * 0.5;
+
+                // Elliptical (wider than tall) for perspective
+                ctx.globalAlpha = alpha;
+                ctx.strokeStyle = 'rgba(220,235,255,0.8)';
+                ctx.beginPath();
+                ctx.ellipse(sp.x, sp.y, radius, radius * 0.35, 0, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+        this._impactRipples.length = writeIdx;
+
+        ctx.restore();
+    }
+
+    /**
+     * Subtle depth-of-field effect: soft blur at screen edges.
+     * Uses canvas filter blur on clipped border regions.
+     */
+    _drawDepthOfField(ctx, w, h) {
+        // Check for filter support (not available in all contexts)
+        if (typeof ctx.filter === 'undefined') return;
+
+        const borderSize = Math.min(w, h) * 0.08; // ~8% of smallest dimension
+
+        ctx.save();
+
+        // Top edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, w, borderSize);
+        ctx.clip();
+        ctx.filter = 'blur(2px)';
+        ctx.drawImage(ctx.canvas, 0, 0);
+        ctx.filter = 'none';
+        ctx.restore();
+
+        // Bottom edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, h - borderSize, w, borderSize);
+        ctx.clip();
+        ctx.filter = 'blur(2px)';
+        ctx.drawImage(ctx.canvas, 0, 0);
+        ctx.filter = 'none';
+        ctx.restore();
+
+        // Left edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, borderSize, borderSize, h - borderSize * 2);
+        ctx.clip();
+        ctx.filter = 'blur(1.5px)';
+        ctx.drawImage(ctx.canvas, 0, 0);
+        ctx.filter = 'none';
+        ctx.restore();
+
+        // Right edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(w - borderSize, borderSize, borderSize, h - borderSize * 2);
+        ctx.clip();
+        ctx.filter = 'blur(1.5px)';
+        ctx.drawImage(ctx.canvas, 0, 0);
+        ctx.filter = 'none';
+        ctx.restore();
+
+        ctx.restore();
+    }
+
+    /**
+     * Heat distortion effect during high-speed inrun (>80 km/h).
+     * Draws subtle wavy distortion lines rising from the track.
+     */
+    _drawHeatDistortion(ctx, jumperState) {
+        if (!jumperState || !this.renderer || !this.hill) return;
+        const speedKmh = (jumperState.speed || 0) * 3.6;
+        if (speedKmh <= 80) return;
+
+        const r = this.renderer;
+        const t = this._time || 0;
+        const intensity = Math.min(1, (speedKmh - 80) / 30); // 0-1 from 80-110 km/h
+
+        ctx.save();
+        ctx.globalAlpha = 0.06 * intensity;
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+
+        // Draw 6-10 wavy rising lines near the jumper on the track
+        const numLines = Math.floor(6 + intensity * 4);
+        const jx = jumperState.x;
+
+        for (let i = 0; i < numLines; i++) {
+            // Spread lines along the track behind/around the jumper
+            const offsetX = (i - numLines / 2) * 1.5;
+            const baseX = jx + offsetX;
+            const baseY = this.hill.getHeightAtDistance(baseX);
+
+            ctx.beginPath();
+            const segments = 8;
+            for (let s = 0; s <= segments; s++) {
+                const frac = s / segments;
+                // Rise upward from the track surface
+                const riseY = baseY - frac * 2.5;
+                // Wavy horizontal wobble that increases with height
+                const wobble = Math.sin(t * 6 + i * 2.3 + frac * 4) * 0.3 * frac * intensity;
+                const wx = baseX + wobble;
+
+                const sp = r.worldToScreen(wx, riseY);
+                if (s === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
 }
