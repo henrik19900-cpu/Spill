@@ -670,15 +670,17 @@ export default class SkihoppGame {
 
             case GameState.READY:
                 // Render the 3D scene behind with camera pan progress
-                this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                    speed: this._getWindSpeed(),
-                    direction: this._getWindDirection(),
-                    cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
-                    cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
-                });
+                if (this.skihoppRenderer) {
+                    this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                        speed: this._getWindSpeed(),
+                        direction: this._getWindDirection(),
+                        cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
+                        cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
+                    });
+                }
 
                 // Show tutorial overlay if active
-                if (this._showTutorial) {
+                if (this._showTutorial && this.tutorialScreen) {
                     this.tutorialScreen.render(ctx, width, height);
                     break;
                 }
@@ -734,10 +736,12 @@ export default class SkihoppGame {
             case GameState.FLIGHT:
             case GameState.LANDING: {
                 // Render the 3D scene
-                this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                    speed: this._getWindSpeed(),
-                    direction: this._getWindDirection(),
-                });
+                if (this.skihoppRenderer) {
+                    this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                        speed: this._getWindSpeed(),
+                        direction: this._getWindDirection(),
+                    });
+                }
 
                 // Edge-approaching warning overlay (pulsing border glow)
                 if (this._edgeWarningActive && state === GameState.INRUN) {
@@ -824,10 +828,12 @@ export default class SkihoppGame {
 
             case GameState.SCORE:
                 // Frozen scene behind the score overlay
-                this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                    speed: this._getWindSpeed(),
-                    direction: this._getWindDirection(),
-                });
+                if (this.skihoppRenderer) {
+                    this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                        speed: this._getWindSpeed(),
+                        direction: this._getWindDirection(),
+                    });
+                }
 
                 // JudgeDisplay._renderBackground provides its own dim overlay,
                 // so no additional dimming is needed here.
