@@ -35,6 +35,236 @@ function lerp(a, b, t) {
 }
 
 // ---------------------------------------------------------------------------
+// ParticlePool - lightweight particle system for visual effects
+// ---------------------------------------------------------------------------
+
+class ParticlePool {
+    constructor(maxSize = 500) {
+        this.particles = [];
+        this.maxSize = maxSize;
+    }
+
+    /**
+     * Spawn a single particle.
+     * @param {Object} config  {x, y, vx, vy, life, maxLife, size, color, gravity, drag, type}
+     *   type: 'circle' | 'star' | 'snowflake' | 'spark' | 'trail'
+     */
+    spawn(config) {
+        if (this.particles.length >= this.maxSize) return;
+        this.particles.push({
+            x: 0, y: 0,
+            vx: 0, vy: 0,
+            life: 1, maxLife: 1,
+            size: 2,
+            color: '#ffffff',
+            gravity: 4,
+            drag: 1,
+            type: 'circle',
+            age: 0,
+            prevX: config.x ?? 0,
+            prevY: config.y ?? 0,
+            sparklePhase: Math.random() * Math.PI * 2,
+            ...config,
+        });
+    }
+
+    /**
+     * Spawn `count` particles in a random burst around a centre point.
+     * @param {number} count
+     * @param {Object} config  - same as spawn(), plus optional spread, speedMin, speedMax
+     */
+    spawnBurst(count, config) {
+        const spread = config.spread ?? Math.PI * 1.2;
+        const baseAngle = config.baseAngle ?? -Math.PI / 2;
+        const speedMin = config.speedMin ?? 1.0;
+        const speedMax = config.speedMax ?? 3.5;
+        const sizeMin = config.sizeMin ?? 1;
+        const sizeMax = config.sizeMax ?? 4;
+        const lifeMin = config.lifeMin ?? 0.6;
+        const lifeMax = config.lifeMax ?? 1.4;
+        const posSpread = config.posSpread ?? 2;
+
+        for (let i = 0; i < count; i++) {
+            if (this.particles.length >= this.maxSize) return;
+            const angle = baseAngle + (Math.random() - 0.5) * spread;
+            const speed = speedMin + Math.random() * (speedMax - speedMin);
+            const sz = sizeMin + Math.random() * (sizeMax - sizeMin);
+            const ml = lifeMin + Math.random() * (lifeMax - lifeMin);
+            this.spawn({
+                x: (config.x || 0) + (Math.random() - 0.5) * posSpread,
+                y: (config.y || 0) + (Math.random() - 0.5) * posSpread * 0.3,
+                vx: Math.cos(angle) * speed,
+                vy: Math.sin(angle) * speed,
+                life: 1,
+                maxLife: ml,
+                size: sz,
+                color: config.color || '#ffffff',
+                gravity: config.gravity ?? 4,
+                drag: config.drag ?? 1,
+                type: config.type || 'circle',
+            });
+        }
+    }
+
+    /**
+     * Advance all particles by dt seconds. Dead particles are compacted out.
+     */
+    update(dt) {
+        let writeIdx = 0;
+        for (let i = 0; i < this.particles.length; i++) {
+            const p = this.particles[i];
+            p.life -= dt / p.maxLife;
+            if (p.life <= 0) continue;
+
+            p.age += dt;
+            p.prevX = p.x;
+            p.prevY = p.y;
+
+            p.vy += p.gravity * dt;
+            p.vx *= Math.pow(p.drag, dt);
+            p.vy *= Math.pow(p.drag, dt);
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+
+            if (writeIdx !== i) this.particles[writeIdx] = p;
+            writeIdx++;
+        }
+        this.particles.length = writeIdx;
+    }
+
+    /**
+     * Batch-render all particles.
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {Function} worldToScreen  (x, y) => {x, y}
+     * @param {number} time             global clock for twinkle effects
+     */
+    render(ctx, worldToScreen, time) {
+        if (this.particles.length === 0) return;
+
+        ctx.save();
+
+        for (let i = 0; i < this.particles.length; i++) {
+            const p = this.particles[i];
+            const sp = worldToScreen(p.x, p.y);
+            const alpha = Math.max(0, p.life);
+
+            ctx.globalAlpha = alpha;
+
+            switch (p.type) {
+                case 'star':
+                    this._renderStar(ctx, sp, p, alpha, time);
+                    break;
+                case 'spark':
+                    this._renderSpark(ctx, sp, p, alpha, worldToScreen);
+                    break;
+                case 'snowflake':
+                    this._renderSnowflake(ctx, sp, p, alpha, time);
+                    break;
+                case 'trail':
+                    this._renderTrail(ctx, sp, p, alpha);
+                    break;
+                default:
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    break;
+            }
+        }
+
+        ctx.restore();
+    }
+
+    /** 4-point star shape */
+    _renderStar(ctx, sp, p, alpha, time) {
+        const twinkle = 0.5 + 0.5 * Math.sin(time * 12 + p.sparklePhase);
+        ctx.globalAlpha = alpha * twinkle;
+        ctx.fillStyle = p.color;
+        const sz = p.size * (0.8 + twinkle * 0.4);
+
+        ctx.beginPath();
+        ctx.moveTo(sp.x, sp.y - sz * 1.5);
+        ctx.lineTo(sp.x + sz * 0.4, sp.y - sz * 0.4);
+        ctx.lineTo(sp.x + sz * 1.5, sp.y);
+        ctx.lineTo(sp.x + sz * 0.4, sp.y + sz * 0.4);
+        ctx.lineTo(sp.x, sp.y + sz * 1.5);
+        ctx.lineTo(sp.x - sz * 0.4, sp.y + sz * 0.4);
+        ctx.lineTo(sp.x - sz * 1.5, sp.y);
+        ctx.lineTo(sp.x - sz * 0.4, sp.y - sz * 0.4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#fffde0';
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, sz * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** Bright dot with short trailing line */
+    _renderSpark(ctx, sp, p, alpha, worldToScreen) {
+        const prev = worldToScreen(p.prevX, p.prevY);
+
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(1, p.size * 0.5);
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(sp.x, sp.y);
+        ctx.stroke();
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = alpha * 0.6;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, p.size * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** 6-arm snowflake shape */
+    _renderSnowflake(ctx, sp, p, alpha, time) {
+        const rot = time * 0.5 + p.sparklePhase;
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(0.5, p.size * 0.25);
+        ctx.lineCap = 'round';
+
+        const armLen = p.size * 1.2;
+        ctx.beginPath();
+        for (let a = 0; a < 6; a++) {
+            const angle = rot + (a * Math.PI) / 3;
+            const ax = sp.x + Math.cos(angle) * armLen;
+            const ay = sp.y + Math.sin(angle) * armLen;
+            ctx.moveTo(sp.x, sp.y);
+            ctx.lineTo(ax, ay);
+
+            const bx = sp.x + Math.cos(angle) * armLen * 0.6;
+            const by = sp.y + Math.sin(angle) * armLen * 0.6;
+            const branchLen = armLen * 0.35;
+            ctx.moveTo(bx, by);
+            ctx.lineTo(bx + Math.cos(angle + 0.5) * branchLen, by + Math.sin(angle + 0.5) * branchLen);
+            ctx.moveTo(bx, by);
+            ctx.lineTo(bx + Math.cos(angle - 0.5) * branchLen, by + Math.sin(angle - 0.5) * branchLen);
+        }
+        ctx.stroke();
+    }
+
+    /** Fading trail dot (used for jumper flight trail) */
+    _renderTrail(ctx, sp, p, alpha) {
+        ctx.globalAlpha = alpha * 0.4;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SkihoppRenderer
 // ---------------------------------------------------------------------------
 
