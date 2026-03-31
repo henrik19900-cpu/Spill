@@ -616,6 +616,7 @@ export default class SkihoppRenderer {
         // Premium: dynamic lighting spotlight during flight
         try { this._drawDynamicLighting(ctx, width, height, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawDynamicLighting error:', e); }
 
+        this._lastJumperX = jumperState ? jumperState.x : 0;
         try { this._drawSpectators(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawSpectators error:', e); }
         try { this._drawCrowdWaveEffect(ctx, jumperState, gameState); } catch (e) { console.warn('[SkihoppRenderer] _drawCrowdWaveEffect error:', e); }
         try { this._drawJumperShadow(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawJumperShadow error:', e); }
@@ -1426,7 +1427,106 @@ export default class SkihoppRenderer {
         this._drawCrowdArea(ctx, w, h);
     }
 
-    /** Draw 10-15 recognizable pine trees at varying distances along the snowy ground. */
+    /** Draw a small hut/building near the outrun area. */
+    _drawOutrunHut(ctx, w, h) {
+        if (!this.hill) return;
+        const r = this.renderer;
+        const landingPts = this.hill.getLandingPoints();
+        if (!landingPts || landingPts.length === 0) return;
+        const last = landingPts[landingPts.length - 1];
+        const hutX = last.x - 8;
+        const hutBaseY = this.hill.getHeightAtDistance(hutX) + 6;
+        const t = this._time || 0;
+
+        const base = r.worldToScreen(hutX, hutBaseY);
+        const hutW = 18;
+        const hutH = 14;
+        const roofH = 7;
+
+        // Hut body (warm wood brown)
+        const bodyGrad = ctx.createLinearGradient(base.x - hutW / 2, base.y - hutH, base.x + hutW / 2, base.y);
+        bodyGrad.addColorStop(0, '#5a3a1a');
+        bodyGrad.addColorStop(1, '#4a2e12');
+        ctx.fillStyle = bodyGrad;
+        ctx.fillRect(base.x - hutW / 2, base.y - hutH, hutW, hutH);
+
+        // Door
+        ctx.fillStyle = '#3a2008';
+        ctx.fillRect(base.x - 2, base.y - 7, 5, 7);
+
+        // Window with warm glow
+        const winX = base.x + hutW * 0.15;
+        const winY = base.y - hutH + 3;
+        const winW2 = 5;
+        const winH2 = 4;
+        ctx.fillStyle = '#2a1808';
+        ctx.fillRect(winX - 0.5, winY - 0.5, winW2 + 1, winH2 + 1);
+        const flicker = 0.85 + 0.15 * Math.sin(t * 2.5 + 1.3);
+        ctx.fillStyle = 'rgb(' + Math.floor(255 * flicker) + ',' + Math.floor(190 * flicker) + ',' + Math.floor(60 * flicker) + ')';
+        ctx.fillRect(winX, winY, winW2, winH2);
+        // Window glow
+        ctx.save();
+        ctx.globalAlpha = 0.2 * flicker;
+        const glowR = 8;
+        const glowG = ctx.createRadialGradient(winX + winW2 / 2, winY + winH2 / 2, 1, winX + winW2 / 2, winY + winH2 / 2, glowR);
+        glowG.addColorStop(0, 'rgba(255,200,80,0.6)');
+        glowG.addColorStop(1, 'rgba(255,200,80,0)');
+        ctx.fillStyle = glowG;
+        ctx.fillRect(winX - glowR, winY - glowR, winW2 + glowR * 2, winH2 + glowR * 2);
+        ctx.restore();
+
+        // Roof (triangle, dark with snow cap)
+        ctx.fillStyle = '#2a1a0a';
+        ctx.beginPath();
+        ctx.moveTo(base.x - hutW / 2 - 3, base.y - hutH);
+        ctx.lineTo(base.x, base.y - hutH - roofH);
+        ctx.lineTo(base.x + hutW / 2 + 3, base.y - hutH);
+        ctx.closePath();
+        ctx.fill();
+        // Snow on roof
+        ctx.fillStyle = 'rgba(230,240,255,0.85)';
+        ctx.beginPath();
+        ctx.moveTo(base.x - hutW / 2 - 1, base.y - hutH - 0.5);
+        ctx.lineTo(base.x, base.y - hutH - roofH + 1);
+        ctx.lineTo(base.x + hutW / 2 + 1, base.y - hutH - 0.5);
+        ctx.lineTo(base.x + hutW / 2 - 1, base.y - hutH + 1.5);
+        ctx.lineTo(base.x - hutW / 2 + 1, base.y - hutH + 1.5);
+        ctx.closePath();
+        ctx.fill();
+
+        // Chimney
+        const chimX = base.x + hutW * 0.2;
+        const chimW = 3;
+        const chimH = 6;
+        ctx.fillStyle = '#443322';
+        ctx.fillRect(chimX, base.y - hutH - roofH * 0.5, chimW, chimH);
+        // Snow on chimney top
+        ctx.fillStyle = 'rgba(230,240,255,0.8)';
+        ctx.fillRect(chimX - 0.5, base.y - hutH - roofH * 0.5 - 1.5, chimW + 1, 2);
+        // Smoke wisps
+        ctx.save();
+        ctx.globalAlpha = 0.15;
+        ctx.strokeStyle = '#cccccc';
+        ctx.lineWidth = 1;
+        ctx.lineCap = 'round';
+        for (let s = 0; s < 3; s++) {
+            const smokeY = base.y - hutH - roofH * 0.5 - 3 - s * 4;
+            const drift = Math.sin(t * 1.2 + s * 2) * 3;
+            ctx.beginPath();
+            ctx.moveTo(chimX + chimW / 2, smokeY + 2);
+            ctx.quadraticCurveTo(chimX + chimW / 2 + drift, smokeY - 1, chimX + chimW / 2 + drift * 1.5, smokeY - 4);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // Snow around base
+        ctx.fillStyle = 'rgba(230,240,255,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(base.x, base.y + 1, hutW * 0.7, 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    /** Draw pine trees in 3 sizes (small/medium/large) with snow on branches. */
     _drawSnowGroundTrees(ctx, w, h) {
         if (!this.hill) return;
         const r = this.renderer;
@@ -1435,16 +1535,19 @@ export default class SkihoppRenderer {
         const xStart = profile[0].x;
         const xRange = profile[profile.length - 1].x - xStart;
 
+        const sizes = ['small', 'medium', 'large'];
         const trees = [];
-        const treeCount = 12;
+        const treeCount = 18;
         for (let i = 0; i < treeCount; i++) {
             const wx = xStart + rng() * xRange;
             const wy = this.hill.getHeightAtDistance(wx);
-            // Place trees behind the hill surface (larger offsetY = further behind)
             const distance = rng(); // 0 = far, 1 = near
             const offsetY = 6 + (1 - distance) * 20 + rng() * 5;
-            const treeH = 2.5 + distance * 4 + rng() * 2; // far trees smaller
-            trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng() });
+            const sizeIdx = Math.floor(rng() * 3);
+            const sizeLabel = sizes[sizeIdx];
+            const baseH = sizeLabel === 'small' ? 1.8 : sizeLabel === 'medium' ? 3.5 : 5.5;
+            const treeH = baseH + distance * 2 + rng() * 1.5;
+            trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng(), size: sizeLabel });
         }
 
         // Sort: far trees first (drawn behind near trees)
@@ -2784,6 +2887,11 @@ export default class SkihoppRenderer {
         const t = this._time || 0;
         const cw = r.width || 400;
         const ch = r.height || 900;
+        const gameState = this._prevGameState;
+        const jumperX = this._lastJumperX || 0;
+
+        // --- Commentator booth (elevated platform with window) ---
+        this._drawCommentatorBooth(ctx);
 
         for (const spec of this._spectators) {
             const sp = r.worldToScreen(spec.x, spec.y);
@@ -2799,30 +2907,62 @@ export default class SkihoppRenderer {
             const lineW = Math.max(1, h * 0.06);
             ctx.lineCap = 'round';
 
+            // --- Landing celebration: all jump up briefly ---
+            let jumpOffset = 0;
+            if (gameState === 'LANDING' || gameState === 4) {
+                const landT = this._cameraPhaseTime || 0;
+                if (landT < 0.8) {
+                    const jumpPhase = Math.sin(landT * 8 + spec.wavePhase * 0.5);
+                    jumpOffset = Math.max(0, jumpPhase) * h * 0.15;
+                }
+            }
+
+            // --- Mexican wave during FLIGHT ---
+            let waveArmOverride = false;
+            let waveIntensity = 0;
+            if (gameState === 'FLIGHT' || gameState === 3) {
+                const dx = spec.x - jumperX;
+                const waveDelay = dx * 0.15;
+                const wavePh = Math.sin(t * 4 - waveDelay);
+                if (wavePh > 0.3) {
+                    waveIntensity = (wavePh - 0.3) / 0.7;
+                    waveArmOverride = true;
+                    jumpOffset = waveIntensity * h * 0.08;
+                }
+            }
+
             // Feet position = base (integer coords to avoid sub-pixel AA)
-            const feetY = sp.y | 0;
+            const feetY = (sp.y - jumpOffset) | 0;
             const spx = sp.x | 0;
             const hipY = (feetY - legLen) | 0;
             const shoulderY = (hipY - bodyLen) | 0;
             const headCenterY = (shoulderY - headR) | 0;
 
+            // --- Feet/boots (small rectangles) ---
+            ctx.fillStyle = '#1a1a2a';
+            ctx.fillRect(spx - (h * 0.12) | 0, feetY - 1, h * 0.08, 2);
+            ctx.fillRect(spx + (h * 0.04) | 0, feetY - 1, h * 0.08, 2);
+
             // --- Leg lines (two lines from hip spreading down to feet) ---
             ctx.strokeStyle = spec.bodyColor;
             ctx.lineWidth = lineW;
-            // Left leg
+            // Left leg with knee bend
+            const kneeY = (hipY + legLen * 0.5) | 0;
             ctx.beginPath();
             ctx.moveTo(spx, hipY);
-            ctx.lineTo(spx - (h * 0.1) | 0, feetY);
+            ctx.lineTo((spx - h * 0.05) | 0, kneeY);
+            ctx.lineTo((spx - h * 0.1) | 0, feetY);
             ctx.stroke();
-            // Right leg
+            // Right leg with knee bend
             ctx.beginPath();
             ctx.moveTo(spx, hipY);
-            ctx.lineTo(spx + (h * 0.1) | 0, feetY);
+            ctx.lineTo((spx + h * 0.05) | 0, kneeY);
+            ctx.lineTo((spx + h * 0.1) | 0, feetY);
             ctx.stroke();
 
             // --- Body line (vertical from hip to shoulder) ---
             ctx.strokeStyle = spec.bodyColor;
-            ctx.lineWidth = lineW * 1.2;
+            ctx.lineWidth = lineW * 1.4;
             ctx.beginPath();
             ctx.moveTo(spx, hipY);
             ctx.lineTo(spx, shoulderY);
@@ -2832,23 +2972,36 @@ export default class SkihoppRenderer {
             ctx.strokeStyle = spec.bodyColor;
             ctx.lineWidth = lineW;
 
-            if (spec.action === 'wave') {
-                // Left arm waves: angle varies with time
+            if (waveArmOverride) {
+                // Mexican wave: both arms raise proportional to intensity
+                const armAngle = -Math.PI / 2 - waveIntensity * 0.5;
+                const laX = (spx + Math.cos(armAngle - 0.3) * armLen) | 0;
+                const laY = (shoulderY + Math.sin(armAngle - 0.3) * armLen) | 0;
+                ctx.beginPath();
+                ctx.moveTo(spx, shoulderY);
+                ctx.lineTo(laX, laY);
+                ctx.stroke();
+                const raX = (spx + Math.cos(armAngle + 0.3) * armLen) | 0;
+                const raY = (shoulderY + Math.sin(armAngle + 0.3) * armLen) | 0;
+                ctx.beginPath();
+                ctx.moveTo(spx, shoulderY);
+                ctx.lineTo(raX, raY);
+                ctx.stroke();
+            } else if (spec.action === 'wave') {
                 const waveAngle = Math.sin(t * spec.waveSpeed + spec.wavePhase) * 0.7;
-                const leftArmAngle = -1.2 + waveAngle; // swings around upper-left
+                const leftArmAngle = -1.2 + waveAngle;
                 const lax = (spx + Math.cos(leftArmAngle) * armLen) | 0;
                 const lay = (shoulderY + Math.sin(leftArmAngle) * armLen) | 0;
                 ctx.beginPath();
                 ctx.moveTo(spx, shoulderY);
                 ctx.lineTo(lax, lay);
                 ctx.stroke();
-                // Right arm relaxed down
                 ctx.beginPath();
                 ctx.moveTo(spx, shoulderY);
                 ctx.lineTo((spx + armLen * 0.7) | 0, (shoulderY + armLen * 0.6) | 0);
                 ctx.stroke();
             } else if (spec.action === 'flag') {
-                // Right arm up holding flag
+                // Right arm up holding Norwegian flag
                 const flagArmEndX = (spx + armLen * 0.15) | 0;
                 const flagArmEndY = (shoulderY - armLen * 0.9) | 0;
                 ctx.beginPath();
@@ -2858,24 +3011,38 @@ export default class SkihoppRenderer {
                 // Flag pole
                 ctx.strokeStyle = '#664422';
                 ctx.lineWidth = Math.max(0.8, lineW * 0.6);
-                const poleTopY = flagArmEndY - h * 0.2;
+                const poleTopY = flagArmEndY - h * 0.25;
                 ctx.beginPath();
                 ctx.moveTo(flagArmEndX, flagArmEndY);
                 ctx.lineTo(flagArmEndX, poleTopY);
                 ctx.stroke();
-                // Flag rectangle
-                const flagW = h * 0.18;
-                const flagH = h * 0.1;
-                const wave = Math.sin(t * 3 + spec.wavePhase) * flagW * 0.08;
-                ctx.fillStyle = spec.flagColor;
+                // Norwegian flag (red bg, blue cross with white border)
+                const flagW = h * 0.22;
+                const flagH2 = h * 0.14;
+                const fw = Math.sin(t * 3 + spec.wavePhase) * flagW * 0.06;
+                const fx = flagArmEndX;
+                const fy = poleTopY;
+                // Red background
+                ctx.fillStyle = '#ef2b2d';
                 ctx.beginPath();
-                ctx.moveTo(flagArmEndX, poleTopY);
-                ctx.lineTo(flagArmEndX + flagW + wave, poleTopY + flagH * 0.2);
-                ctx.lineTo(flagArmEndX + flagW - wave, poleTopY + flagH);
-                ctx.lineTo(flagArmEndX, poleTopY + flagH * 0.8);
+                ctx.moveTo(fx, fy);
+                ctx.lineTo(fx + flagW + fw, fy + flagH2 * 0.15);
+                ctx.lineTo(fx + flagW - fw, fy + flagH2);
+                ctx.lineTo(fx, fy + flagH2 * 0.85);
                 ctx.closePath();
                 ctx.fill();
-                // Left arm relaxed down
+                // White cross
+                ctx.fillStyle = '#ffffff';
+                const crossW = flagW * 0.12;
+                const crossX = fx + flagW * 0.33;
+                ctx.fillRect(crossX - crossW, fy, crossW * 2, flagH2);
+                ctx.fillRect(fx, fy + flagH2 * 0.38, flagW, flagH2 * 0.24);
+                // Blue cross (thinner)
+                ctx.fillStyle = '#002868';
+                const bcW = crossW * 0.5;
+                ctx.fillRect(crossX - bcW, fy, bcW * 2, flagH2);
+                ctx.fillRect(fx, fy + flagH2 * 0.42, flagW, flagH2 * 0.16);
+                // Left arm relaxed
                 ctx.strokeStyle = spec.bodyColor;
                 ctx.lineWidth = lineW;
                 ctx.beginPath();
@@ -2883,29 +3050,147 @@ export default class SkihoppRenderer {
                 ctx.lineTo((spx - armLen * 0.7) | 0, (shoulderY + armLen * 0.6) | 0);
                 ctx.stroke();
             } else {
-                // Still: both arms relaxed at sides
+                // Still: both arms relaxed at sides with slight bend
                 ctx.beginPath();
                 ctx.moveTo(spx, shoulderY);
-                ctx.lineTo((spx - armLen * 0.7) | 0, (shoulderY + armLen * 0.6) | 0);
+                ctx.quadraticCurveTo(
+                    (spx - armLen * 0.5) | 0, (shoulderY + armLen * 0.2) | 0,
+                    (spx - armLen * 0.6) | 0, (shoulderY + armLen * 0.55) | 0
+                );
                 ctx.stroke();
                 ctx.beginPath();
                 ctx.moveTo(spx, shoulderY);
-                ctx.lineTo((spx + armLen * 0.7) | 0, (shoulderY + armLen * 0.6) | 0);
+                ctx.quadraticCurveTo(
+                    (spx + armLen * 0.5) | 0, (shoulderY + armLen * 0.2) | 0,
+                    (spx + armLen * 0.6) | 0, (shoulderY + armLen * 0.55) | 0
+                );
                 ctx.stroke();
             }
 
-            // --- Head (circle) ---
+            // --- Head (circle with skin tone) ---
             ctx.fillStyle = '#ffccaa';
             ctx.beginPath();
             ctx.arc(spx, headCenterY, headR, 0, Math.PI * 2);
             ctx.fill();
-
-            // --- Colored hat (small circle sitting on top of head) ---
-            ctx.fillStyle = spec.hatColor;
+            // Eyes (tiny dots)
+            ctx.fillStyle = '#222';
             ctx.beginPath();
-            ctx.arc(spx, (headCenterY - headR * 0.9) | 0, headR * 0.55, 0, Math.PI * 2);
+            ctx.arc(spx - headR * 0.3, headCenterY - headR * 0.15, headR * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(spx + headR * 0.3, headCenterY - headR * 0.15, headR * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+
+            // --- Colored beanie hat (rounded rectangle on top of head) ---
+            ctx.fillStyle = spec.hatColor;
+            const hatW = headR * 1.3;
+            const hatH = headR * 0.8;
+            const hatY = headCenterY - headR - hatH * 0.5;
+            // Main beanie body
+            ctx.beginPath();
+            ctx.arc(spx, hatY, hatW * 0.55, Math.PI, 0);
+            ctx.lineTo(spx + hatW * 0.55, headCenterY - headR * 0.5);
+            ctx.lineTo(spx - hatW * 0.55, headCenterY - headR * 0.5);
+            ctx.closePath();
+            ctx.fill();
+            // Beanie fold/brim
+            ctx.fillStyle = spec.hatColor;
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(spx - hatW * 0.6, headCenterY - headR * 0.55, hatW * 1.2, headR * 0.2);
+            ctx.globalAlpha = 1.0;
+            // Pompom on top
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(spx, hatY - hatW * 0.35, headR * 0.2, 0, Math.PI * 2);
             ctx.fill();
         }
+    }
+
+    /** Draw an elevated commentator booth near the landing area. */
+    _drawCommentatorBooth(ctx) {
+        if (!this.hill) return;
+        const r = this.renderer;
+        const kp = this.hill.getKPointPosition();
+        if (!kp) return;
+        const t = this._time || 0;
+
+        const boothX = kp.x - 5;
+        const surfaceY = this.hill.getHeightAtDistance(boothX);
+        const boothBaseY = surfaceY + 5;
+
+        const base = r.worldToScreen(boothX, boothBaseY);
+        const platformH = 20;
+        const boothW = 22;
+        const boothH = 12;
+
+        // Support legs (steel)
+        ctx.strokeStyle = '#556677';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(base.x - boothW * 0.35, base.y);
+        ctx.lineTo(base.x - boothW * 0.25, base.y - platformH);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(base.x + boothW * 0.35, base.y);
+        ctx.lineTo(base.x + boothW * 0.25, base.y - platformH);
+        ctx.stroke();
+        // Cross brace
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(base.x - boothW * 0.3, base.y - platformH * 0.5);
+        ctx.lineTo(base.x + boothW * 0.3, base.y - platformH * 0.7);
+        ctx.stroke();
+
+        // Platform
+        ctx.fillStyle = '#3a4a5a';
+        ctx.fillRect(base.x - boothW / 2, base.y - platformH - 2, boothW, 3);
+
+        // Booth body
+        const boothTopY = base.y - platformH - 2 - boothH;
+        const boothGrad = ctx.createLinearGradient(base.x - boothW / 2, boothTopY, base.x + boothW / 2, boothTopY);
+        boothGrad.addColorStop(0, '#3a4858');
+        boothGrad.addColorStop(0.5, '#4a5868');
+        boothGrad.addColorStop(1, '#354050');
+        ctx.fillStyle = boothGrad;
+        ctx.fillRect(base.x - boothW / 2, boothTopY, boothW, boothH);
+
+        // Large window (panoramic)
+        const winMargin = 2;
+        const winY2 = boothTopY + 2;
+        const winH3 = boothH - 5;
+        const winW3 = boothW - winMargin * 2;
+        ctx.fillStyle = '#1a2535';
+        ctx.fillRect(base.x - winW3 / 2, winY2, winW3, winH3);
+        // Window reflection/glow
+        const flicker = 0.9 + 0.1 * Math.sin(t * 1.5);
+        ctx.fillStyle = 'rgba(180,220,255,' + (0.15 * flicker).toFixed(2) + ')';
+        ctx.fillRect(base.x - winW3 / 2, winY2, winW3 * 0.6, winH3 * 0.5);
+
+        // Roof
+        ctx.fillStyle = '#2a3545';
+        ctx.fillRect(base.x - boothW / 2 - 2, boothTopY - 2, boothW + 4, 3);
+        // Snow on roof
+        ctx.fillStyle = 'rgba(230,240,255,0.7)';
+        ctx.fillRect(base.x - boothW / 2 - 1, boothTopY - 3, boothW + 2, 2);
+
+        // Antenna/satellite dish
+        ctx.strokeStyle = '#667';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(base.x + boothW * 0.3, boothTopY - 2);
+        ctx.lineTo(base.x + boothW * 0.3, boothTopY - 10);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(base.x + boothW * 0.3, boothTopY - 10, 3, -0.5, 0.8);
+        ctx.stroke();
+
+        // "PRESS" or "TV" label
+        ctx.save();
+        ctx.font = 'bold 7px sans-serif';
+        ctx.fillStyle = '#aabbcc';
+        ctx.textAlign = 'center';
+        ctx.fillText('TV', base.x, boothTopY + boothH - 2);
+        ctx.restore();
     }
 
     // ------------------------------------------------------------------

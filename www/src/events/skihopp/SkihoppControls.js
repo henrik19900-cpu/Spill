@@ -651,6 +651,15 @@ export default class SkihoppControls {
     const elapsed = performance.now() - this._scoreShownAt;
     if (elapsed < SCORE_READ_DELAY_MS) return;
 
+    // --- PREMIUM: If post-jump stats overlay is active, skip it ---
+    const scene = this.game.currentScene;
+    if (scene && scene._postJumpStats) {
+      scene._postJumpStats = null;
+      scene._postJumpStatsTimer = 0;
+      this.game.setState(GameState.RESULTS);
+      return;
+    }
+
     this.game.setState(GameState.RESULTS);
   }
 
