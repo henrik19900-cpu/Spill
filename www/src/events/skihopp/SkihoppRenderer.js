@@ -622,9 +622,9 @@ export default class SkihoppRenderer {
         // Premium: impact ripples on landing
         try { this._drawImpactRipple(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawImpactRipple error:', e); }
 
-        try { this._drawCelebrationParticles(ctx, 1 / 60); } catch (e) { console.warn('[SkihoppRenderer] _drawCelebrationParticles error:', e); }
+        // Celebration particles now handled by unified _particles system
         try { this._drawMilestoneFlashes(ctx, jumperState, gameState); } catch (e) { console.warn('[SkihoppRenderer] _drawMilestoneFlashes error:', e); }
-        try { this._drawEffectParticles(ctx, 1 / 60); } catch (e) { console.warn('[SkihoppRenderer] _drawEffectParticles error:', e); }
+        try { this._particles.render(ctx, (x, y) => this.renderer.worldToScreen(x, y), this._time); } catch (e) { console.warn('[SkihoppRenderer] _particles.render error:', e); }
         try { this._drawSnowParticles(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawSnowParticles error:', e); }
 
         // Wind streaks during flight

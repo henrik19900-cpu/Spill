@@ -453,13 +453,18 @@ export default class SkihoppGame {
         }
 
         // Wind updates continuously (even on menu for ambient feel)
-        this.wind.update(dt);
+        if (this.wind) {
+            this.wind.update(dt);
+        }
 
         // Feed wind speed into jumper state so physics can use it
+        if (!this.jumper) return;
         const jumperState = this.jumper.getState();
-        jumperState.wind = this.wind.isHeadwind()
-            ? -this.wind.getSpeed()
-            : this.wind.getSpeed();
+        if (this.wind) {
+            jumperState.wind = this.wind.isHeadwind()
+                ? -this.wind.getSpeed()
+                : this.wind.getSpeed();
+        }
 
         // Tutorial during READY state
         if (state === GameState.READY && this._showTutorial) {
