@@ -731,8 +731,8 @@ export default class SkihoppGame {
             case GameState.LANDING: {
                 // Render the 3D scene
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                    speed: this.wind.getSpeed(),
-                    direction: this.wind.getDirection(),
+                    speed: this._getWindSpeed(),
+                    direction: this._getWindDirection(),
                 });
 
                 // Edge-approaching warning overlay (pulsing border glow)
