@@ -157,6 +157,32 @@ export default class SkihoppGame {
         this.hillSelectScreen = null;
         this.statsScreen = null;
         this.settingsScreen = null;
+
+        // --- PREMIUM: Screen shake system ---
+        this._shakes = [];
+
+        // --- PREMIUM: Slowmo visual state ---
+        this._slowmoActive = false;
+        this._slowmoTextAlpha = 0;
+
+        // --- PREMIUM: Combo / streak system ---
+        this._comboCount = 0;
+        this._comboTextTimer = 0;
+        this._comboTextValue = 0;  // the streak number to display
+
+        // --- PREMIUM: Post-jump stats overlay ---
+        this._postJumpStats = null;       // { maxHeight, topSpeed, flightTime }
+        this._postJumpStatsTimer = 0;
+        this._postJumpStatsDuration = 3.5; // seconds to show before RESULTS
+        this._trackMaxHeight = 0;
+        this._trackTopSpeed = 0;
+        this._trackFlightStartTime = 0;
+        this._trackFlightEndTime = 0;
+        this._personalBests = { maxHeight: 0, topSpeed: 0, flightTime: 0 };
+
+        // --- PREMIUM: Woosh transition (RESULTS -> READY) ---
+        this._wooshProgress = 0;  // 0 = not active, 0..1 = animating
+        this._wooshActive = false;
     }
 
     // ------------------------------------------------------------------
@@ -948,7 +974,14 @@ export default class SkihoppGame {
                     // Queue new achievements for popup notifications
                     if (this._newAchievements && this._newAchievements.length > 0) {
                         for (const a of this._newAchievements) {
-                            this._achievementQueue.push(a);
+                            const emoji = a.icon || a.emoji || '\u2B50';
+                            const label = a.name || a.title || 'Prestasjon';
+                            this._showPopup(
+                                `${emoji} ${label}`,
+                                a.description || '',
+                                'achievement',
+                                2.5
+                            );
                         }
                         // Play achievement chime for new unlocks
                         this._safeAudioCall('playAchievement');
@@ -961,13 +994,12 @@ export default class SkihoppGame {
                     // _bestDistance was already updated in LANDING, so check if
                     // the current landing distance matches the new best
                     if (jumperState.landingDistance >= prevBest && jumperState.landingDistance > 0) {
-                        this._newRecordPopup = {
-                            active: true,
-                            distance: jumperState.landingDistance,
-                            timer: 0,
-                            duration: 3.0,
-                            pulsePhase: 0,
-                        };
+                        this._showPopup(
+                            'NY REKORD!',
+                            `${jumperState.landingDistance.toFixed(1)} m`,
+                            'record',
+                            3.0
+                        );
                         // Play new record arpeggio
                         this._safeAudioCall('playNewRecord');
                     }
@@ -1046,6 +1078,143 @@ export default class SkihoppGame {
             default:
                 break;
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Popup notification system (achievements & records)
+    // ------------------------------------------------------------------
+
+    /**
+     * Queue a popup notification. If one is already showing, it waits in
+     * the queue and appears after the current popup finishes.
+     * @param {string} text    - main line (e.g. emoji + achievement name)
+     * @param {string} subtext - secondary line (description or distance)
+     * @param {'achievement'|'record'} type
+     * @param {number} duration - total display time in seconds
+     */
+    _showPopup(text, subtext, type, duration) {
+        const popup = { text, subtext, type, timer: 0, duration };
+        if (this._currentPopup) {
+            this._achievementQueue.push(popup);
+        } else {
+            this._currentPopup = popup;
+        }
+    }
+
+    /**
+     * Render the current popup notification at the top of the screen.
+     * Slides down from above over 0.3 s, holds, then slides back up
+     * over the last 0.3 s. Semi-transparent so gameplay remains visible.
+     */
+    _renderPopup(ctx, width, height) {
+        const p = this._currentPopup;
+        if (!p) return;
+
+        const slideIn = 0.3;
+        const slideOut = 0.3;
+        const t = p.timer;
+        const d = p.duration;
+        const isRecord = p.type === 'record';
+
+        // Panel dimensions
+        const panelW = isRecord ? Math.min(420, width * 0.65) : Math.min(340, width * 0.55);
+        const panelH = isRecord ? 72 : 54;
+        const panelX = (width - panelW) / 2;
+        const restY = 20; // resting position (fully visible)
+        const hideY = -panelH - 10; // offscreen above
+
+        // Compute current Y via slide-in / hold / slide-out
+        let panelY;
+        if (t < slideIn) {
+            // Slide in
+            const frac = t / slideIn;
+            panelY = hideY + (restY - hideY) * frac;
+        } else if (t > d - slideOut) {
+            // Slide out
+            const frac = (t - (d - slideOut)) / slideOut;
+            panelY = restY + (hideY - restY) * frac;
+        } else {
+            panelY = restY;
+        }
+
+        ctx.save();
+
+        if (isRecord) {
+            // --- Record popup: gold background ---
+            ctx.globalAlpha = 0.92;
+            // Gold fill
+            ctx.fillStyle = '#FFD700';
+            ctx.strokeStyle = '#B8860B';
+            ctx.lineWidth = 3;
+            const r = 12;
+            ctx.beginPath();
+            ctx.moveTo(panelX + r, panelY);
+            ctx.lineTo(panelX + panelW - r, panelY);
+            ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + r);
+            ctx.lineTo(panelX + panelW, panelY + panelH - r);
+            ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - r, panelY + panelH);
+            ctx.lineTo(panelX + r, panelY + panelH);
+            ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - r);
+            ctx.lineTo(panelX, panelY + r);
+            ctx.quadraticCurveTo(panelX, panelY, panelX + r, panelY);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Main text
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#4a2800';
+            ctx.font = 'bold 26px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(255,255,255,0.5)';
+            ctx.shadowBlur = 4;
+            ctx.fillText(p.text, width / 2, panelY + panelH * 0.36);
+            // Subtext (distance)
+            ctx.font = 'bold 20px sans-serif';
+            ctx.fillStyle = '#6b3a00';
+            ctx.shadowBlur = 0;
+            ctx.fillText(p.subtext, width / 2, panelY + panelH * 0.7);
+        } else {
+            // --- Achievement popup: dark panel with gold border ---
+            ctx.globalAlpha = 0.88;
+            ctx.fillStyle = 'rgba(30, 30, 40, 0.92)';
+            ctx.strokeStyle = '#FFD700';
+            ctx.lineWidth = 2;
+            const r = 10;
+            ctx.beginPath();
+            ctx.moveTo(panelX + r, panelY);
+            ctx.lineTo(panelX + panelW - r, panelY);
+            ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + r);
+            ctx.lineTo(panelX + panelW, panelY + panelH - r);
+            ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - r, panelY + panelH);
+            ctx.lineTo(panelX + r, panelY + panelH);
+            ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - r);
+            ctx.lineTo(panelX, panelY + r);
+            ctx.quadraticCurveTo(panelX, panelY, panelX + r, panelY);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Main text (emoji + name)
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = '#FFD700';
+            ctx.font = 'bold 18px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(0,0,0,0.6)';
+            ctx.shadowBlur = 4;
+            ctx.fillText(p.text, width / 2, panelY + (p.subtext ? panelH * 0.36 : panelH * 0.5));
+            // Subtext (description)
+            if (p.subtext) {
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#cccccc';
+                ctx.shadowBlur = 0;
+                ctx.fillText(p.subtext, width / 2, panelY + panelH * 0.7);
+            }
+        }
+
+        ctx.restore();
     }
 
     // ------------------------------------------------------------------
@@ -1237,6 +1406,8 @@ export default class SkihoppGame {
         this._fadeAlpha = 0;
         this._newUnlocks = [];
         this._newAchievements = [];
+        this._achievementQueue = [];
+        this._currentPopup = null;
         this.hillSelectScreen = null;
         this.statsScreen = null;
         this.settingsScreen = null;
