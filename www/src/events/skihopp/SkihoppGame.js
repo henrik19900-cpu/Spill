@@ -680,7 +680,7 @@ export default class SkihoppGame {
                 }
 
                 // Show tutorial overlay if active
-                if (this._showTutorial) {
+                if (this._showTutorial && this.tutorialScreen) {
                     this.tutorialScreen.render(ctx, width, height);
                     break;
                 }
