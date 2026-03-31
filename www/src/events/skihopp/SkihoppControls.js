@@ -137,6 +137,13 @@ export default class SkihoppControls {
 
     // Config-driven values (overridden in init if config is available)
     this._angleChangeRate = ANGLE_CHANGE_RATE;
+    this._untuckedSpeedFloor = UNTUCKED_SPEED_FLOOR;
+    this._autoLaunchQuality = TAKEOFF_AUTO_QUALITY;
+    this._defaultAngle = BODY_ANGLE_DEFAULT;
+    this._optimalAngle = BODY_ANGLE_OPTIMAL;
+    this._autoDriftRate = ANGLE_AUTO_DRIFT;
+    this._telemarkWindow = LANDING_WINDOW_MS;
+    this._telemarkAttemptWindow = LANDING_ATTEMPT_MS;
 
     // Difficulty preset (resolved from game.config.difficulty in init/update)
     this._difficulty = DIFFICULTY_PRESETS.normal;
