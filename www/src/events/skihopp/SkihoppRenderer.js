@@ -280,15 +280,14 @@ export default class SkihoppRenderer {
         this._spectators = [];
         this._snowParticles = [];
 
-        // Visual polish effect particles
-        this._takeoffParticles = [];
-        this._landingParticles = [];
+        // Unified particle system (replaces _takeoffParticles, _landingParticles, _celebrationParticles)
+        this._particles = new ParticlePool(500);
+        this._trailFrameCounter = 0;
         this._windStreaks = [];
         this._prevGameState = null;
 
         // Game juice effect state
         this._takeoffFlash = null;          // { x, y, startTime }
-        this._celebrationParticles = [];    // golden sparkle particles
         this._milestoneFlashes = [];        // { distance, startTime }
         this._passedMilestones = new Set(); // track which milestones already triggered
 
@@ -533,9 +532,18 @@ export default class SkihoppRenderer {
         try { this._drawMountains(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawMountains error:', e); }
         try { this._drawSnowGround(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawSnowGround error:', e); }
         try { this._drawHillSurface(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawHillSurface error:', e); }
+
+        // Premium: dynamic lighting spotlight during flight
+        try { this._drawDynamicLighting(ctx, width, height, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawDynamicLighting error:', e); }
+
         try { this._drawSpectators(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawSpectators error:', e); }
         try { this._drawCrowdWaveEffect(ctx, jumperState, gameState); } catch (e) { console.warn('[SkihoppRenderer] _drawCrowdWaveEffect error:', e); }
         try { this._drawJumperShadow(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawJumperShadow error:', e); }
+
+        // Premium: heat distortion during fast inrun
+        if (gameState === GameState.INRUN) {
+            try { this._drawHeatDistortion(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawHeatDistortion error:', e); }
+        }
 
         // Speed lines behind jumper during inrun
         if (gameState === GameState.INRUN) {
@@ -543,7 +551,17 @@ export default class SkihoppRenderer {
         }
 
         try { this._drawJumper(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawJumper error:', e); }
+
+        // Premium: trajectory ghost line during flight
+        if (gameState === GameState.FLIGHT) {
+            try { this._drawTrajectoryGhost(ctx, jumperState); } catch (e) { console.warn('[SkihoppRenderer] _drawTrajectoryGhost error:', e); }
+        }
+
         try { this._drawTakeoffFlash(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawTakeoffFlash error:', e); }
+
+        // Premium: impact ripples on landing
+        try { this._drawImpactRipple(ctx); } catch (e) { console.warn('[SkihoppRenderer] _drawImpactRipple error:', e); }
+
         try { this._drawCelebrationParticles(ctx, 1 / 60); } catch (e) { console.warn('[SkihoppRenderer] _drawCelebrationParticles error:', e); }
         try { this._drawMilestoneFlashes(ctx, jumperState, gameState); } catch (e) { console.warn('[SkihoppRenderer] _drawMilestoneFlashes error:', e); }
         try { this._drawEffectParticles(ctx, 1 / 60); } catch (e) { console.warn('[SkihoppRenderer] _drawEffectParticles error:', e); }
@@ -554,10 +572,16 @@ export default class SkihoppRenderer {
             try { this._drawWindStreaks(ctx, width, height, wind); } catch (e) { console.warn('[SkihoppRenderer] _drawWindStreaks error:', e); }
         }
 
+        // Premium: lens flare from floodlights
+        try { this._drawLensFlare(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawLensFlare error:', e); }
+
         // Restore camera shake transform
         if ((jumperState.vibration || 0) > 0.01) {
             ctx.restore();
         }
+
+        // Premium: depth of field edge blur
+        try { this._drawDepthOfField(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawDepthOfField error:', e); }
 
         // Vignette overlay (drawn last, outside camera shake)
         try { this._drawVignette(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawVignette error:', e); }
@@ -3071,4 +3095,370 @@ export default class SkihoppRenderer {
         }
         ctx.restore();
     }
+    // ------------------------------------------------------------------
+    // Premium Visual Effects
+    // ------------------------------------------------------------------
+
+    /**
+     * Lens flare effect from floodlight positions.
+     * Draws hexagonal bokeh shapes and light streaks using screen composite.
+     */
+    _drawLensFlare(ctx, w, h) {
+        if (!this.hill || !this.renderer) return;
+        const r = this.renderer;
+        const kp = this.hill.getKPointPosition();
+        const hs = this.hill.getHSPointPosition();
+        if (!kp || !hs) return;
+
+        const t = this._time || 0;
+
+        // Floodlight positions (same as _drawFloodlights)
+        const polePositions = [
+            { x: kp.x * 0.3, side: 1 },
+            { x: kp.x * 0.65, side: -1 },
+            { x: kp.x * 1.0, side: 1 },
+            { x: hs.x * 0.9, side: -1 },
+        ];
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+
+        for (const pole of polePositions) {
+            const surfaceY = this.hill.getHeightAtDistance(pole.x);
+            const poleTopY = surfaceY + pole.side * 6 - 18;
+            const top = r.worldToScreen(pole.x, poleTopY);
+
+            // Skip if off-screen
+            if (top.x < -50 || top.x > w + 50 || top.y < -50 || top.y > h + 50) continue;
+
+            // Subtle pulsing flare intensity
+            const pulse = 0.7 + 0.3 * Math.sin(t * 1.5 + pole.x * 0.1);
+
+            // Central soft glow
+            const glowR = 35 * pulse;
+            const glowGrad = ctx.createRadialGradient(top.x, top.y, 0, top.x, top.y, glowR);
+            glowGrad.addColorStop(0, `rgba(255,255,230,${(0.15 * pulse).toFixed(3)})`);
+            glowGrad.addColorStop(0.5, `rgba(255,250,200,${(0.06 * pulse).toFixed(3)})`);
+            glowGrad.addColorStop(1, 'rgba(255,250,200,0)');
+            ctx.fillStyle = glowGrad;
+            ctx.beginPath();
+            ctx.arc(top.x, top.y, glowR, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Light streak (horizontal anamorphic flare)
+            const streakLen = 50 * pulse;
+            const streakGrad = ctx.createLinearGradient(
+                top.x - streakLen, top.y, top.x + streakLen, top.y
+            );
+            streakGrad.addColorStop(0, 'rgba(255,250,220,0)');
+            streakGrad.addColorStop(0.3, `rgba(255,250,220,${(0.04 * pulse).toFixed(3)})`);
+            streakGrad.addColorStop(0.5, `rgba(255,255,240,${(0.08 * pulse).toFixed(3)})`);
+            streakGrad.addColorStop(0.7, `rgba(255,250,220,${(0.04 * pulse).toFixed(3)})`);
+            streakGrad.addColorStop(1, 'rgba(255,250,220,0)');
+            ctx.fillStyle = streakGrad;
+            ctx.fillRect(top.x - streakLen, top.y - 1.5, streakLen * 2, 3);
+
+            // 2-3 hexagonal bokeh ghosts along a line from flare to center
+            const cx = w / 2;
+            const cy = h / 2;
+            const dx = cx - top.x;
+            const dy = cy - top.y;
+            const bokehPositions = [0.3, 0.55, 0.8];
+            const bokehSizes = [8, 12, 6];
+            const bokehAlphas = [0.03, 0.04, 0.025];
+
+            for (let bi = 0; bi < bokehPositions.length; bi++) {
+                const bx = top.x + dx * bokehPositions[bi];
+                const by = top.y + dy * bokehPositions[bi];
+                const bSize = bokehSizes[bi] * pulse;
+                const bAlpha = bokehAlphas[bi] * pulse;
+
+                // Draw hexagon
+                ctx.globalAlpha = bAlpha;
+                ctx.fillStyle = `rgba(200,220,255,1)`;
+                ctx.beginPath();
+                for (let hi = 0; hi < 6; hi++) {
+                    const angle = (hi / 6) * Math.PI * 2 - Math.PI / 6;
+                    const hx = bx + Math.cos(angle) * bSize;
+                    const hy = by + Math.sin(angle) * bSize;
+                    if (hi === 0) ctx.moveTo(hx, hy);
+                    else ctx.lineTo(hx, hy);
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        ctx.restore();
+    }
+
+    /**
+     * Dynamic spotlight that follows the jumper during flight.
+     * Lights up the snow surface below with a radial gradient.
+     */
+    _drawDynamicLighting(ctx, w, h, jumperState) {
+        if (!jumperState || !this.renderer || !this.hill) return;
+        const phase = jumperState.phase;
+        if (phase !== GameState.FLIGHT && phase !== 'FLIGHT') return;
+
+        const r = this.renderer;
+        const surfaceY = this.hill.getHeightAtDistance(jumperState.x);
+        const heightAbove = Math.max(0, surfaceY - jumperState.y);
+
+        // Only show when jumper is airborne
+        if (heightAbove < 0.5) return;
+
+        // Spotlight on the snow surface below the jumper
+        const groundSp = r.worldToScreen(jumperState.x, surfaceY);
+        const jumperSp = r.worldToScreen(jumperState.x, jumperState.y);
+
+        // Radius grows with height (wider spread from higher up)
+        const spotRadius = Math.min(120, 30 + heightAbove * 8);
+        const intensity = Math.min(0.12, 0.04 + heightAbove * 0.005);
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+
+        // Main spotlight on ground
+        const spotGrad = ctx.createRadialGradient(
+            groundSp.x, groundSp.y, 0,
+            groundSp.x, groundSp.y, spotRadius
+        );
+        spotGrad.addColorStop(0, `rgba(200,220,255,${intensity.toFixed(3)})`);
+        spotGrad.addColorStop(0.4, `rgba(180,200,240,${(intensity * 0.5).toFixed(3)})`);
+        spotGrad.addColorStop(0.7, `rgba(150,180,220,${(intensity * 0.2).toFixed(3)})`);
+        spotGrad.addColorStop(1, 'rgba(150,180,220,0)');
+        ctx.fillStyle = spotGrad;
+        ctx.beginPath();
+        ctx.arc(groundSp.x, groundSp.y, spotRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Subtle glow around jumper
+        const jumperGlow = 20;
+        const jGrad = ctx.createRadialGradient(
+            jumperSp.x, jumperSp.y, 0,
+            jumperSp.x, jumperSp.y, jumperGlow
+        );
+        jGrad.addColorStop(0, 'rgba(220,240,255,0.06)');
+        jGrad.addColorStop(0.5, 'rgba(200,220,255,0.02)');
+        jGrad.addColorStop(1, 'rgba(200,220,255,0)');
+        ctx.fillStyle = jGrad;
+        ctx.beginPath();
+        ctx.arc(jumperSp.x, jumperSp.y, jumperGlow, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    /**
+     * Predicted trajectory ghost line during flight.
+     * Draws a faint dotted arc ahead of the jumper showing estimated landing.
+     */
+    _drawTrajectoryGhost(ctx, jumperState) {
+        if (!jumperState || !this.renderer || !this.hill) return;
+        const r = this.renderer;
+
+        const vx = jumperState.vx || 0;
+        const vy = jumperState.vy || 0;
+        const gravity = 9.81;
+
+        // Skip if barely moving
+        if (Math.abs(vx) < 0.5) return;
+
+        ctx.save();
+        ctx.globalAlpha = 0.2;
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.setLineDash([4, 6]);
+        ctx.lineWidth = 1.5;
+        ctx.lineCap = 'round';
+
+        ctx.beginPath();
+        let started = false;
+        const dt = 0.08; // time step for prediction
+        const steps = 30;  // predict ~2.4 seconds ahead
+
+        for (let i = 1; i <= steps; i++) {
+            const t = i * dt;
+            // Simple projectile: x = x0 + vx*t, y = y0 + vy*t + 0.5*g*t^2
+            const px = jumperState.x + vx * t;
+            const py = jumperState.y + vy * t + 0.5 * gravity * t * t;
+
+            // Check if we hit the hill surface
+            const surfaceY = this.hill.getHeightAtDistance(px);
+            if (py >= surfaceY) break;
+
+            const sp = r.worldToScreen(px, py);
+            if (!started) {
+                ctx.moveTo(sp.x, sp.y);
+                started = true;
+            } else {
+                ctx.lineTo(sp.x, sp.y);
+            }
+        }
+
+        if (started) {
+            ctx.stroke();
+        }
+
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    /**
+     * Expanding concentric ripple rings on landing impact (like stone in water, but snow).
+     * 3 rings, expanding and fading over 0.5s.
+     */
+    _drawImpactRipple(ctx) {
+        if (this._impactRipples.length === 0) return;
+        const r = this.renderer;
+        const duration = 0.5;
+
+        ctx.save();
+        ctx.lineWidth = 1.5;
+
+        // Clean up expired ripples while iterating
+        let writeIdx = 0;
+        for (let i = 0; i < this._impactRipples.length; i++) {
+            const ripple = this._impactRipples[i];
+            const elapsed = this._time - ripple.startTime;
+            if (elapsed > duration) continue;
+
+            // Keep this ripple
+            if (writeIdx !== i) this._impactRipples[writeIdx] = ripple;
+            writeIdx++;
+
+            const progress = elapsed / duration;
+            const sp = r.worldToScreen(ripple.x, ripple.y);
+            const ppm = r.ppm;
+
+            // 3 concentric rings with staggered expansion
+            for (let ring = 0; ring < 3; ring++) {
+                const ringDelay = ring * 0.08;
+                const ringProgress = Math.max(0, (elapsed - ringDelay) / (duration - ringDelay));
+                if (ringProgress <= 0 || ringProgress >= 1) continue;
+
+                // Expand outward
+                const maxRadius = (2.0 + ring * 1.5) * ppm;
+                const radius = maxRadius * ringProgress;
+
+                // Fade out as they expand -- fast ease-out
+                const alpha = (1 - ringProgress) * (1 - ringProgress) * 0.5;
+
+                // Elliptical (wider than tall) for perspective
+                ctx.globalAlpha = alpha;
+                ctx.strokeStyle = 'rgba(220,235,255,0.8)';
+                ctx.beginPath();
+                ctx.ellipse(sp.x, sp.y, radius, radius * 0.35, 0, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+        }
+        this._impactRipples.length = writeIdx;
+
+        ctx.restore();
+    }
+
+    /**
+     * Subtle depth-of-field effect: soft blur at screen edges.
+     * Uses canvas filter blur on clipped border regions.
+     */
+    _drawDepthOfField(ctx, w, h) {
+        // Check for filter support (not available in all contexts)
+        if (typeof ctx.filter === 'undefined') return;
+
+        const borderSize = Math.min(w, h) * 0.08; // ~8% of smallest dimension
+
+        ctx.save();
+
+        // Top edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, w, borderSize);
+        ctx.clip();
+        ctx.filter = 'blur(2px)';
+        ctx.drawImage(ctx.canvas, 0, 0);
+        ctx.filter = 'none';
+        ctx.restore();
+
+        // Bottom edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, h - borderSize, w, borderSize);
+        ctx.clip();
+        ctx.filter = 'blur(2px)';
+        ctx.drawImage(ctx.canvas, 0, 0);
+        ctx.filter = 'none';
+        ctx.restore();
+
+        // Left edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, borderSize, borderSize, h - borderSize * 2);
+        ctx.clip();
+        ctx.filter = 'blur(1.5px)';
+        ctx.drawImage(ctx.canvas, 0, 0);
+        ctx.filter = 'none';
+        ctx.restore();
+
+        // Right edge
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(w - borderSize, borderSize, borderSize, h - borderSize * 2);
+        ctx.clip();
+        ctx.filter = 'blur(1.5px)';
+        ctx.drawImage(ctx.canvas, 0, 0);
+        ctx.filter = 'none';
+        ctx.restore();
+
+        ctx.restore();
+    }
+
+    /**
+     * Heat distortion effect during high-speed inrun (>80 km/h).
+     * Draws subtle wavy distortion lines rising from the track.
+     */
+    _drawHeatDistortion(ctx, jumperState) {
+        if (!jumperState || !this.renderer || !this.hill) return;
+        const speedKmh = (jumperState.speed || 0) * 3.6;
+        if (speedKmh <= 80) return;
+
+        const r = this.renderer;
+        const t = this._time || 0;
+        const intensity = Math.min(1, (speedKmh - 80) / 30); // 0-1 from 80-110 km/h
+
+        ctx.save();
+        ctx.globalAlpha = 0.06 * intensity;
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 1;
+
+        // Draw 6-10 wavy rising lines near the jumper on the track
+        const numLines = Math.floor(6 + intensity * 4);
+        const jx = jumperState.x;
+
+        for (let i = 0; i < numLines; i++) {
+            // Spread lines along the track behind/around the jumper
+            const offsetX = (i - numLines / 2) * 1.5;
+            const baseX = jx + offsetX;
+            const baseY = this.hill.getHeightAtDistance(baseX);
+
+            ctx.beginPath();
+            const segments = 8;
+            for (let s = 0; s <= segments; s++) {
+                const frac = s / segments;
+                // Rise upward from the track surface
+                const riseY = baseY - frac * 2.5;
+                // Wavy horizontal wobble that increases with height
+                const wobble = Math.sin(t * 6 + i * 2.3 + frac * 4) * 0.3 * frac * intensity;
+                const wx = baseX + wobble;
+
+                const sp = r.worldToScreen(wx, riseY);
+                if (s === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
 }
