@@ -777,12 +777,13 @@ export default class SkihoppGame {
                 // During inrun, distance is remaining-to-table (not useful for display)
                 let displayDistance = 0;
                 if (state === GameState.FLIGHT || state === GameState.TAKEOFF) {
-                    displayDistance = this.hill.getSurfaceDistanceAtX
+                    displayDistance = (this.hill && this.hill.getSurfaceDistanceAtX)
                         ? this.hill.getSurfaceDistanceAtX(Math.max(0, jumperState.x))
                         : jumperState.x;
                 } else if (state === GameState.LANDING) {
                     displayDistance = jumperState.landingDistance;
                 }
+                if (this.hud) {
                 this.hud.render(ctx, width, height, {
                     speed: jumperState.speed,
                     distance: displayDistance,
@@ -792,13 +793,14 @@ export default class SkihoppGame {
                     phase: state,
                     takeoffQuality: jumperState.takeoffQuality,
                     landingQuality: jumperState.landingQuality,
-                    kPoint: this.hill.kPoint,
+                    kPoint: (this.hill && this.hill.kPoint) || 0,
                     feedback: this.game.feedback || {},
                     heightAboveGround: jumperState.heightAboveGround || 0,
                     isTucked: jumperState.isTucked || false,
                     edgeWarning: this._edgeWarningActive && state === GameState.INRUN,
                     edgeWarningPulse: this._edgeWarningActive ? Math.sin(this._edgeWarningTime * 12) : 0,
                 });
+                }
 
                 // Landing: show distance text during the 1.5s hold period
                 if (state === GameState.LANDING && jumperState.landingDistance > 0) {
