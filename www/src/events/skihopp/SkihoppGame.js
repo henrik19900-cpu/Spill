@@ -588,8 +588,10 @@ export default class SkihoppGame {
                         record: this.progression ? this.progression.getRecord() : null,
                         level: this.progression ? this.progression.getLevel() : 1,
                         xp: this.progression ? this.progression.getXP() : 0,
+                        xpForNextLevel: this.progression ? this.progression.getXPForNextLevel() : 100,
                         currentHill: this._currentHillKey,
                         hillName: this.hill ? this.hill.name : null,
+                        achievements: this.progression ? this.progression.getAchievements() : [],
                     };
                     this.menuScreen.render(ctx, width, height, menuData);
                 }
