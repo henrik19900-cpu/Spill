@@ -616,6 +616,19 @@ export default class SkihoppGame {
         if (!this.jumper) return;
         const jumperState = this.jumper.getState();
 
+        // --- PREMIUM: Screen shake offset ---
+        const shake = this._getShakeOffset();
+        const hasShake = shake.x !== 0 || shake.y !== 0;
+        if (hasShake) {
+            ctx.save();
+            ctx.translate(shake.x, shake.y);
+        }
+
+        // --- PREMIUM: Slowmo desaturation filter ---
+        if (this._slowmoActive) {
+            try { ctx.filter = 'saturate(0.7)'; } catch (_e) { /* filter unsupported */ }
+        }
+
         switch (state) {
             case GameState.MENU:
                 if (this._menuSubScreen === 'hills') {
@@ -654,8 +667,8 @@ export default class SkihoppGame {
             case GameState.READY:
                 // Render the 3D scene behind with camera pan progress
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                    speed: this.wind.getSpeed(),
-                    direction: this.wind.getDirection(),
+                    speed: this._getWindSpeed(),
+                    direction: this._getWindDirection(),
                     cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
                     cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
                 });
@@ -1564,6 +1577,16 @@ export default class SkihoppGame {
         } catch (e) {
             console.warn(`[SkihoppGame] audio.${method}() error:`, e);
         }
+    }
+
+    /** Safe wind speed accessor — returns 0 if wind is unavailable. */
+    _getWindSpeed() {
+        return this.wind ? this.wind.getSpeed() : 0;
+    }
+
+    /** Safe wind direction accessor — returns 0 if wind is unavailable. */
+    _getWindDirection() {
+        return this.wind ? this.wind.getDirection() : 0;
     }
 
     // ------------------------------------------------------------------

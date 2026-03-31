@@ -1312,51 +1312,112 @@ export default class SkihoppRenderer {
         // --- Pine trees at varying distances along the ground ---
         this._drawSnowGroundTrees(ctx, w, h);
 
-        // --- Sparkle dots that twinkle over time ---
-        // Cache sparkle seeded random data
+        // --- Sparkle dots that twinkle over time (enhanced: more visible, faster) ---
         if (!this._snowGroundSparkles) {
             const rng2 = seededRandom(4040);
             this._snowGroundSparkles = [];
-            for (let i = 0; i < 70; i++) {
+            for (let i = 0; i < 120; i++) {
                 const wxNorm = rng2();
                 const wyOff = 1 + rng2() * 14;
-                const freq = 1.2 + rng2() * 2.5;
+                const freq = 2.5 + rng2() * 5.0;
                 const phase = rng2() * 6.28;
-                const dotR = 0.8 + rng2() * 1.0;
-                this._snowGroundSparkles.push({ wxNorm, wyOff, freq, phase, dotR });
+                const dotR = 1.0 + rng2() * 1.5;
+                const starSize = rng2() < 0.3;
+                this._snowGroundSparkles.push({ wxNorm, wyOff, freq, phase, dotR, starSize });
             }
         }
         const t = this._time || 0;
         ctx.save();
         ctx.fillStyle = '#ffffff';
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 0.4;
+        ctx.lineWidth = 0.5;
         for (let i = 0; i < this._snowGroundSparkles.length; i++) {
             const sd = this._snowGroundSparkles[i];
             const raw = Math.sin(t * sd.freq + sd.phase);
-            if (raw < 0.3) continue;
+            if (raw < 0.1) continue;
             const wx = xStart + sd.wxNorm * xRange;
             const wy = this.hill.getHeightAtDistance(wx) + sd.wyOff;
             const sp = r.worldToScreen(wx, wy);
             if (sp.x < -20 || sp.x > w + 20 || sp.y < -20 || sp.y > h + 20) continue;
-            const intensity = (raw - 0.3) / 0.7;
-            ctx.globalAlpha = 0.25 * intensity * intensity;
+            const intensity = (raw - 0.1) / 0.9;
+            ctx.globalAlpha = 0.45 * intensity * intensity;
             ctx.beginPath();
-            ctx.arc(sp.x, sp.y, sd.dotR, 0, Math.PI * 2);
+            ctx.arc(sp.x, sp.y, sd.dotR * (0.7 + 0.3 * intensity), 0, Math.PI * 2);
             ctx.fill();
-            // Add a tiny cross-star on the brightest sparkles
-            if (intensity > 0.7) {
-                ctx.globalAlpha = 0.15 * intensity;
-                const cr = sd.dotR * 2.5;
+            // Cross-star on brighter sparkles
+            if (intensity > 0.5 || sd.starSize) {
+                ctx.globalAlpha = 0.3 * intensity;
+                const cr = sd.dotR * 3.0;
                 ctx.beginPath();
                 ctx.moveTo(sp.x - cr, sp.y);
                 ctx.lineTo(sp.x + cr, sp.y);
                 ctx.moveTo(sp.x, sp.y - cr);
                 ctx.lineTo(sp.x, sp.y + cr);
                 ctx.stroke();
+                // Diagonal cross for extra sparkle
+                if (intensity > 0.75) {
+                    ctx.globalAlpha = 0.15 * intensity;
+                    const dr = cr * 0.7;
+                    ctx.beginPath();
+                    ctx.moveTo(sp.x - dr, sp.y - dr);
+                    ctx.lineTo(sp.x + dr, sp.y + dr);
+                    ctx.moveTo(sp.x + dr, sp.y - dr);
+                    ctx.lineTo(sp.x - dr, sp.y + dr);
+                    ctx.stroke();
+                }
             }
         }
         ctx.restore();
+
+        // --- Wavy terrain bumps in the snow ---
+        ctx.save();
+        if (!this._snowBumps) {
+            const bumpRng = seededRandom(9191);
+            this._snowBumps = [];
+            for (let i = 0; i < 20; i++) {
+                const wxNorm = bumpRng();
+                const wyOff = 3 + bumpRng() * 18;
+                const bumpLen = 10 + bumpRng() * 30;
+                const amplitude = 0.3 + bumpRng() * 0.5;
+                const freq2 = 0.3 + bumpRng() * 0.4;
+                const phase2 = bumpRng() * 6.28;
+                this._snowBumps.push({ wxNorm, wyOff, bumpLen, amplitude, freq2, phase2 });
+            }
+        }
+        ctx.lineCap = 'round';
+        for (const bump of this._snowBumps) {
+            const baseWx = xStart + bump.wxNorm * xRange;
+            const baseWy = this.hill.getHeightAtDistance(baseWx) + bump.wyOff;
+            ctx.globalAlpha = 0.12;
+            ctx.strokeStyle = '#f4faff';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            for (let j = 0; j <= 16; j++) {
+                const rx = baseWx + (j / 16) * bump.bumpLen;
+                const ry = baseWy + Math.sin(j * bump.freq2 + bump.phase2) * bump.amplitude;
+                const sp = r.worldToScreen(rx, ry);
+                if (j === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+            // Shadow below bump
+            ctx.globalAlpha = 0.05;
+            ctx.strokeStyle = '#8099bb';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            for (let j = 0; j <= 16; j++) {
+                const rx = baseWx + (j / 16) * bump.bumpLen;
+                const ry = baseWy + Math.sin(j * bump.freq2 + bump.phase2) * bump.amplitude + 0.4;
+                const sp = r.worldToScreen(rx, ry);
+                if (j === 0) ctx.moveTo(sp.x, sp.y);
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // --- Small hut/building near the outrun ---
+        this._drawOutrunHut(ctx, w, h);
 
         // --- Original pine trees along the hill sides ---
         this._drawPineTrees(ctx, w, h);
