@@ -512,21 +512,73 @@ export default class SkihoppRenderer {
         // --- Detect state transitions for particle effects ---
         if (this._prevGameState !== gameState) {
             if (gameState === GameState.FLIGHT && this._prevGameState === GameState.TAKEOFF) {
-                this._spawnTakeoffParticles();
+                // Takeoff spark burst
+                this._particles.spawnBurst(25, {
+                    type: 'spark', color: '#ffffff',
+                    x: jumperState.x, y: jumperState.y,
+                    speedMin: 1.5, speedMax: 4.5, spread: Math.PI * 0.8,
+                    sizeMin: 1, sizeMax: 3, lifeMin: 0.4, lifeMax: 0.8,
+                    gravity: 3, drag: 0.95,
+                });
+                // Perfect takeoff: golden stars
+                if ((jumperState.takeoffQuality || 0) > 0.85) {
+                    this._particles.spawnBurst(20, {
+                        type: 'star', color: '#ffd700',
+                        x: jumperState.x, y: jumperState.y,
+                        speedMin: 0.8, speedMax: 2.5, spread: Math.PI * 1.4,
+                        sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.7, lifeMax: 1.2,
+                        gravity: -0.5, drag: 0.97,
+                    });
+                }
                 this._triggerTakeoffFlash(jumperState.x, jumperState.y);
                 this._passedMilestones.clear();
+                this._trailFrameCounter = 0;
             }
             if (gameState === GameState.LANDING && this._prevGameState === GameState.FLIGHT) {
                 const impactForce = Math.abs(jumperState.vy || 0) * 2;
-                this._spawnLandingParticles(jumperState.x, jumperState.y, impactForce);
+                const snowCount = Math.floor(15 + Math.min(30, impactForce * 3));
+                // Landing snowflake burst
+                this._particles.spawnBurst(snowCount, {
+                    type: 'snowflake', color: '#e0f0ff',
+                    x: jumperState.x, y: jumperState.y,
+                    speedMin: 0.8, speedMax: 3.0, spread: Math.PI * 1.2,
+                    sizeMin: 2, sizeMax: 5, lifeMin: 0.8, lifeMax: 1.6,
+                    gravity: 2, drag: 0.92, posSpread: 3,
+                });
                 // Spawn impact ripples on landing
                 this._impactRipples.push({ x: jumperState.x, y: jumperState.y, startTime: this._time });
+                // Perfect telemark: green stars
                 if ((jumperState.landingQuality || 0) > 0.8) {
-                    this._spawnCelebrationParticles(jumperState.x, jumperState.y);
+                    this._particles.spawnBurst(15, {
+                        type: 'star', color: '#44ff88',
+                        x: jumperState.x, y: jumperState.y - 0.5,
+                        speedMin: 0.5, speedMax: 2.0, spread: Math.PI * 1.4,
+                        sizeMin: 1.5, sizeMax: 3.0, lifeMin: 0.8, lifeMax: 1.4,
+                        gravity: -0.8, drag: 0.96,
+                    });
                 }
             }
             this._prevGameState = gameState;
         }
+
+        // --- Continuous trail behind jumper during flight ---
+        if (gameState === GameState.FLIGHT && jumperState) {
+            this._trailFrameCounter++;
+            if (this._trailFrameCounter % 3 === 0) {
+                this._particles.spawn({
+                    type: 'trail', color: '#c8deff',
+                    x: jumperState.x, y: jumperState.y,
+                    vx: (Math.random() - 0.5) * 0.2,
+                    vy: (Math.random() - 0.5) * 0.1,
+                    life: 1, maxLife: 0.5,
+                    size: 1.5 + Math.random(),
+                    gravity: 0.3, drag: 0.98,
+                });
+            }
+        }
+
+        // --- Update particle system ---
+        this._particles.update(1 / 60);
 
         // --- Track distance milestones during flight ---
         if (gameState === GameState.FLIGHT) {
@@ -1653,7 +1705,59 @@ export default class SkihoppRenderer {
         }
         ctx.restore();
 
-        // --- Landing slope: white snow surface ---
+        // --- Track rails: two dark parallel lines with glossy shine ---
+        const railOffset = 0.35;
+        for (const side of [-1, 1]) {
+            ctx.beginPath();
+            first = true;
+            for (let i = 0; i < inrunPts.length; i += 2) {
+                const pt = inrunPts[i];
+                const sp = r.worldToScreen(pt.x, pt.y + side * railOffset);
+                if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.strokeStyle = '#1a2233';
+            ctx.lineWidth = 1.8;
+            ctx.stroke();
+            // Shine highlight on rail
+            ctx.save();
+            ctx.beginPath();
+            first = true;
+            for (let i = 0; i < inrunPts.length; i += 2) {
+                const pt = inrunPts[i];
+                const sp = r.worldToScreen(pt.x, pt.y + side * railOffset - 0.05);
+                if (first) { ctx.moveTo(sp.x, sp.y); first = false; }
+                else ctx.lineTo(sp.x, sp.y);
+            }
+            ctx.globalAlpha = 0.4;
+            ctx.strokeStyle = '#aaccee';
+            ctx.lineWidth = 0.6;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // --- Table edge: warm amber glow ---
+        ctx.save();
+        ctx.shadowColor = '#ffaa33';
+        ctx.shadowBlur = 12;
+        ctx.strokeStyle = '#ffcc44';
+        ctx.lineWidth = 3.5;
+        const teUp = r.worldToScreen(0, -wallThickness - 0.5);
+        const teDown = r.worldToScreen(0, wallThickness + 0.5);
+        ctx.beginPath();
+        ctx.moveTo(teUp.x, teUp.y);
+        ctx.lineTo(teDown.x, teDown.y);
+        ctx.stroke();
+        ctx.shadowBlur = 20;
+        ctx.globalAlpha = 0.4;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(teUp.x, teUp.y);
+        ctx.lineTo(teDown.x, teDown.y);
+        ctx.stroke();
+        ctx.restore();
+
+        // --- Landing slope: white snow surface with noise texture ---
         ctx.beginPath();
         first = true;
         for (const pt of landingPts) {
@@ -1667,8 +1771,40 @@ export default class SkihoppRenderer {
         ctx.lineTo(landLastS.x, landLastS.y + thickness);
         ctx.lineTo(landFirstS.x, landFirstS.y + thickness);
         ctx.closePath();
-        ctx.fillStyle = '#ffffff';
+        const snowGrad = ctx.createLinearGradient(0, landFirstS.y, 0, landFirstS.y + thickness);
+        snowGrad.addColorStop(0, '#fafeff');
+        snowGrad.addColorStop(0.3, '#f0f6fc');
+        snowGrad.addColorStop(1, '#dde8f2');
+        ctx.fillStyle = snowGrad;
         ctx.fill();
+
+        // Snow noise texture (subtle random dots on landing slope)
+        ctx.save();
+        if (!this._snowNoiseDots) {
+            const noiseRng = seededRandom(7171);
+            this._snowNoiseDots = [];
+            for (let i = 0; i < 200; i++) {
+                this._snowNoiseDots.push({
+                    tNorm: noiseRng(),
+                    offY: noiseRng() * 2.0,
+                    dotR: 0.5 + noiseRng() * 1.2,
+                    bright: noiseRng() < 0.5,
+                });
+            }
+        }
+        for (const dot of this._snowNoiseDots) {
+            const idx = Math.floor(dot.tNorm * (landingPts.length - 1));
+            if (idx < 0 || idx >= landingPts.length) continue;
+            const pt = landingPts[idx];
+            const sp = r.worldToScreen(pt.x, pt.y + dot.offY);
+            if (sp.x < -10 || sp.x > w + 10 || sp.y < -10 || sp.y > h + 10) continue;
+            ctx.globalAlpha = dot.bright ? 0.12 : 0.06;
+            ctx.fillStyle = dot.bright ? '#ffffff' : '#c8d8e8';
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, dot.dotR, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
 
         // Shadow strip just below surface edge
         ctx.beginPath();

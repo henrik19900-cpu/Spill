@@ -894,11 +894,13 @@ export default class SkihoppGame {
                     this.replay.startRecording();
                 }
 
-                // Fade in from state transition
-                this._fadeAlpha = 1;
+                // Brief fade from countdown to inrun (not full black — countdown already faded)
+                this._fadeAlpha = Math.min(this._fadeAlpha, 0.3);
 
                 // Run has started - play ambient sounds
-                this._safeAudioCall('playWind', this.wind.getSpeed() / 4);
+                if (this.wind) {
+                    this._safeAudioCall('playWind', this.wind.getSpeed() / 4);
+                }
                 break;
 
             case GameState.TAKEOFF:
