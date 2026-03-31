@@ -2828,46 +2828,7 @@ export default class SkihoppRenderer {
         ctx.globalAlpha = 1.0;
     }
 
-    /**
-     * Spawn white particles at takeoff point (0,0) when entering FLIGHT.
-     */
-    _spawnTakeoffParticles() {
-        const rng = seededRandom(Math.floor(this._time * 1000));
-        for (let i = 0; i < 20; i++) {
-            const angle = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 0.8;
-            const speed = 1.5 + rng() * 3;
-            this._takeoffParticles.push({
-                x: (rng() - 0.5) * 1.0,
-                y: rng() * 0.3,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed,
-                life: 1.0,
-                maxLife: 0.6 + rng() * 0.6,
-                size: 1 + rng() * 2,
-            });
-        }
-    }
 
-    /**
-     * Spawn snow cloud particles at the landing point.
-     */
-    _spawnLandingParticles(x, y, impactForce) {
-        const count = Math.floor(10 + Math.min(30, impactForce * 3));
-        const rng = seededRandom(Math.floor(this._time * 1000) + 7);
-        for (let i = 0; i < count; i++) {
-            const angle = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.2;
-            const speed = 0.8 + rng() * 2.5;
-            this._landingParticles.push({
-                x: x + (rng() - 0.5) * 2,
-                y: y,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed,
-                life: 1.0,
-                maxLife: 0.8 + rng() * 1.0,
-                size: 2 + rng() * 4,
-            });
-        }
-    }
 
     /**
      * Update and draw takeoff and landing particle effects.

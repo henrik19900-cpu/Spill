@@ -574,7 +574,9 @@ export default class SkihoppGame {
      * @param {number} height
      */
     render(ctx, width, height) {
+        if (!this.game) return;
         const state = this.game.getState();
+        if (!this.jumper) return;
         const jumperState = this.jumper.getState();
 
         switch (state) {
