@@ -724,7 +724,7 @@ export default class SkihoppControls {
     if (state === GameState.TAKEOFF) {
       const elapsed = now - this._takeoffWindowStart;
       const windowMs = this._difficulty.takeoffWindowMs;
-      const autoQ = this._difficulty.autoQuality;
+      const autoQ = this._difficulty.autoQuality ?? this._autoLaunchQuality;
 
       // Update ring progress for renderer (0 -> 1 over the timing window)
       if (fb) {
@@ -756,7 +756,7 @@ export default class SkihoppControls {
     // -- LANDING: timing bar + auto-penalty --
     if (state === GameState.LANDING) {
       const elapsed = now - this._landingWindowStart;
-      const landingMs = this._difficulty.landingWindowMs;
+      const landingMs = this._difficulty.landingWindowMs ?? this._telemarkWindow;
 
       // Update landing timing bar for renderer
       if (fb) {

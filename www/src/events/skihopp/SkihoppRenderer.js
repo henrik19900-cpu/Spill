@@ -2073,9 +2073,13 @@ export default class SkihoppRenderer {
     _drawSpectators(ctx) {
         const r = this.renderer;
         const t = this._time || 0;
+        const cw = r.width || 400;
+        const ch = r.height || 900;
 
         for (const spec of this._spectators) {
             const sp = r.worldToScreen(spec.x, spec.y);
+            // Skip off-screen spectators
+            if (sp.x < -50 || sp.x > cw + 50 || sp.y < -80 || sp.y > ch + 20) continue;
             const ppm = r.ppm;
             const h = spec.h * ppm;      // total stick figure height in px
             const headR = h * 0.12;       // head radius

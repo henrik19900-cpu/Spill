@@ -784,8 +784,7 @@ export default class SkihoppGame {
         }
 
         // Achievement and record popups (drawn on top of everything)
-        this._renderAchievementPopup(ctx, width, height);
-        this._renderNewRecordPopup(ctx, width, height);
+        this._renderPopup(ctx, width, height);
     }
 
     // ------------------------------------------------------------------
