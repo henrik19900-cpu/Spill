@@ -707,9 +707,9 @@ export default class SkihoppRenderer {
      */
     _getProfileScreen() {
         const r = this.renderer;
-        if (this._cachedCameraX === r.cameraX &&
-            this._cachedCameraY === r.cameraY &&
-            this._cachedZoom === r.zoom) {
+        if (Math.abs(this._cachedCameraX - r.cameraX) < 0.1 &&
+            Math.abs(this._cachedCameraY - r.cameraY) < 0.1 &&
+            Math.abs(this._cachedZoom - r.zoom) < 0.1) {
             return this._cachedProfileScreen;
         }
         const profile = this.hill.getProfile();
@@ -2073,9 +2073,13 @@ export default class SkihoppRenderer {
     _drawSpectators(ctx) {
         const r = this.renderer;
         const t = this._time || 0;
+        const cw = r.width || 400;
+        const ch = r.height || 900;
 
         for (const spec of this._spectators) {
             const sp = r.worldToScreen(spec.x, spec.y);
+            // Skip off-screen spectators
+            if (sp.x < -50 || sp.x > cw + 50 || sp.y < -80 || sp.y > ch + 20) continue;
             const ppm = r.ppm;
             const h = spec.h * ppm;      // total stick figure height in px
             const headR = h * 0.12;       // head radius
@@ -2405,52 +2409,400 @@ export default class SkihoppRenderer {
     }
 
     // ------------------------------------------------------------------
+    // Game Juice Effects
+    // ------------------------------------------------------------------
+
+    /**
+     * 1. Speed lines during inrun: diagonal white streaks behind the jumper
+     *    when speed > 70 km/h. More streaks = faster.
+     */
+    _drawSpeedLines(ctx, js) {
+        if (!js) return;
+        const speedKmh = (js.speed || 0) * 3.6;
+        if (speedKmh <= 65) return; // ~18 m/s threshold
+
+        const r = this.renderer;
+        const sp = r.worldToScreen(js.x, js.y);
+        const ppm = r.ppm;
+
+        // 3 streaks at 65 km/h, up to 5 at 85+ km/h
+        const numStreaks = Math.min(5, 3 + Math.floor((speedKmh - 65) / 10));
+        const t = this._time;
+
+        ctx.save();
+        ctx.lineCap = 'round';
+
+        for (let i = 0; i < numStreaks; i++) {
+            // Stagger streaks vertically around the jumper
+            const yOffset = (i - (numStreaks - 1) / 2) * 0.3 * ppm;
+            // Animate streaks sliding backward using time + index offset
+            const phase = ((t * 8 + i * 1.7) % 1);
+            // Start behind the jumper, slide further back
+            const startOffset = (0.5 + phase * 1.5) * ppm;
+            const streakLen = (0.8 + (speedKmh - 65) / 80) * ppm;
+
+            const sx = sp.x + startOffset;
+            const sy = sp.y + yOffset - 0.3 * ppm;
+            const ex = sx + streakLen;
+            const ey = sy + streakLen * 0.15;
+
+            // Fade based on phase (appear then disappear)
+            const alpha = Math.sin(phase * Math.PI) * 0.4 * Math.min(1, (speedKmh - 65) / 20);
+
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(ex, ey);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    /**
+     * 2. Takeoff flash: trigger state.
+     */
+    _triggerTakeoffFlash(x, y) {
+        this._takeoffFlash = {
+            x,
+            y,
+            startTime: this._time,
+        };
+    }
+
+    /**
+     * 2. Takeoff flash: draw a brief white radial flash at the takeoff point
+     *    that expands and fades over 0.3s.
+     */
+    _drawTakeoffFlash(ctx) {
+        if (!this._takeoffFlash) return;
+
+        const elapsed = this._time - this._takeoffFlash.startTime;
+        const duration = 0.3;
+        if (elapsed > duration) {
+            this._takeoffFlash = null;
+            return;
+        }
+
+        const r = this.renderer;
+        const sp = r.worldToScreen(this._takeoffFlash.x, this._takeoffFlash.y);
+        const progress = elapsed / duration;
+
+        // Expand radius from small to large
+        const maxRadius = 60;
+        const radius = maxRadius * progress;
+
+        // Bright start, quick fade
+        const alpha = (1 - progress) * (1 - progress) * 0.7;
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'screen';
+        const grad = ctx.createRadialGradient(sp.x, sp.y, 0, sp.x, sp.y, radius);
+        grad.addColorStop(0, `rgba(255,255,255,${alpha.toFixed(3)})`);
+        grad.addColorStop(0.3, `rgba(255,250,230,${(alpha * 0.6).toFixed(3)})`);
+        grad.addColorStop(0.7, `rgba(255,240,200,${(alpha * 0.2).toFixed(3)})`);
+        grad.addColorStop(1, 'rgba(255,240,200,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    /**
+     * 3. Perfect landing celebration: spawn golden sparkle particles.
+     */
+    _spawnCelebrationParticles(x, y) {
+        const rng = seededRandom(Math.floor(this._time * 1000) + 42);
+        const count = 15 + Math.floor(rng() * 6); // 15-20 particles
+        for (let i = 0; i < count; i++) {
+            const angle = -Math.PI / 2 + (rng() - 0.5) * Math.PI * 1.4;
+            const speed = 1.0 + rng() * 2.5;
+            this._celebrationParticles.push({
+                x: x + (rng() - 0.5) * 2,
+                y: y - rng() * 0.5,
+                vx: Math.cos(angle) * speed * 0.5,
+                vy: -0.5 - rng() * 2.0, // float upward
+                life: 1.0,
+                maxLife: 0.8 + rng() * 0.8,
+                size: 1.5 + rng() * 2.5,
+                sparklePhase: rng() * Math.PI * 2,
+                hue: 40 + rng() * 20, // gold hue variation (40-60)
+            });
+        }
+    }
+
+    /**
+     * 3. Perfect landing celebration: update and draw golden sparkle particles
+     *    that float upward and fade.
+     */
+    _drawCelebrationParticles(ctx, dt) {
+        const r = this.renderer;
+        const t = this._time;
+
+        for (let i = this._celebrationParticles.length - 1; i >= 0; i--) {
+            const p = this._celebrationParticles[i];
+            p.life -= dt / p.maxLife;
+            if (p.life <= 0) {
+                this._celebrationParticles.splice(i, 1);
+                continue;
+            }
+
+            // Float upward, slight horizontal drift
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
+            p.vy -= 0.5 * dt; // gentle upward acceleration
+
+            const sp = r.worldToScreen(p.x, p.y);
+            const alpha = Math.max(0, p.life);
+            const twinkle = 0.5 + 0.5 * Math.sin(t * 12 + p.sparklePhase);
+
+            ctx.save();
+            ctx.globalAlpha = alpha * twinkle;
+
+            // Golden glow
+            const gR = 255;
+            const gG = Math.floor(200 + p.hue * 0.5);
+            const gB = Math.floor(50 + (1 - alpha) * 80);
+            ctx.fillStyle = `rgb(${gR},${gG},${gB})`;
+
+            // Draw a 4-point star shape
+            const sz = p.size * (0.8 + twinkle * 0.4);
+            ctx.beginPath();
+            ctx.moveTo(sp.x, sp.y - sz * 1.5);
+            ctx.lineTo(sp.x + sz * 0.4, sp.y - sz * 0.4);
+            ctx.lineTo(sp.x + sz * 1.5, sp.y);
+            ctx.lineTo(sp.x + sz * 0.4, sp.y + sz * 0.4);
+            ctx.lineTo(sp.x, sp.y + sz * 1.5);
+            ctx.lineTo(sp.x - sz * 0.4, sp.y + sz * 0.4);
+            ctx.lineTo(sp.x - sz * 1.5, sp.y);
+            ctx.lineTo(sp.x - sz * 0.4, sp.y - sz * 0.4);
+            ctx.closePath();
+            ctx.fill();
+
+            // Bright center dot
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = '#fffde0';
+            ctx.beginPath();
+            ctx.arc(sp.x, sp.y, sz * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+    }
+
+    /**
+     * 4. Distance milestones: check if jumper passed 100m, 120m (K-point), or 140m.
+     */
+    _checkDistanceMilestones(js) {
+        if (!js) return;
+        const milestones = [100, 120, 140];
+        for (const m of milestones) {
+            if (!this._passedMilestones.has(m) && js.x >= m) {
+                this._passedMilestones.add(m);
+                this._milestoneFlashes.push({
+                    distance: m,
+                    startTime: this._time,
+                    worldX: js.x,
+                    worldY: js.y,
+                });
+            }
+        }
+    }
+
+    /**
+     * 4. Distance milestone flashes: briefly flash the distance number
+     *    larger and in gold when passing milestones during flight.
+     */
+    _drawMilestoneFlashes(ctx, js, gameState) {
+        if (gameState !== GameState.FLIGHT) return;
+        const r = this.renderer;
+        const duration = 0.8;
+
+        for (let i = this._milestoneFlashes.length - 1; i >= 0; i--) {
+            const mf = this._milestoneFlashes[i];
+            const elapsed = this._time - mf.startTime;
+            if (elapsed > duration) {
+                this._milestoneFlashes.splice(i, 1);
+                continue;
+            }
+
+            const progress = elapsed / duration;
+
+            // Scale: start at 1.5x, peak at 2.5x, then shrink back
+            const scaleCurve = progress < 0.2
+                ? 1.5 + (progress / 0.2) * 1.0
+                : 2.5 - ((progress - 0.2) / 0.8) * 1.0;
+
+            // Fade: full opacity for first 60%, then fade out
+            const alpha = progress < 0.6 ? 1.0 : 1.0 - (progress - 0.6) / 0.4;
+
+            // Position near the jumper, offset above
+            const sp = r.worldToScreen(js.x, js.y);
+            const textY = sp.y - 40 - progress * 20; // float upward
+
+            ctx.save();
+            ctx.globalAlpha = alpha;
+
+            const fontSize = Math.round(16 * scaleCurve);
+            ctx.font = `bold ${fontSize}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Gold glow
+            ctx.shadowColor = '#ffcc00';
+            ctx.shadowBlur = 12 * alpha;
+            ctx.fillStyle = '#ffd700';
+            const label = `${mf.distance}m` + (mf.distance === 120 ? ' K' : '');
+            ctx.fillText(label, sp.x, textY);
+
+            // Sharper inner text
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = '#fff8e0';
+            ctx.fillText(label, sp.x, textY);
+
+            ctx.restore();
+        }
+    }
+
+    /**
+     * 5. Crowd wave effect: during FLIGHT, animate spectators doing a wave
+     *    that follows the jumper's x position.
+     */
+    _drawCrowdWaveEffect(ctx, js, gameState) {
+        if (gameState !== GameState.FLIGHT || !js) return;
+
+        const r = this.renderer;
+        const t = this._time;
+        const jumperX = js.x;
+
+        for (const spec of this._spectators) {
+            // Distance from jumper x to spectator
+            const dx = spec.x - jumperX;
+
+            // Wave propagates: spectators near jumperX raise arms,
+            // with a wave-like delay based on distance
+            const waveDelay = dx * 0.15;
+            const wavePhase = Math.sin(t * 4 - waveDelay);
+
+            // Only raise arms when wave passes (wavePhase > 0.3)
+            if (wavePhase < 0.3) continue;
+
+            const intensity = (wavePhase - 0.3) / 0.7; // 0-1
+
+            const sp = r.worldToScreen(spec.x, spec.y);
+            const ppm = r.ppm;
+            const h = spec.h * ppm;
+            const legLen = h * 0.35;
+            const bodyLen = h * 0.35;
+            const armLen = h * 0.25;
+            const lineW = Math.max(1, h * 0.06);
+
+            const feetY = sp.y;
+            const hipY = feetY - legLen;
+            const shoulderY = hipY - bodyLen;
+
+            // Both arms raise upward proportional to intensity
+            const armAngle = -Math.PI / 2 - intensity * 0.5;
+
+            ctx.save();
+            ctx.strokeStyle = spec.bodyColor;
+            ctx.lineWidth = lineW;
+            ctx.lineCap = 'round';
+            ctx.globalAlpha = 0.9;
+
+            // Left arm raised
+            const laX = sp.x + Math.cos(armAngle - 0.3) * armLen;
+            const laY = shoulderY + Math.sin(armAngle - 0.3) * armLen;
+            ctx.beginPath();
+            ctx.moveTo(sp.x, shoulderY);
+            ctx.lineTo(laX, laY);
+            ctx.stroke();
+
+            // Right arm raised
+            const raX = sp.x + Math.cos(armAngle + 0.3) * armLen;
+            const raY = shoulderY + Math.sin(armAngle + 0.3) * armLen;
+            ctx.beginPath();
+            ctx.moveTo(sp.x, shoulderY);
+            ctx.lineTo(raX, raY);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 7. Snow particles
     // ------------------------------------------------------------------
 
     _drawSnowParticles(ctx, w, h) {
         const t = this._time || 0;
         const wind = this._wind || { speed: 0, direction: 0 };
-        // Wind influence on horizontal drift: direction in radians, speed in m/s
-        // Normalize to a gentle screen-space factor
         const windDriftX = Math.cos(wind.direction || 0) * (wind.speed || 0) * 0.012;
+        const particles = this._snowParticles;
 
         ctx.save();
-        for (const p of this._snowParticles) {
-            // Horizontal: base drift + wind (wind affects all, but more for larger particles)
+
+        // Pre-compute snowflake arm angles (avoid recomputing trig per flake)
+        // angles: 0, PI/3, 2PI/3, PI, 4PI/3, 5PI/3
+        const flakeCos = [1, 0.5, -0.5, -1, -0.5, 0.5];
+        const flakeSin = [0, 0.866025, 0.866025, 0, -0.866025, -0.866025];
+
+        // First pass: batch regular (non-flake) circles by quantized radius
+        // Group into buckets by rounded radius to batch same-size particles
+        ctx.fillStyle = '#ffffff';
+        // Sort particles into alpha groups (quantize to 10 levels) to reduce state changes
+        // Use a simpler approach: batch all same-alpha particles into one path
+        const alphaBuckets = new Array(10);
+        for (let i = 0; i < particles.length; i++) {
+            const p = particles[i];
+            if (p.isFlake) continue;
             const windFactor = 0.5 + p.depth * 0.5;
             const driftX = p.baseDriftX + windDriftX * windFactor;
-            // Add a gentle wobble
             const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
-
-            // Animate position with wrapping
             const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
             const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
-
-            const sx = px * w;
-            const sy = py * h;
-
-            ctx.globalAlpha = p.alpha;
-
-            if (p.isFlake) {
-                // Draw a 6-armed snowflake star
-                const armLen = p.r * 1.2;
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 0.6;
-                ctx.beginPath();
-                for (let a = 0; a < 6; a++) {
-                    const angle = (a / 6) * Math.PI * 2;
-                    ctx.moveTo(sx, sy);
-                    ctx.lineTo(sx + Math.cos(angle) * armLen, sy + Math.sin(angle) * armLen);
-                }
-                ctx.stroke();
-            } else {
-                // Simple circular snowflake
-                ctx.beginPath();
-                ctx.arc(sx, sy, p.r, 0, Math.PI * 2);
-                ctx.fillStyle = '#ffffff';
-                ctx.fill();
+            const sx = (px * w) | 0;
+            const sy = (py * h) | 0;
+            const bucket = (p.alpha * 10) | 0;
+            if (!alphaBuckets[bucket]) alphaBuckets[bucket] = [];
+            alphaBuckets[bucket].push(sx, sy, p.r);
+        }
+        for (let b = 0; b < 10; b++) {
+            const arr = alphaBuckets[b];
+            if (!arr || arr.length === 0) continue;
+            ctx.globalAlpha = (b + 0.5) / 10;
+            ctx.beginPath();
+            for (let j = 0; j < arr.length; j += 3) {
+                ctx.moveTo(arr[j] + arr[j + 2], arr[j + 1]);
+                ctx.arc(arr[j], arr[j + 1], arr[j + 2], 0, Math.PI * 2);
             }
+            ctx.fill();
+        }
+
+        // Second pass: snowflake shapes (fewer particles, set stroke style once)
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 0.6;
+        for (let i = 0; i < particles.length; i++) {
+            const p = particles[i];
+            if (!p.isFlake) continue;
+            const windFactor = 0.5 + p.depth * 0.5;
+            const driftX = p.baseDriftX + windDriftX * windFactor;
+            const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
+            const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
+            const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
+            const sx = (px * w) | 0;
+            const sy = (py * h) | 0;
+            const armLen = p.r * 1.2;
+            ctx.globalAlpha = p.alpha;
+            ctx.beginPath();
+            for (let a = 0; a < 6; a++) {
+                ctx.moveTo(sx, sy);
+                ctx.lineTo(sx + flakeCos[a] * armLen, sy + flakeSin[a] * armLen);
+            }
+            ctx.stroke();
         }
         ctx.restore();
     }

@@ -142,31 +142,16 @@ export default class SkihoppGame {
         // Perfect takeoff flash
         this._perfectFlashAlpha = 0;
         this._perfectFlashTime = 0;
+        this._perfectFlashTimer = 0;
         this._showPerfektText = false;
 
         // Progression results from last jump
         this._newUnlocks = [];
         this._newAchievements = [];
 
-        // Achievement notification queue & popup state
+        // Achievement / record notification queue & popup state
         this._achievementQueue = [];
-        this._achievementPopup = {
-            active: false,
-            achievement: null,
-            timer: 0,
-            duration: 2.5,
-            slideIn: 0.3,
-            slideOut: 0.3,
-        };
-
-        // New record notification state
-        this._newRecordPopup = {
-            active: false,
-            distance: 0,
-            timer: 0,
-            duration: 3.0,
-            pulsePhase: 0,
-        };
+        this._currentPopup = null; // { text, subtext, type, timer, duration }
 
         // Optional UI screens for sub-menus
         this.hillSelectScreen = null;
@@ -400,8 +385,9 @@ export default class SkihoppGame {
         // Perfect takeoff flash decay
         if (this._perfectFlashAlpha > 0) {
             this._perfectFlashTime += dt;
+            this._perfectFlashTimer += dt;
             this._perfectFlashAlpha = Math.max(0, this._perfectFlashAlpha - dt * 2);
-            if (this._perfectFlashTime >= 0.5) {
+            if (this._perfectFlashTimer >= 0.5) {
                 this._showPerfektText = false;
             }
         }
@@ -522,29 +508,15 @@ export default class SkihoppGame {
             this._scoreAnimationTime += dt;
         }
 
-        // Achievement popup processing
-        if (this._achievementPopup.active) {
-            this._achievementPopup.timer += dt;
-            if (this._achievementPopup.timer >= this._achievementPopup.duration) {
-                this._achievementPopup.active = false;
-                this._achievementPopup.achievement = null;
-                this._achievementPopup.timer = 0;
+        // Popup queue processing (achievements & records)
+        if (this._currentPopup) {
+            this._currentPopup.timer += dt;
+            if (this._currentPopup.timer >= this._currentPopup.duration) {
+                this._currentPopup = null;
             }
         } else if (this._achievementQueue.length > 0) {
-            // Pop next achievement from queue and start showing it
-            const next = this._achievementQueue.shift();
-            this._achievementPopup.active = true;
-            this._achievementPopup.achievement = next;
-            this._achievementPopup.timer = 0;
-        }
-
-        // New record popup processing
-        if (this._newRecordPopup.active) {
-            this._newRecordPopup.timer += dt;
-            this._newRecordPopup.pulsePhase += dt;
-            if (this._newRecordPopup.timer >= this._newRecordPopup.duration) {
-                this._newRecordPopup.active = false;
-            }
+            this._currentPopup = this._achievementQueue.shift();
+            this._currentPopup.timer = 0;
         }
 
         // Audio: wind sound proportional to speed
@@ -598,10 +570,12 @@ export default class SkihoppGame {
                 break;
 
             case GameState.READY:
-                // Render the 3D scene behind
+                // Render the 3D scene behind with camera pan progress
                 this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
                     speed: this.wind.getSpeed(),
                     direction: this.wind.getDirection(),
+                    cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
+                    cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
                 });
 
                 // Show tutorial overlay if active
@@ -630,9 +604,9 @@ export default class SkihoppGame {
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
                     ctx.fillRect(0, 0, width, height);
 
-                    // HOP! screen flash (green-white)
+                    // HOP! screen flash (white)
                     if (this._hopFlashAlpha > 0) {
-                        ctx.fillStyle = `rgba(100, 255, 100, ${this._hopFlashAlpha})`;
+                        ctx.fillStyle = `rgba(255, 255, 255, ${this._hopFlashAlpha})`;
                         ctx.fillRect(0, 0, width, height);
                     }
 
@@ -641,15 +615,15 @@ export default class SkihoppGame {
                     ctx.globalAlpha = fadeAlpha;
 
                     if (isHop) {
-                        ctx.fillStyle = '#00ff44';
-                        ctx.font = 'bold 84px sans-serif';
+                        ctx.fillStyle = '#44ff88';
+                        ctx.font = 'bold 80px sans-serif';
                     } else {
                         ctx.fillStyle = '#ffffff';
                         ctx.font = 'bold 72px sans-serif';
                     }
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.shadowColor = isHop ? 'rgba(0, 80, 0, 0.8)' : 'rgba(0, 0, 0, 0.6)';
+                    ctx.shadowColor = isHop ? 'rgba(0, 100, 50, 0.8)' : 'rgba(0, 0, 0, 0.6)';
                     ctx.shadowBlur = isHop ? 16 : 8;
                     ctx.fillText(countdownText, 0, 0);
                     ctx.restore();
@@ -810,8 +784,7 @@ export default class SkihoppGame {
         }
 
         // Achievement and record popups (drawn on top of everything)
-        this._renderAchievementPopup(ctx, width, height);
-        this._renderNewRecordPopup(ctx, width, height);
+        this._renderPopup(ctx, width, height);
     }
 
     // ------------------------------------------------------------------
@@ -903,6 +876,7 @@ export default class SkihoppGame {
                 if (jumperState.takeoffQuality > 0.9) {
                     this._perfectFlashAlpha = 1.0;
                     this._perfectFlashTime = 0;
+                    this._perfectFlashTimer = 0;
                     this._showPerfektText = true;
                     this._safeAudioCall('playPerfectTakeoff');
                 }

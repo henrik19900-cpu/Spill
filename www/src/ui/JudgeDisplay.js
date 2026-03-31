@@ -15,6 +15,10 @@ export default class JudgeDisplay {
         this._particles = [];
         this._particlesBurst = false;
 
+        // Button rects for tap handling
+        this._replayButtonRect = null;
+        this._continueButtonRect = null;
+
         // Country flags for judges (Norway, Finland, Austria, Japan, Germany)
         this._judgeCountries = [
             { code: 'NOR', colors: ['#BA0C2F', '#FFFFFF', '#00205B'] },
@@ -188,7 +192,9 @@ export default class JudgeDisplay {
         ctx.font = `800 ${fontSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`${d.distance.toFixed(1)} m`, width / 2, y);
+        // Animate distance counting up from 0 to final value over the 0-0.2 range
+        const countUpValue = d.distance * eased;
+        ctx.fillText(`${countUpValue.toFixed(1)} m`, width / 2, y);
 
         // Hill name subtitle
         ctx.shadowBlur = 0;
@@ -630,21 +636,41 @@ export default class JudgeDisplay {
         ctx.fillText(d.totalPoints.toFixed(1), width / 2, y - 5);
         ctx.restore();
 
-        // Rating label below the score (e.g. "Fantastisk!", "Bra hopp!")
-        if (d.rating) {
-            const ratingColors = {
-                S: '#FFD700',  // gold
-                A: '#7BFFB0',  // green
-                B: '#7BC8FF',  // blue
-                C: '#FFA888',  // orange
-            };
-            const ratingColor = ratingColors[d.ratingTier] || '#ffffff';
-            ctx.fillStyle = ratingColor;
-            ctx.font = `700 ${Math.min(width * 0.05, 20)}px sans-serif`;
+        // "NY REKORD!" flashing gold text above the total score
+        if (d.isNewRecord) {
+            const flashAlpha = 0.6 + Math.sin(this._time * 6) * 0.4;
+            ctx.save();
+            ctx.globalAlpha = flashAlpha;
+            ctx.shadowColor = 'rgba(255,200,50,0.8)';
+            ctx.shadowBlur = 15;
+            ctx.fillStyle = '#FFD700';
+            ctx.font = `900 ${Math.min(width * 0.06, 24)}px sans-serif`;
             ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            ctx.fillText(d.rating, width / 2, y + textSize + 2);
+            ctx.textBaseline = 'bottom';
+            ctx.fillText('NY REKORD!', width / 2, pillY - 6);
+            ctx.restore();
         }
+
+        // Jump rating text below the total score
+        const total = d.totalPoints;
+        let ratingText = d.rating;
+        let ratingColor;
+        if (!ratingText) {
+            if (total > 130) { ratingText = 'Fantastisk!'; }
+            else if (total > 110) { ratingText = 'Bra hopp!'; }
+            else if (total > 90) { ratingText = 'OK'; }
+            else { ratingText = 'Svakt'; }
+        }
+        if (total > 130) { ratingColor = '#7BFFB0'; }       // green
+        else if (total > 110) { ratingColor = '#7BC8FF'; }   // blue
+        else if (total > 90) { ratingColor = '#ffffff'; }    // white
+        else { ratingColor = '#FF6060'; }                     // red
+
+        ctx.fillStyle = ratingColor;
+        ctx.font = `700 ${Math.min(width * 0.05, 20)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(ratingText, width / 2, y + textSize + 2);
 
         ctx.restore();
 
@@ -654,27 +680,45 @@ export default class JudgeDisplay {
             this._spawnParticles(width / 2, y, width);
         }
 
-        // Tap to continue hint
+        // "Se igjen" and "Fortsett" buttons at the bottom
         if (totalProgress >= 1) {
-            const pulse = 0.3 + Math.sin(this._time * 3.5) * 0.3;
+            const btnW = Math.min(width * 0.35, 140);
+            const btnH = 44;
+            const btnGap = 16;
+            const btnY = height * 0.82;
+            const replayX = width / 2 - btnW - btnGap / 2;
+            const continueX = width / 2 + btnGap / 2;
+
+            // Store button rects for tap handling
+            this._replayButtonRect = { x: replayX, y: btnY, w: btnW, h: btnH };
+            this._continueButtonRect = { x: continueX, y: btnY, w: btnW, h: btnH };
+
+            // "Se igjen" button (outline style)
             ctx.save();
-            ctx.globalAlpha = pulse;
-            ctx.fillStyle = 'rgba(255,220,150,0.6)';
-            ctx.font = `400 ${Math.min(width * 0.035, 14)}px sans-serif`;
+            ctx.strokeStyle = 'rgba(255,220,150,0.6)';
+            ctx.lineWidth = 1.5;
+            this._roundRect(ctx, replayX, btnY, btnW, btnH, btnH / 2);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255,220,150,0.7)';
+            ctx.font = `600 ${Math.min(width * 0.038, 15)}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText('Trykk for \u00E5 fortsette', width / 2, height * 0.82);
+            ctx.fillText('Se igjen', replayX + btnW / 2, btnY + btnH / 2);
+            ctx.restore();
 
-            // Small chevron
-            const chevY = height * 0.82 + 18 + Math.sin(this._time * 4) * 2;
-            ctx.strokeStyle = 'rgba(255,220,150,0.4)';
-            ctx.lineWidth = 1.5;
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(width / 2 - 6, chevY);
-            ctx.lineTo(width / 2, chevY + 4);
-            ctx.lineTo(width / 2 + 6, chevY);
-            ctx.stroke();
+            // "Fortsett" button (filled style)
+            ctx.save();
+            const contGrad = ctx.createLinearGradient(continueX, btnY, continueX, btnY + btnH);
+            contGrad.addColorStop(0, 'rgba(255,210,80,0.9)');
+            contGrad.addColorStop(1, 'rgba(220,170,40,0.9)');
+            ctx.fillStyle = contGrad;
+            this._roundRect(ctx, continueX, btnY, btnW, btnH, btnH / 2);
+            ctx.fill();
+            ctx.fillStyle = '#1a1a2e';
+            ctx.font = `700 ${Math.min(width * 0.038, 15)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Fortsett', continueX + btnW / 2, btnY + btnH / 2);
             ctx.restore();
         }
     }
@@ -754,6 +798,32 @@ export default class JudgeDisplay {
             ctx.restore();
         }
         this._particles = alive;
+    }
+
+    // -------------------------------------------------------------------
+    // Tap handling
+    // -------------------------------------------------------------------
+
+    /**
+     * Check if a tap at (x, y) hit one of the buttons.
+     * @param {number} x
+     * @param {number} y
+     * @returns {'replay'|'continue'|null}
+     */
+    handleTap(x, y) {
+        if (this._replayButtonRect) {
+            const r = this._replayButtonRect;
+            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                return 'replay';
+            }
+        }
+        if (this._continueButtonRect) {
+            const r = this._continueButtonRect;
+            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                return 'continue';
+            }
+        }
+        return null;
     }
 
     // -------------------------------------------------------------------
