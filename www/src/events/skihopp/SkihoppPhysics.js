@@ -528,20 +528,25 @@ export default class SkihoppPhysics {
         j.turbulenceY = turbY;
 
         // ---- Body angle evolution during flight ----
-        // The jumper can adjust body angle toward a target (set by controls).
-        // If no target is set, body angle drifts toward the velocity direction
-        // (natural aerodynamic weathervaning). The rate of change is limited
-        // to ~15°/s for realism — you can't instantly change posture in the air.
-        const bodyAngleRate = cfg.bodyAngleRate || 15; // degrees per second
-        const targetAngle = (j.targetAngle !== undefined && j.targetAngle !== null)
+        // The jumper's body angle tracks a target that is offset from the
+        // velocity direction by the desired angle of attack. The controls
+        // set j.targetAngle as the desired AoA offset (typically 25-35°
+        // for a skilled jumper). If the controls haven't set a value, we
+        // default to a reasonable offset (~25°) for autonomous flight.
+        //
+        // The actual body angle smoothly tracks velAngle + desiredAoA,
+        // limited to a realistic rate of change (~12°/s).
+        const bodyAngleRate = cfg.bodyAngleRate || 12; // degrees per second
+        const desiredAoA = (j.targetAngle !== undefined && j.targetAngle !== null)
             ? j.targetAngle
-            : radToDeg(Math.atan2(j.vy, j.vx)) + 20; // natural drift toward AoA ~20°
-        const angleDelta = targetAngle - j.bodyAngle;
+            : 25; // default desired AoA in degrees
+        const flightTargetAngle = radToDeg(velAngle) + desiredAoA;
+        const angleDeltaBody = flightTargetAngle - j.bodyAngle;
         const maxChange = bodyAngleRate * dt;
-        if (Math.abs(angleDelta) > maxChange) {
-            j.bodyAngle += Math.sign(angleDelta) * maxChange;
+        if (Math.abs(angleDeltaBody) > maxChange) {
+            j.bodyAngle += Math.sign(angleDeltaBody) * maxChange;
         } else {
-            j.bodyAngle = targetAngle;
+            j.bodyAngle = flightTargetAngle;
         }
 
         // ---- Integration (semi-implicit Euler) ----
