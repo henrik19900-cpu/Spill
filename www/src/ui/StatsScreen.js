@@ -18,6 +18,10 @@ export default class StatsScreen {
 
         /** Animation time tracker. */
         this._time = 0;
+
+        /** For touch-scroll tracking (smooth momentum). */
+        this._touchStartY = null;
+        this._scrollVelocity = 0;
     }
 
     // -------------------------------------------------------------------

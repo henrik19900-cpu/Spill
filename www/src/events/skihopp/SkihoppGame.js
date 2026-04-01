@@ -183,6 +183,16 @@ export default class SkihoppGame {
         // --- PREMIUM: Woosh transition (RESULTS -> READY) ---
         this._wooshProgress = 0;  // 0 = not active, 0..1 = animating
         this._wooshActive = false;
+
+        // --- Transition effects tracker ---
+        // Each key holds { active, timer, duration } plus effect-specific fields
+        this._transitionEffects = {
+            menuToReadyZoom: { active: false, timer: 0, duration: 0.5 },
+            takeoffFlash: { active: false, timer: 0, duration: 0.1, alpha: 0 },
+            takeoffQualityText: { active: false, timer: 0, duration: 0.8, text: '', color: '#ffffff', scale: 0 },
+            landingImpactFlash: { active: false, timer: 0, duration: 0.15, alpha: 0 },
+            scoreToResultsCrossfade: { active: false, timer: 0, duration: 0.4, alpha: 0 },
+        };
     }
 
     // ------------------------------------------------------------------
@@ -499,7 +509,7 @@ export default class SkihoppGame {
                     this._hopFlashAlpha = 0.6;
                 }
             }
-            this._countdownScaleAnim = Math.min(1, this._countdownScaleAnim + dt * 2.5);
+            this._countdownScaleAnim = Math.min(1, this._countdownScaleAnim + dt * 3.0);
 
             if (this._countdownTimer >= COUNTDOWN_DURATION) {
                 this.game.setState(GameState.INRUN);
@@ -597,6 +607,65 @@ export default class SkihoppGame {
             }
         }
 
+        // --- Transition effects update ---
+        const fx = this._transitionEffects;
+
+        // 1. MENU->READY zoom-in (0.5s)
+        if (fx.menuToReadyZoom.active) {
+            fx.menuToReadyZoom.timer += dt;
+            if (fx.menuToReadyZoom.timer >= fx.menuToReadyZoom.duration) {
+                fx.menuToReadyZoom.active = false;
+            }
+        }
+
+        // 3. INRUN->TAKEOFF white HUD flash (0.1s)
+        if (fx.takeoffFlash.active) {
+            fx.takeoffFlash.timer += dt;
+            fx.takeoffFlash.alpha = Math.max(0, 1.0 - fx.takeoffFlash.timer / fx.takeoffFlash.duration);
+            if (fx.takeoffFlash.timer >= fx.takeoffFlash.duration) {
+                fx.takeoffFlash.active = false;
+                fx.takeoffFlash.alpha = 0;
+            }
+        }
+
+        // 4. TAKEOFF quality text (0.8s scale-in)
+        if (fx.takeoffQualityText.active) {
+            fx.takeoffQualityText.timer += dt;
+            const qt = fx.takeoffQualityText.timer / fx.takeoffQualityText.duration;
+            // easeOutBack for scale: overshoot then settle
+            if (qt < 0.4) {
+                const t2 = qt / 0.4;
+                const c1 = 1.70158;
+                const c3 = c1 + 1;
+                fx.takeoffQualityText.scale = 1 + c3 * Math.pow(t2 - 1, 3) + c1 * Math.pow(t2 - 1, 2);
+            } else {
+                fx.takeoffQualityText.scale = 1.0;
+            }
+            if (fx.takeoffQualityText.timer >= fx.takeoffQualityText.duration) {
+                fx.takeoffQualityText.active = false;
+            }
+        }
+
+        // 5. FLIGHT->LANDING impact flash (0.15s)
+        if (fx.landingImpactFlash.active) {
+            fx.landingImpactFlash.timer += dt;
+            fx.landingImpactFlash.alpha = Math.max(0, 1.0 - fx.landingImpactFlash.timer / fx.landingImpactFlash.duration);
+            if (fx.landingImpactFlash.timer >= fx.landingImpactFlash.duration) {
+                fx.landingImpactFlash.active = false;
+                fx.landingImpactFlash.alpha = 0;
+            }
+        }
+
+        // 6. SCORE->RESULTS crossfade (0.4s)
+        if (fx.scoreToResultsCrossfade.active) {
+            fx.scoreToResultsCrossfade.timer += dt;
+            // alpha goes 0->1 (fade out old) then stays at 1 (new fully visible)
+            fx.scoreToResultsCrossfade.alpha = Math.min(1, fx.scoreToResultsCrossfade.timer / fx.scoreToResultsCrossfade.duration);
+            if (fx.scoreToResultsCrossfade.timer >= fx.scoreToResultsCrossfade.duration) {
+                fx.scoreToResultsCrossfade.active = false;
+            }
+        }
+
         // Popup queue processing (achievements & records)
         if (this._currentPopup) {
             this._currentPopup.timer += dt;
@@ -677,7 +746,19 @@ export default class SkihoppGame {
                 }
                 break;
 
-            case GameState.READY:
+            case GameState.READY: {
+                // MENU->READY zoom-in effect (0.5s)
+                const zoomFx = this._transitionEffects.menuToReadyZoom;
+                const hasZoom = zoomFx.active;
+                if (hasZoom) {
+                    const zt = Math.min(1, zoomFx.timer / zoomFx.duration);
+                    // Smooth ease-out: zoom from 1.15 -> 1.0
+                    const zoomScale = 1.15 - 0.15 * (1 - Math.pow(1 - zt, 3));
+                    ctx.save();
+                    ctx.translate(width / 2, height / 2);
+                    ctx.scale(zoomScale, zoomScale);
+                    ctx.translate(-width / 2, -height / 2);
+                }
                 // Render the 3D scene behind with camera pan progress
                 if (this.skihoppRenderer) {
                     this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
@@ -704,9 +785,12 @@ export default class SkihoppGame {
                     else if (remaining > 0) countdownText = '1...';
                     else { countdownText = 'HOP!'; isHop = true; }
 
-                    // Scale: 1.0 -> 1.5 over the animation, then fade out
+                    // Scale: easeOutBack bounce 0 -> ~1.3 -> 1.0
                     const t = this._countdownScaleAnim;
-                    const scale = 1.0 + 0.5 * t;
+                    // easeOutBack curve: overshoots to ~1.3 then settles to 1.0
+                    const c1 = 1.70158;
+                    const c3 = c1 + 1;
+                    const scale = t < 0.01 ? 0 : (1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2));
                     // Fade: fully visible for first 60%, then fade out
                     const fadeAlpha = t < 0.6 ? 1.0 : Math.max(0, 1.0 - (t - 0.6) / 0.4);
 
@@ -738,7 +822,11 @@ export default class SkihoppGame {
                     ctx.fillText(countdownText, 0, 0);
                     ctx.restore();
                 }
+                if (hasZoom) {
+                    ctx.restore();
+                }
                 break;
+            }
 
             case GameState.INRUN:
             case GameState.TAKEOFF:
@@ -782,6 +870,42 @@ export default class SkihoppGame {
                         ctx.shadowBlur = 20;
                         ctx.fillText('PERFEKT!', 0, 0);
                     }
+                    ctx.restore();
+                }
+
+                // INRUN->TAKEOFF white HUD flash (0.1s)
+                if (this._transitionEffects.takeoffFlash.active) {
+                    ctx.save();
+                    ctx.globalAlpha = this._transitionEffects.takeoffFlash.alpha * 0.7;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, width, height);
+                    ctx.restore();
+                }
+
+                // Takeoff quality text ("PERFEKT!" / "BRA!" / "OK") centered with scale-in
+                if (this._transitionEffects.takeoffQualityText.active) {
+                    const qfx = this._transitionEffects.takeoffQualityText;
+                    const qAlpha = qfx.timer < 0.5 ? 1.0 : Math.max(0, 1.0 - (qfx.timer - 0.5) / 0.3);
+                    ctx.save();
+                    ctx.globalAlpha = qAlpha;
+                    ctx.translate(width / 2, height * 0.35);
+                    ctx.scale(qfx.scale, qfx.scale);
+                    ctx.fillStyle = qfx.color;
+                    ctx.font = 'bold 60px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+                    ctx.shadowBlur = 16;
+                    ctx.fillText(qfx.text, 0, 0);
+                    ctx.restore();
+                }
+
+                // FLIGHT->LANDING impact flash
+                if (this._transitionEffects.landingImpactFlash.active) {
+                    ctx.save();
+                    ctx.globalAlpha = this._transitionEffects.landingImpactFlash.alpha * 0.6;
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, width, height);
                     ctx.restore();
                 }
 
@@ -869,15 +993,52 @@ export default class SkihoppGame {
 
             case GameState.RESULTS: {
                 if (!this.scoreboard) break;
+
+                // SCORE -> RESULTS smooth crossfade (0.4s)
+                // During crossfade, render the score screen at fading-out opacity behind
+                const cfx = this._transitionEffects.scoreToResultsCrossfade;
+                if (cfx.active && this._scoreResult && this.judgeDisplay) {
+                    const fadeOutAlpha = 1.0 - cfx.alpha;
+                    ctx.save();
+                    ctx.globalAlpha = fadeOutAlpha;
+                    // Draw the frozen score scene behind
+                    if (this.skihoppRenderer) {
+                        this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                            speed: this._getWindSpeed(),
+                            direction: this._getWindDirection(),
+                        });
+                    }
+                    this.judgeDisplay.render(ctx, width, height, {
+                        judges: this._scoreResult.judges,
+                        distancePoints: this._scoreResult.distancePoints,
+                        stylePoints: this._scoreResult.stylePoints,
+                        windComp: this._scoreResult.windCompensation,
+                        totalPoints: this._scoreResult.totalPoints,
+                        distance: this._scoreResult.distance,
+                        kPoint: (this.hill && this.hill.kPoint) || 120,
+                        hillName: (this.hill && this.hill.name) || 'Storbakke',
+                        rating: this._scoreResult.rating,
+                        ratingTier: this._scoreResult.ratingTier,
+                        bestDistance: this._bestDistance,
+                        animationProgress: 1,
+                    });
+                    ctx.restore();
+                }
+
+                // Draw the results scoreboard (fades in during crossfade)
+                const resultsAlpha = cfx.active ? cfx.alpha : 1.0;
+                ctx.save();
+                ctx.globalAlpha = resultsAlpha;
                 // Find the index of the latest jump (tagged with _latest)
                 const latestIdx = this._jumpResults.findIndex(j => j._latest);
                 this.scoreboard.render(ctx, width, height, {
                     jumps: this._jumpResults,
                     currentJumper: latestIdx >= 0 ? latestIdx : this._jumpResults.length - 1,
                 });
+                ctx.restore();
 
-                // SCORE -> RESULTS smooth fade-in overlay
-                if (this._scoreToResultsFade > 0) {
+                // Legacy SCORE -> RESULTS black fade overlay (kept for backward compat)
+                if (this._scoreToResultsFade > 0 && !cfx.active) {
                     ctx.save();
                     ctx.globalAlpha = this._scoreToResultsFade;
                     ctx.fillStyle = '#000000';
@@ -934,6 +1095,9 @@ export default class SkihoppGame {
             ctx.fillRect(0, 0, width, height);
             ctx.restore();
         }
+
+        // Transition effects overlay (drawn on top of everything)
+        this._renderTransitionEffects(ctx, width, height);
 
         // Achievement and record popups (drawn on top of everything)
         this._renderPopup(ctx, width, height);
@@ -1006,6 +1170,9 @@ export default class SkihoppGame {
                     // MENU -> READY: smooth camera pan from overview to inrun top
                     this._cameraPanActive = true;
                     this._cameraPanProgress = 0;
+                    // MENU -> READY: zoom-in animation (0.5s)
+                    this._transitionEffects.menuToReadyZoom.active = true;
+                    this._transitionEffects.menuToReadyZoom.timer = 0;
                 }
 
 
@@ -1043,11 +1210,17 @@ export default class SkihoppGame {
                 this._safeAudioCall('playSwoosh');
                 // --- PREMIUM: Screen shake on takeoff ---
                 this._addShake(3, 0.2);
+                // INRUN->TAKEOFF: brief white HUD flash (0.1s warning)
+                this._transitionEffects.takeoffFlash.active = true;
+                this._transitionEffects.takeoffFlash.timer = 0;
+                this._transitionEffects.takeoffFlash.alpha = 1.0;
                 break;
 
-            case GameState.FLIGHT:
-                // Perfect takeoff flash (quality > 0.9)
-                if (jumperState.takeoffQuality > 0.9) {
+            case GameState.FLIGHT: {
+                // Takeoff quality text with tiered feedback
+                const toq = jumperState.takeoffQuality || 0;
+                if (toq > 0.9) {
+                    // Perfect takeoff flash (quality > 0.9)
                     this._perfectFlashAlpha = 1.0;
                     this._perfectFlashTime = 0;
                     this._perfectFlashTimer = 0;
@@ -1055,10 +1228,31 @@ export default class SkihoppGame {
                     this._safeAudioCall('playPerfectTakeoff');
                     // --- PREMIUM: Perfect timing shake ---
                     this._addShake(2, 0.15);
+                    // Quality text: "PERFEKT!" in gold
+                    this._transitionEffects.takeoffQualityText.active = true;
+                    this._transitionEffects.takeoffQualityText.timer = 0;
+                    this._transitionEffects.takeoffQualityText.scale = 0;
+                    this._transitionEffects.takeoffQualityText.text = 'PERFEKT!';
+                    this._transitionEffects.takeoffQualityText.color = '#FFD700';
+                } else if (toq > 0.6) {
+                    // Good takeoff: "BRA!" in green
+                    this._transitionEffects.takeoffQualityText.active = true;
+                    this._transitionEffects.takeoffQualityText.timer = 0;
+                    this._transitionEffects.takeoffQualityText.scale = 0;
+                    this._transitionEffects.takeoffQualityText.text = 'BRA!';
+                    this._transitionEffects.takeoffQualityText.color = '#44ff88';
+                } else {
+                    // Acceptable takeoff: "OK" in white
+                    this._transitionEffects.takeoffQualityText.active = true;
+                    this._transitionEffects.takeoffQualityText.timer = 0;
+                    this._transitionEffects.takeoffQualityText.scale = 0;
+                    this._transitionEffects.takeoffQualityText.text = 'OK';
+                    this._transitionEffects.takeoffQualityText.color = '#ffffff';
                 }
                 // --- PREMIUM: Record flight start time ---
                 this._trackFlightStartTime = performance.now();
                 break;
+            }
 
             case GameState.LANDING:
                 // Stop replay recording
@@ -1066,15 +1260,25 @@ export default class SkihoppGame {
                     this.replay.stopRecording();
                 }
 
+                // FLIGHT->LANDING: brief white screen flash on impact
+                this._transitionEffects.landingImpactFlash.active = true;
+                this._transitionEffects.landingImpactFlash.timer = 0;
+                this._transitionEffects.landingImpactFlash.alpha = 1.0;
+
                 // Finalise flight stability on jumper state
                 jumperState.flightStability = this._calculateFinalStability();
 
                 // --- PREMIUM: Record flight end time ---
                 this._trackFlightEndTime = performance.now();
 
-                // Track best distance
-                if (jumperState.landingDistance > this._bestDistance) {
-                    this._bestDistance = jumperState.landingDistance;
+                // Track best distance and mark new records
+                {
+                    const prevBestForRecord = this._bestDistance;
+                    if (jumperState.landingDistance > this._bestDistance) {
+                        this._bestDistance = jumperState.landingDistance;
+                    }
+                    // Flag for renderer particle celebration (first jump cannot be a "record")
+                    jumperState.isNewRecord = prevBestForRecord > 0 && jumperState.landingDistance > prevBestForRecord;
                 }
 
                 // --- PREMIUM: Screen shake on landing ---
@@ -1148,7 +1352,7 @@ export default class SkihoppGame {
                 }
 
                 // Progression tracking
-                if (this.progression) {
+                if (this.progression && this._scoreResult) {
                     this.progression.addJump(
                         this._currentHillKey,
                         jumperState.landingDistance,
@@ -1215,7 +1419,7 @@ export default class SkihoppGame {
                 // Audio effects for score reveal
                 this._safeAudioCall('playJudgeReveal');
                 this._safeAudioCall('playCrowdCheer',
-                    this._scoreResult.totalPoints > 120 ? 1.0 : 0.5
+                    (this._scoreResult && this._scoreResult.totalPoints > 120) ? 1.0 : 0.5
                 );
                 // Smooth fade transition from SCORE -> RESULTS
                 this._scoreToResultsFade = 1.0;
@@ -1225,6 +1429,11 @@ export default class SkihoppGame {
             case GameState.RESULTS:
                 // Button click feedback when advancing to results
                 this._safeAudioCall('playButtonClick');
+
+                // SCORE->RESULTS: smooth crossfade (0.4s)
+                this._transitionEffects.scoreToResultsCrossfade.active = true;
+                this._transitionEffects.scoreToResultsCrossfade.timer = 0;
+                this._transitionEffects.scoreToResultsCrossfade.alpha = 0;
 
                 // Stop wind sound on results screen
                 this._safeAudioCall('stopWind');
@@ -1309,6 +1518,23 @@ export default class SkihoppGame {
         } else {
             this._currentPopup = popup;
         }
+    }
+
+    /**
+     * Render all active transition effects on top of the scene.
+     * Called at the end of render() so effects overlay everything.
+     */
+    _renderTransitionEffects(ctx, width, height) {
+        const fx = this._transitionEffects;
+
+        // The individual effects (takeoffFlash, qualityText, landingImpactFlash)
+        // are rendered inline within their respective state blocks for proper
+        // layering with the HUD. This method handles any global overlay effects
+        // that should appear on top of absolutely everything.
+
+        // No additional global overlays needed currently — each effect is
+        // rendered in context. This method serves as an extension point for
+        // future global transition effects.
     }
 
     /**
@@ -1747,14 +1973,16 @@ export default class SkihoppGame {
 
         // Rebuild hill and dependent systems
         this.hill = new Hill(hillConfig);
-        this.physics = new SkihoppPhysics(this.game, this.hill, this.jumper.getState());
+        if (this.jumper) {
+            this.physics = new SkihoppPhysics(this.game, this.hill, this.jumper.getState());
+        }
         this.scoringSystem = new ScoringSystem(hillConfig);
         if (this.skihoppRenderer && typeof this.skihoppRenderer.setHill === 'function') {
             this.skihoppRenderer.setHill(this.hill);
         }
 
         // Reset jumper on new hill
-        this.jumper.reset(this.hill);
+        if (this.jumper) this.jumper.reset(this.hill);
         if (this.physics) this.physics.reset();
     }
 
@@ -1819,5 +2047,14 @@ export default class SkihoppGame {
         this._wooshActive = false;
         this._wooshProgress = 0;
         this._personalBests = { maxHeight: 0, topSpeed: 0, flightTime: 0 };
+
+        // Transition effects cleanup
+        this._transitionEffects = {
+            menuToReadyZoom: { active: false, timer: 0, duration: 0.5 },
+            takeoffFlash: { active: false, timer: 0, duration: 0.1, alpha: 0 },
+            takeoffQualityText: { active: false, timer: 0, duration: 0.8, text: '', color: '#ffffff', scale: 0 },
+            landingImpactFlash: { active: false, timer: 0, duration: 0.15, alpha: 0 },
+            scoreToResultsCrossfade: { active: false, timer: 0, duration: 0.4, alpha: 0 },
+        };
     }
 }

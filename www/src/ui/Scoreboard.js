@@ -78,7 +78,7 @@ export default class Scoreboard {
         }
 
         this._renderBackground(ctx, width, height);
-        this._renderHeader(ctx, width, height);
+        this._renderHeader(ctx, width, height, data);
         this._renderNewRecord(ctx, width, height, data);
         this._renderTable(ctx, width, height, data);
         this._renderPlayAgainButton(ctx, width, height);
@@ -114,7 +114,7 @@ export default class Scoreboard {
     // Header with decorative underline
     // -------------------------------------------------------------------
 
-    _renderHeader(ctx, width, height) {
+    _renderHeader(ctx, width, height, scoreData) {
         const padX = 14;
 
         // Dark header panel
@@ -144,11 +144,12 @@ export default class Scoreboard {
         ctx.letterSpacing = '3px';
         ctx.fillText('RESULTATER', width / 2, 34);
 
-        // Hill name subtitle
+        // Hill name subtitle - use scoreData.hillName if available
+        const hillName = (scoreData && scoreData.hillName) ? scoreData.hillName : 'Holmenkollbakken K120';
         ctx.fillStyle = 'rgba(255,255,255,0.55)';
         ctx.font = `${Math.max(Math.min(width * 0.035, 14), 12)}px sans-serif`;
         ctx.letterSpacing = '1px';
-        ctx.fillText('Holmenkollbakken K120', width / 2, 62);
+        ctx.fillText(hillName.toUpperCase(), width / 2, 62);
 
         ctx.letterSpacing = '0px';
         ctx.restore();
@@ -161,37 +162,57 @@ export default class Scoreboard {
     _renderNewRecord(ctx, width, height, data) {
         if (!data.isNewRecord) return;
 
-        const bannerY = 70;
+        const bannerY = 96;
         const flashAlpha = 0.7 + Math.sin(this._time * 5) * 0.3;
+        const scaleOsc = 1 + Math.sin(this._time * 4) * 0.03;
 
         ctx.save();
 
-        // Glowing golden banner
-        ctx.shadowColor = `rgba(255,200,50,${0.6 * flashAlpha})`;
-        ctx.shadowBlur = 18;
-
-        const bannerH = 28;
-        const bannerW = Math.min(width * 0.55, 220);
+        const bannerH = 38;
+        const bannerW = Math.min(width * 0.75, 300);
         const bannerX = (width - bannerW) / 2;
 
-        const grad = ctx.createLinearGradient(bannerX, bannerY, bannerX + bannerW, bannerY);
-        grad.addColorStop(0, 'rgba(255,200,50,0)');
-        grad.addColorStop(0.15, `rgba(255,200,50,${0.15 * flashAlpha})`);
-        grad.addColorStop(0.5, `rgba(255,210,60,${0.25 * flashAlpha})`);
-        grad.addColorStop(0.85, `rgba(255,200,50,${0.15 * flashAlpha})`);
-        grad.addColorStop(1, 'rgba(255,200,50,0)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(bannerX, bannerY, bannerW, bannerH);
+        // Outer glow
+        ctx.shadowColor = `rgba(255,200,50,${0.8 * flashAlpha})`;
+        ctx.shadowBlur = 25;
 
-        // Text
-        ctx.globalAlpha = flashAlpha;
-        ctx.fillStyle = '#FFD700';
-        ctx.font = `900 ${Math.max(Math.min(width * 0.045, 18), 14)}px sans-serif`;
+        // Banner background with gold gradient
+        const bgGrad = ctx.createLinearGradient(bannerX, bannerY, bannerX + bannerW, bannerY);
+        bgGrad.addColorStop(0, `rgba(180,140,20,${0.6 * flashAlpha})`);
+        bgGrad.addColorStop(0.3, `rgba(255,210,60,${0.8 * flashAlpha})`);
+        bgGrad.addColorStop(0.5, `rgba(255,230,100,${0.9 * flashAlpha})`);
+        bgGrad.addColorStop(0.7, `rgba(255,210,60,${0.8 * flashAlpha})`);
+        bgGrad.addColorStop(1, `rgba(180,140,20,${0.6 * flashAlpha})`);
+        ctx.fillStyle = bgGrad;
+        this._roundRect(ctx, bannerX, bannerY, bannerW, bannerH, 6);
+        ctx.fill();
+
+        // Shimmering sweep effect
+        ctx.shadowBlur = 0;
+        const sweepX = bannerX + ((this._time * 80) % (bannerW + 60)) - 30;
+        const sweepGrad = ctx.createLinearGradient(sweepX - 30, 0, sweepX + 30, 0);
+        sweepGrad.addColorStop(0, 'rgba(255,255,255,0)');
+        sweepGrad.addColorStop(0.5, 'rgba(255,255,255,0.25)');
+        sweepGrad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = sweepGrad;
+        ctx.save();
+        this._roundRect(ctx, bannerX, bannerY, bannerW, bannerH, 6);
+        ctx.clip();
+        ctx.fillRect(sweepX - 30, bannerY, 60, bannerH);
+        ctx.restore();
+
+        // Text with scale animation
+        ctx.save();
+        ctx.translate(width / 2, bannerY + bannerH / 2);
+        ctx.scale(scaleOsc, scaleOsc);
+        ctx.fillStyle = '#3a2500';
+        ctx.font = `900 ${Math.max(Math.min(width * 0.055, 22), 16)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.letterSpacing = '2px';
-        ctx.fillText('\u2605 NY REKORD! \u2605', width / 2, bannerY + bannerH / 2);
+        ctx.letterSpacing = '3px';
+        ctx.fillText('\u2605 NY REKORD! \u2605', 0, 0);
         ctx.letterSpacing = '0px';
+        ctx.restore();
 
         ctx.restore();
     }
@@ -211,7 +232,8 @@ export default class Scoreboard {
             return;
         }
 
-        const tableTop = 100;
+        // Shift table down if new record banner is showing
+        const tableTop = data.isNewRecord ? 140 : 100;
         const rowHeight = 52;
         const headerHeight = 34;
         const padX = 10;
@@ -288,7 +310,7 @@ export default class Scoreboard {
             const isCurrent = this._isCurrentJumper(jump, data.currentJumper, i);
             const rank = jump.rank != null ? jump.rank : i + 1;
 
-            // Row background
+            // Row background - alternating with subtle color difference
             if (isCurrent) {
                 // Player row: blue glow highlight
                 ctx.save();
@@ -305,23 +327,17 @@ export default class Scoreboard {
                 ctx.lineWidth = 1.5;
                 this._roundRect(ctx, padX, rowY + 2, width - padX * 2, rowHeight - 4, 6);
                 ctx.stroke();
-            } else if (i % 2 === 0) {
-                ctx.fillStyle = 'rgba(255,255,255,0.04)';
-                ctx.fillRect(padX, rowY + 2, width - padX * 2, rowHeight - 4);
+            } else {
+                // Alternating row backgrounds
+                const rowAlpha = i % 2 === 0 ? 0.06 : 0.02;
+                ctx.fillStyle = `rgba(255,255,255,${rowAlpha})`;
+                this._roundRect(ctx, padX, rowY + 2, width - padX * 2, rowHeight - 4, 4);
+                ctx.fill();
             }
 
-            // -- Rank column --
+            // -- Rank column: medal circles for top 3 --
             if (rank <= 3) {
-                const medalColors = {
-                    1: '#FFD700',
-                    2: '#C0C0C0',
-                    3: '#CD7F32',
-                };
-                ctx.fillStyle = medalColors[rank];
-                ctx.font = `bold ${fontSize}px monospace`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(rank, cols.rank, centerY);
+                this._renderMedal(ctx, cols.rank, centerY, rank);
             } else {
                 ctx.fillStyle = 'rgba(255,255,255,0.5)';
                 ctx.font = `${fontSize}px monospace`;
@@ -350,12 +366,12 @@ export default class Scoreboard {
             ctx.textBaseline = 'middle';
             ctx.fillText(countryCode, cols.country, centerY + 5);
 
-            // -- Distance column (monospace) --
+            // -- Distance column (monospace for alignment) --
             ctx.fillStyle = isCurrent ? '#ffffff' : 'rgba(255,255,255,0.85)';
             ctx.font = `${fontSize}px monospace`;
             ctx.textAlign = 'right';
             ctx.textBaseline = 'middle';
-            const dist = typeof jump.distance === 'number' ? `${jump.distance.toFixed(1)} m` : '-';
+            const dist = typeof jump.distance === 'number' ? `${jump.distance.toFixed(1)} m` : '  -  ';
             ctx.fillText(dist, cols.distance + 18, centerY);
 
             // -- Points column (monospace, bold, accent) --
@@ -363,7 +379,7 @@ export default class Scoreboard {
             ctx.font = `bold ${fontSize}px monospace`;
             ctx.textAlign = 'right';
             ctx.textBaseline = 'middle';
-            const pts = typeof jump.totalPoints === 'number' ? jump.totalPoints.toFixed(1) : '-';
+            const pts = typeof jump.totalPoints === 'number' ? jump.totalPoints.toFixed(1) : '  -  ';
             ctx.fillText(pts, cols.points, centerY);
 
             // Separator line between rows
@@ -528,11 +544,38 @@ export default class Scoreboard {
     _renderPlayAgainButton(ctx, width, height) {
         const padX = 14;
 
-        // --- "Hopp igjen" button: full width, large, prominent ---
+        // --- "Meny" subtle link at the very bottom ---
+        const menuBtnH = 30;
+        const menuBtnY = height - menuBtnH - 8;
+        const menuBtnW = 120;
+        const menuBtnX = (width - menuBtnW) / 2;
+
+        this._menuButtonRect = { x: menuBtnX, y: menuBtnY, w: menuBtnW, h: menuBtnH };
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = `${Math.max(Math.min(width * 0.033, 13), 11)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // Subtle underline effect
+        const menuText = 'Meny';
+        const menuCX = menuBtnX + menuBtnW / 2;
+        const menuCY = menuBtnY + menuBtnH / 2;
+        ctx.fillText(menuText, menuCX, menuCY);
+        const menuTextW = ctx.measureText(menuText).width;
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(menuCX - menuTextW / 2, menuCY + 8);
+        ctx.lineTo(menuCX + menuTextW / 2, menuCY + 8);
+        ctx.stroke();
+        ctx.restore();
+
+        // --- "HOPP IGJEN" button: full width, 60px, green gradient, very prominent ---
         const btnW = width - padX * 2;
         const btnH = 60;
         const btnX = padX;
-        const btnY = height - btnH - 12;
+        const btnY = menuBtnY - btnH - 10;
 
         // Store for hit testing
         this._buttonRect = { x: btnX, y: btnY, w: btnW, h: btnH };
@@ -542,37 +585,58 @@ export default class Scoreboard {
         // Pulsing glow effect to draw attention
         const pulse = 0.7 + Math.sin(this._time * 3) * 0.3;
 
-        // Button shadow (strong glow)
-        ctx.shadowColor = `rgba(0,200,100,${0.5 * pulse})`;
-        ctx.shadowBlur = 20;
+        // Strong outer glow
+        ctx.shadowColor = `rgba(40,220,80,${0.6 * pulse})`;
+        ctx.shadowBlur = 28;
 
-        // Button gradient (green - action color)
+        // Button gradient (vibrant green)
         const grad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
-        grad.addColorStop(0, '#43A047');
-        grad.addColorStop(1, '#2E7D32');
+        grad.addColorStop(0, '#56d364');
+        grad.addColorStop(0.45, '#3fb950');
+        grad.addColorStop(1, '#238636');
         ctx.fillStyle = grad;
-        this._roundRect(ctx, btnX, btnY, btnW, btnH, 12);
+        this._roundRect(ctx, btnX, btnY, btnW, btnH, 14);
         ctx.fill();
 
-        // Top highlight
+        // Top highlight (gloss)
         ctx.shadowBlur = 0;
-        const highGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH * 0.45);
-        highGrad.addColorStop(0, 'rgba(255,255,255,0.25)');
+        const highGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH * 0.5);
+        highGrad.addColorStop(0, 'rgba(255,255,255,0.3)');
         highGrad.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = highGrad;
-        this._roundRect(ctx, btnX, btnY, btnW, btnH * 0.45, 12);
+        this._roundRect(ctx, btnX, btnY, btnW, btnH * 0.5, 14);
         ctx.fill();
 
-        // Button text - large and bold
-        ctx.fillStyle = '#ffffff';
-        const fontSize = Math.max(Math.min(width * 0.065, 26), 20);
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        // Bottom inner shadow
+        const bottomGrad = ctx.createLinearGradient(btnX, btnY + btnH * 0.7, btnX, btnY + btnH);
+        bottomGrad.addColorStop(0, 'rgba(0,0,0,0)');
+        bottomGrad.addColorStop(1, 'rgba(0,0,0,0.15)');
+        ctx.fillStyle = bottomGrad;
+        this._roundRect(ctx, btnX, btnY, btnW, btnH, 14);
+        ctx.fill();
 
+        // Subtle border
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        this._roundRect(ctx, btnX, btnY, btnW, btnH, 14);
+        ctx.stroke();
+
+        // Button text - large and bold with shadow
+        const fontSize = Math.max(Math.min(width * 0.065, 26), 20);
         const label = 'HOPP IGJEN';
         const centerX = btnX + btnW / 2;
         const centerY = btnY + btnH / 2;
+
+        // Text shadow
+        ctx.fillStyle = 'rgba(0,60,0,0.4)';
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = '2px';
+        ctx.fillText(label, centerX + 11, centerY + 2);
+
+        // Main text
+        ctx.fillStyle = '#ffffff';
         ctx.fillText(label, centerX + 10, centerY);
 
         // Ski jump arrow icon to the left of text
@@ -580,34 +644,16 @@ export default class Scoreboard {
         const iconX = centerX - textW / 2 - 8;
         const iconY = centerY;
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 3;
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.beginPath();
         ctx.moveTo(iconX - 8, iconY + 5);
         ctx.lineTo(iconX, iconY - 5);
         ctx.lineTo(iconX + 8, iconY - 3);
         ctx.stroke();
 
-        ctx.restore();
-
-        // --- "Tilbake til meny" small text link above main button ---
-        const menuBtnH = 32;
-        const menuBtnY = btnY - menuBtnH - 6;
-        const menuBtnW = width - padX * 2;
-        const menuBtnX = padX;
-
-        this._menuButtonRect = { x: menuBtnX, y: menuBtnY, w: menuBtnW, h: menuBtnH };
-
-        ctx.save();
-        ctx.fillStyle = 'rgba(255,255,255,0.12)';
-        this._roundRect(ctx, menuBtnX, menuBtnY, menuBtnW, menuBtnH, 8);
-        ctx.fill();
-
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.font = `${Math.max(Math.min(width * 0.035, 14), 12)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('Tilbake til meny', menuBtnX + menuBtnW / 2, menuBtnY + menuBtnH / 2);
+        ctx.letterSpacing = '0px';
         ctx.restore();
     }
 

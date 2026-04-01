@@ -884,57 +884,131 @@ export default class AudioManager {
       droneLfo.connect(droneLfoGain);
       droneLfoGain.connect(droneGain.gain);
 
-      this._chain(drone, droneGain, musicGain);
+      // Warm low-pass on the drone to soften harmonics
+      const droneLp = this.ctx.createBiquadFilter();
+      droneLp.type = 'lowpass';
+      droneLp.frequency.value = 150;
+      droneLp.Q.value = 0.7;
+
+      this._chain(drone, droneLp, droneGain, musicGain);
 
       drone.start(now);
       droneLfo.start(now);
       nodes.push(drone, droneLfo);
 
+      // --- Layer 1b: Sub-bass warmth (40Hz sine, very quiet) ---
+      const subDrone = this.ctx.createOscillator();
+      subDrone.type = 'sine';
+      subDrone.frequency.value = 40;
+
+      const subDroneGain = this.ctx.createGain();
+      subDroneGain.gain.value = 0.04;
+
+      this._chain(subDrone, subDroneGain, musicGain);
+      subDrone.start(now);
+      nodes.push(subDrone);
+
       // --- Layer 2: Mid pad (220Hz + 330Hz perfect fifth, triangle) ---
+      // Slightly detuned pairs for warm chorusing
       const pad1 = this.ctx.createOscillator();
       pad1.type = 'triangle';
       pad1.frequency.value = 220;
 
+      const pad1b = this.ctx.createOscillator();
+      pad1b.type = 'triangle';
+      pad1b.frequency.value = 221.5; // slight detune for chorus
+
       const pad1Gain = this.ctx.createGain();
       pad1Gain.gain.value = 0.025; // very quiet
 
+      // Slow LFO on pad volume for breathing feel
+      const padLfo = this.ctx.createOscillator();
+      padLfo.type = 'sine';
+      padLfo.frequency.value = 0.07; // very slow
+      const padLfoGain = this.ctx.createGain();
+      padLfoGain.gain.value = 0.012;
+      padLfo.connect(padLfoGain);
+      padLfoGain.connect(pad1Gain.gain);
+
       this._chain(pad1, pad1Gain, musicGain);
+      pad1b.connect(pad1Gain); // both pads through same gain
       pad1.start(now);
-      nodes.push(pad1);
+      pad1b.start(now);
+      padLfo.start(now);
+      nodes.push(pad1, pad1b, padLfo);
 
       const pad2 = this.ctx.createOscillator();
       pad2.type = 'triangle';
       pad2.frequency.value = 330;
 
+      const pad2b = this.ctx.createOscillator();
+      pad2b.type = 'triangle';
+      pad2b.frequency.value = 331.2; // slight detune
+
       const pad2Gain = this.ctx.createGain();
       pad2Gain.gain.value = 0.02; // even quieter
 
       this._chain(pad2, pad2Gain, musicGain);
+      pad2b.connect(pad2Gain);
       pad2.start(now);
-      nodes.push(pad2);
+      pad2b.start(now);
+      nodes.push(pad2, pad2b);
 
-      // --- Layer 3: High shimmer (880Hz sine with random twinkling) ---
+      // --- Layer 3: High shimmer (880Hz + 1320Hz sines with random twinkling) ---
       const shimmer = this.ctx.createOscillator();
       shimmer.type = 'sine';
       shimmer.frequency.value = 880;
 
+      const shimmer2 = this.ctx.createOscillator();
+      shimmer2.type = 'sine';
+      shimmer2.frequency.value = 1320; // fifth above for harmonic richness
+
       const shimmerGain = this.ctx.createGain();
       shimmerGain.gain.value = 0; // starts silent, will be gated randomly
 
-      this._chain(shimmer, shimmerGain, musicGain);
-      shimmer.start(now);
-      nodes.push(shimmer);
+      const shimmer2Gain = this.ctx.createGain();
+      shimmer2Gain.gain.value = 0;
 
-      // Random volume gates for twinkling effect
+      this._chain(shimmer, shimmerGain, musicGain);
+      this._chain(shimmer2, shimmer2Gain, musicGain);
+      shimmer.start(now);
+      shimmer2.start(now);
+      nodes.push(shimmer, shimmer2);
+
+      // --- Layer 4: Gentle filtered noise bed for icy atmosphere ---
+      const noiseBuf = this._createNoise(3);
+      const noiseSource = this.ctx.createBufferSource();
+      noiseSource.buffer = noiseBuf;
+      noiseSource.loop = true;
+
+      const noiseBp = this.ctx.createBiquadFilter();
+      noiseBp.type = 'bandpass';
+      noiseBp.frequency.value = 3000;
+      noiseBp.Q.value = 2.0;
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.value = 0.008; // barely audible texture
+
+      this._chain(noiseSource, noiseBp, noiseGain, musicGain);
+      noiseSource.start(now);
+      nodes.push(noiseSource);
+
+      // Random volume gates for twinkling effect (alternates between shimmer freqs)
       const shimmerInterval = setInterval(() => {
         try {
           if (!this.ctx || this.ctx.state !== 'running') return;
           const t = this.ctx.currentTime;
           if (Math.random() < 0.4) {
-            // Twinkle on
+            // Twinkle on primary shimmer
             const vol = 0.01 + Math.random() * 0.025;
             shimmerGain.gain.setValueAtTime(vol, t);
             shimmerGain.gain.exponentialRampToValueAtTime(0.001, t + 0.15 + Math.random() * 0.25);
+          }
+          if (Math.random() < 0.25) {
+            // Twinkle on secondary shimmer (less frequent, quieter)
+            const vol2 = 0.005 + Math.random() * 0.015;
+            shimmer2Gain.gain.setValueAtTime(vol2, t + 0.05);
+            shimmer2Gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2 + Math.random() * 0.3);
           }
         } catch (_) { /* context may be closed */ }
       }, 200);

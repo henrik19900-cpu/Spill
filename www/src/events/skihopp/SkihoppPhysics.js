@@ -205,7 +205,13 @@ export default class SkihoppPhysics {
         this._inrunTime += dt;
 
         const friction     = this.cfgInrun.friction   || 0.02;
-        const maxSpeed     = this.cfgInrun.maxSpeed    || 26;   // m/s (~93.6 km/h)
+        const baseMaxSpeed = this.cfgInrun.maxSpeed    || 27;   // m/s (~97 km/h)
+
+        // Scale max speed by hill size: K90 stays moderate, K185 gets faster
+        // K90 (kPoint 90) -> scale ~0.96, K120 -> 1.0, K185 -> 1.07
+        const kPoint = (this.hill && this.hill.kPoint) || 120;
+        const hillSpeedScale = 0.85 + 0.15 * Math.min(kPoint / 120, 1.5);
+        const maxSpeed = baseMaxSpeed * hillSpeedScale;
 
         // Slope angle at current position (use the already-synced x coordinate)
         const slopeAngle = degToRad(Math.abs(this.hill.getAngleAtDistance(j.x)));
@@ -217,11 +223,11 @@ export default class SkihoppPhysics {
         // Friction: linear (ski friction) + quadratic (air drag) for natural speed curve
         // Tuck position reduces air drag significantly.
         // Drag coefficients are tuned so that:
-        //   tucked terminal velocity  ≈ maxSpeed (26 m/s, ~94 km/h)
-        //   untucked terminal velocity ≈ 80% of maxSpeed (~21 m/s, ~75 km/h)
+        //   tucked terminal velocity  ≈ maxSpeed (~27 m/s, ~97 km/h)
+        //   untucked terminal velocity ≈ 80% of maxSpeed (~22 m/s, ~79 km/h)
         // Terminal speed = sqrt((g*sin(a) - friction*g*cos(a)) / dragCoeff)
         const isTucked = j.isTucked || false;
-        const airDragCoeff = isTucked ? 0.0085 : 0.0145;
+        const airDragCoeff = isTucked ? 0.0075 : 0.0135;
         const totalDrag = friction * GRAVITY * Math.cos(slopeAngle) + airDragCoeff * j.speed * j.speed;
 
         const a = gravityPull - totalDrag;
@@ -312,16 +318,19 @@ export default class SkihoppPhysics {
         if (progress >= 1.0) {
             // --- Compute launch parameters ---
 
-            // Speed modification: perfect timing preserves ~97% of speed; poor ~82%
-            const speedRetention = 0.82 + 0.15 * quality;
+            // Speed modification: perfect timing preserves ~98% of speed; poor ~83%
+            const speedRetention = 0.83 + 0.15 * quality;
             const launchSpeed = j.speed * speedRetention;
 
             // Launch angle: table angle minus an upward boost for good timing
             const launchAngle = tableAngleRad - degToRad(boostDeg);
 
-            // Upward velocity kick for a "powerful" feel at good timing
-            // This adds a small vertical impulse independent of the angle change
-            const upwardKick = quality * 1.8; // m/s upward at perfect timing
+            // Upward velocity kick for a "powerful" feel at good timing.
+            // Scales with hill size: bigger hills reward perfect timing more,
+            // producing the large distance spreads needed for K185 (180-210m).
+            const hillKPoint = (this.hill && this.hill.kPoint) || 120;
+            const hillKickScale = 0.8 + 0.4 * Math.min(hillKPoint / 120, 1.6);
+            const upwardKick = quality * 2.2 * hillKickScale; // m/s upward at perfect timing
 
             // Convert to velocity components
             j.vx = launchSpeed * Math.cos(launchAngle);
@@ -368,11 +377,11 @@ export default class SkihoppPhysics {
         const liftArea     = cfg.liftArea           || 1.2;   // m² (body + V-style skis, effective lift surface)
         const dragArea     = cfg.dragArea           || 0.55;  // m² (frontal cross-section for drag)
         const jumperMass   = cfg.jumperMass         || 75;    // kg (jumper + equipment)
-        const optimalAoA   = degToRad(cfg.optimalAngle || 34); // optimal angle of attack (33-35°)
+        const optimalAoA   = degToRad(cfg.optimalAngle || 33); // optimal angle of attack (33-35°)
         const turbStrength = cfg.turbulenceStrength || 0.3;
 
         // Aerodynamic coefficients at optimal angle of attack
-        const CL_max       = cfg.maxLiftCoeff       || 1.35;  // lift coefficient at optimal AoA
+        const CL_max       = cfg.maxLiftCoeff       || 1.40;  // lift coefficient at optimal AoA
         const CL_min       = cfg.minLiftCoeff       || 0.20;  // lift coefficient at worst AoA
         const CD_base      = cfg.baseDragCoeff      || 0.45;  // drag coefficient at optimal (clean position)
         const CD_stall     = cfg.stallDragCoeff     || 1.20;  // drag coefficient when stalled (>50° AoA)
@@ -415,7 +424,9 @@ export default class SkihoppPhysics {
         // Gaussian envelope. Stall occurs above stallAoA (~50°) where lift
         // drops sharply — the body acts like a wall instead of an airfoil.
         const aoaDiff = aoa - optimalAoA;
-        const sigma = degToRad(20); // width of the lift sweet spot (~20° half-width)
+        const sigma = degToRad(14); // width of the lift sweet spot (~14° half-width)
+        // Narrower than before (was 20°) so that 10° off optimal costs ~15m.
+        // At 10° off: efficiency = exp(-100/(2*196)) ≈ 0.77, costing ~15-20m.
         let liftEfficiency = Math.exp(-(aoaDiff * aoaDiff) / (2 * sigma * sigma));
 
         // Sharp stall: beyond stallAoA, lift collapses rapidly
