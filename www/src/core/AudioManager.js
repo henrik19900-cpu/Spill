@@ -940,19 +940,23 @@ export default class AudioManager {
 
       // If already playing, just update volume (clear correlation: louder = further jump)
       if (this._crowdSource) {
-        const t = this.ctx.currentTime + 0.15;
+        const now = this.ctx.currentTime;
+        const t = now + 0.15;
         // Low murmur layer grows with distance
+        this._crowdGain.gain.setValueAtTime(this._crowdGain.gain.value, now);
         this._crowdGain.gain.linearRampToValueAtTime(
           intensity * 0.3, t,
         );
         // High excitement layer kicks in at higher intensity
         if (this._crowdHighGain) {
+          this._crowdHighGain.gain.setValueAtTime(this._crowdHighGain.gain.value, now);
           this._crowdHighGain.gain.linearRampToValueAtTime(
             Math.max(0, (intensity - 0.3) * 0.35), t,
           );
         }
         // Filter opens up with excitement
         if (this._crowdFilter) {
+          this._crowdFilter.frequency.setValueAtTime(this._crowdFilter.frequency.value, now);
           this._crowdFilter.frequency.linearRampToValueAtTime(
             400 + intensity * 800, t,
           );

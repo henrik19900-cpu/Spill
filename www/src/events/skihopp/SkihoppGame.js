@@ -975,10 +975,14 @@ export default class SkihoppGame {
                 if (!jumperState) break;
                 // Frozen scene behind the score overlay
                 if (this.skihoppRenderer) {
-                    this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                        speed: this._getWindSpeed(),
-                        direction: this._getWindDirection(),
-                    });
+                    try {
+                        this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                            speed: this._getWindSpeed(),
+                            direction: this._getWindDirection(),
+                        });
+                    } catch (e) {
+                        console.error('[SkihoppGame] Renderer error (score):', e);
+                    }
                 }
 
                 // JudgeDisplay._renderBackground provides its own dim overlay,
@@ -986,21 +990,25 @@ export default class SkihoppGame {
 
                 // Judge display with animation
                 if (this._scoreResult && this.judgeDisplay) {
-                    const progress = Math.min(1, this._scoreAnimationTime / SCORE_ANIMATION_DURATION);
-                    this.judgeDisplay.render(ctx, width, height, {
-                        judges: this._scoreResult.judges,
-                        distancePoints: this._scoreResult.distancePoints,
-                        stylePoints: this._scoreResult.stylePoints,
-                        windComp: this._scoreResult.windCompensation,
-                        totalPoints: this._scoreResult.totalPoints,
-                        distance: this._scoreResult.distance,
-                        kPoint: (this.hill && this.hill.kPoint) || 120,
-                        hillName: (this.hill && this.hill.name) || 'Storbakke',
-                        rating: this._scoreResult.rating,
-                        ratingTier: this._scoreResult.ratingTier,
-                        bestDistance: this._bestDistance,
-                        animationProgress: progress,
-                    });
+                    try {
+                        const progress = Math.min(1, this._scoreAnimationTime / SCORE_ANIMATION_DURATION);
+                        this.judgeDisplay.render(ctx, width, height, {
+                            judges: this._scoreResult.judges,
+                            distancePoints: this._scoreResult.distancePoints,
+                            stylePoints: this._scoreResult.stylePoints,
+                            windComp: this._scoreResult.windCompensation,
+                            totalPoints: this._scoreResult.totalPoints,
+                            distance: this._scoreResult.distance,
+                            kPoint: (this.hill && this.hill.kPoint) || 120,
+                            hillName: (this.hill && this.hill.name) || 'Storbakke',
+                            rating: this._scoreResult.rating,
+                            ratingTier: this._scoreResult.ratingTier,
+                            bestDistance: this._bestDistance,
+                            animationProgress: progress,
+                        });
+                    } catch (e) {
+                        console.error('[SkihoppGame] JudgeDisplay render error:', e);
+                    }
                 }
                 break;
             }
@@ -1126,8 +1134,7 @@ export default class SkihoppGame {
      * @param {string} prevState - previous GameState value
      */
     onStateChange(newState, prevState) {
-        if (!this.jumper) return;
-        const jumperState = this.jumper.getState();
+        const jumperState = this.jumper ? this.jumper.getState() : null;
 
         switch (newState) {
             case GameState.READY: {
@@ -1141,7 +1148,7 @@ export default class SkihoppGame {
                 this._fadeAlpha = isRestart ? 0.4 : 1;
 
                 // Fast reset of all game systems
-                this.jumper.reset(this.hill);
+                if (this.jumper) this.jumper.reset(this.hill);
                 if (this.physics) this.physics.reset();
                 this._resetFlightTracking();
                 this._countdownTimer = 0;
