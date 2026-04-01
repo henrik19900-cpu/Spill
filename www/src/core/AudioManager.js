@@ -844,37 +844,67 @@ export default class AudioManager {
 
       intensity = Math.max(0, Math.min(1, intensity));
 
-      // If already playing, just update volume
+      // If already playing, just update volume (clear correlation: louder = further jump)
       if (this._crowdSource) {
+        const t = this.ctx.currentTime + 0.15;
+        // Low murmur layer grows with distance
         this._crowdGain.gain.linearRampToValueAtTime(
-          intensity * 0.25,
-          this.ctx.currentTime + 0.1,
+          intensity * 0.3, t,
         );
+        // High excitement layer kicks in at higher intensity
+        if (this._crowdHighGain) {
+          this._crowdHighGain.gain.linearRampToValueAtTime(
+            Math.max(0, (intensity - 0.3) * 0.35), t,
+          );
+        }
+        // Filter opens up with excitement
+        if (this._crowdFilter) {
+          this._crowdFilter.frequency.linearRampToValueAtTime(
+            400 + intensity * 800, t,
+          );
+        }
         return;
       }
 
-      // Create looped noise source
+      // --- Layer 1: Low crowd murmur (bandpass noise, always present) ---
       const noiseBuf = this._createNoise(2);
       const source = this.ctx.createBufferSource();
       source.buffer = noiseBuf;
       source.loop = true;
 
-      // Bandpass filter to shape crowd-like murmur
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'bandpass';
-      filter.frequency.value = 800;
-      filter.Q.value = 0.6;
+      filter.frequency.value = 400 + intensity * 800;
+      filter.Q.value = 0.5;
 
       const gain = this.ctx.createGain();
-      gain.gain.value = intensity * 0.25;
+      gain.gain.value = intensity * 0.3;
 
       this._chain(source, filter, gain, this._masterGain);
-
       source.start();
+
+      // --- Layer 2: Higher excitement roar (separate noise, higher band) ---
+      const highBuf = this._createNoise(2);
+      const highSource = this.ctx.createBufferSource();
+      highSource.buffer = highBuf;
+      highSource.loop = true;
+
+      const highBp = this.ctx.createBiquadFilter();
+      highBp.type = 'bandpass';
+      highBp.frequency.value = 2000;
+      highBp.Q.value = 0.7;
+
+      const highGain = this.ctx.createGain();
+      highGain.gain.value = Math.max(0, (intensity - 0.3) * 0.35);
+
+      this._chain(highSource, highBp, highGain, this._masterGain);
+      highSource.start();
 
       this._crowdSource = source;
       this._crowdGain = gain;
       this._crowdFilter = filter;
+      this._crowdHighSource = highSource;
+      this._crowdHighGain = highGain;
     } catch (e) {
       console.warn('AudioManager.playCrowdAmbience error:', e);
     }
