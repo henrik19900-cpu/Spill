@@ -2228,17 +2228,18 @@ export default class SkihoppRenderer {
             ctx.fillStyle = '#778899';
             ctx.fillRect(top.x - 5, top.y - 2, 10, 4);
 
-            // Light cone
+            // Light cone (enhanced with visible snow illumination)
             const coneTarget = r.worldToScreen(pole.x, surfaceY);
             ctx.save();
             ctx.globalCompositeOperation = 'screen';
             const coneH = Math.abs(coneTarget.y - top.y);
             const coneGrad = ctx.createRadialGradient(top.x, top.y, 2, top.x, top.y, coneH * 0.9);
-            coneGrad.addColorStop(0, 'rgba(255,255,240,0.35)');
-            coneGrad.addColorStop(0.3, 'rgba(255,255,230,0.12)');
-            coneGrad.addColorStop(0.7, 'rgba(255,255,220,0.04)');
+            coneGrad.addColorStop(0, 'rgba(255,255,240,0.40)');
+            coneGrad.addColorStop(0.2, 'rgba(255,255,230,0.18)');
+            coneGrad.addColorStop(0.5, 'rgba(255,255,220,0.08)');
+            coneGrad.addColorStop(0.8, 'rgba(255,255,220,0.03)');
             coneGrad.addColorStop(1, 'rgba(255,255,220,0)');
-            const coneSpread = coneH * 0.4;
+            const coneSpread = coneH * 0.45;
             ctx.beginPath();
             ctx.moveTo(top.x - 3, top.y);
             ctx.lineTo(top.x + 3, top.y);
@@ -2247,6 +2248,23 @@ export default class SkihoppRenderer {
             ctx.closePath();
             ctx.fillStyle = coneGrad;
             ctx.fill();
+
+            // Visible light pool on the snow surface below each floodlight
+            const poolWidth = coneSpread * 1.6;
+            const poolHeight = 8;
+            const poolGrad = ctx.createRadialGradient(
+                coneTarget.x, coneTarget.y, 0,
+                coneTarget.x, coneTarget.y, poolWidth
+            );
+            poolGrad.addColorStop(0, 'rgba(255,255,230,0.12)');
+            poolGrad.addColorStop(0.4, 'rgba(255,255,220,0.06)');
+            poolGrad.addColorStop(0.7, 'rgba(255,255,210,0.02)');
+            poolGrad.addColorStop(1, 'rgba(255,255,210,0)');
+            ctx.fillStyle = poolGrad;
+            ctx.beginPath();
+            ctx.ellipse(coneTarget.x, coneTarget.y, poolWidth, poolHeight, 0, 0, Math.PI * 2);
+            ctx.fill();
+
             ctx.restore();
 
             // Bright dot at fixture
@@ -2255,6 +2273,50 @@ export default class SkihoppRenderer {
             ctx.fillStyle = '#ffffee';
             ctx.fill();
         }
+
+        // Darker areas between floodlights for contrast
+        this._drawFloodlightShadows(ctx, w, h, polePositions);
+    }
+
+    /**
+     * Draw subtle darkness between floodlight pools to enhance the night lighting atmosphere.
+     */
+    _drawFloodlightShadows(ctx, w, h, polePositions) {
+        if (!this.hill) return;
+        const r = this.renderer;
+
+        // Sort pole positions by x for gap detection
+        const sortedPoles = polePositions
+            .map(p => ({
+                x: p.x,
+                screenX: r.worldToScreen(p.x, this.hill.getHeightAtDistance(p.x)).x,
+                surfaceScreenY: r.worldToScreen(p.x, this.hill.getHeightAtDistance(p.x)).y,
+            }))
+            .sort((a, b) => a.screenX - b.screenX);
+
+        ctx.save();
+        // Draw subtle dark patches between lights
+        for (let i = 0; i < sortedPoles.length - 1; i++) {
+            const left = sortedPoles[i];
+            const right = sortedPoles[i + 1];
+            const midX = (left.screenX + right.screenX) / 2;
+            const midY = (left.surfaceScreenY + right.surfaceScreenY) / 2;
+            const gapWidth = Math.abs(right.screenX - left.screenX);
+
+            if (gapWidth < 20) continue; // Skip if too close
+
+            // Subtle dark gradient in the gap between lights
+            const shadowGrad = ctx.createRadialGradient(
+                midX, midY - 10, 0,
+                midX, midY - 10, gapWidth * 0.4
+            );
+            shadowGrad.addColorStop(0, 'rgba(0,5,15,0.08)');
+            shadowGrad.addColorStop(0.6, 'rgba(0,5,15,0.04)');
+            shadowGrad.addColorStop(1, 'rgba(0,5,15,0)');
+            ctx.fillStyle = shadowGrad;
+            ctx.fillRect(midX - gapWidth * 0.4, midY - 30, gapWidth * 0.8, 40);
+        }
+        ctx.restore();
     }
 
     _drawDistanceMarkers(ctx) {

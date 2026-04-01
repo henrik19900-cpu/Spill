@@ -535,28 +535,48 @@ export default class AudioManager {
 
   /**
    * Short "ding" for each judge score reveal.
-   * Sine wave at ~800 Hz with a quick attack/decay envelope.
+   * Each judge gets a slightly higher pitch (ascending scale).
+   * Clean sine tones with a bell-like harmonic overtone.
+   * @param {number} [index=0] - judge index (0-4), each gets ascending pitch
    */
-  playJudgeReveal() {
+  playJudgeReveal(index = 0) {
     try {
       this._ensureContext();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
 
+      // Ascending pitches: C6, D6, E6, F#6, G6
+      const pitches = [1046.5, 1174.7, 1318.5, 1480.0, 1568.0];
+      const freq = pitches[Math.min(Math.max(0, Math.floor(index)), pitches.length - 1)] || pitches[0];
+
+      // Main clean sine tone
       const osc = this.ctx.createOscillator();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(800, now);
-      osc.frequency.setValueAtTime(820, now + 0.05); // tiny shimmer
+      osc.frequency.setValueAtTime(freq, now);
 
       const gain = this.ctx.createGain();
       gain.gain.setValueAtTime(0.001, now);
-      gain.gain.linearRampToValueAtTime(0.35, now + 0.01); // fast attack
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      gain.gain.linearRampToValueAtTime(0.3, now + 0.008); // crisp attack
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
 
       this._chain(osc, gain, this._masterGain);
 
+      // Bell-like harmonic overtone (2.5x fundamental, quieter)
+      const overtone = this.ctx.createOscillator();
+      overtone.type = 'sine';
+      overtone.frequency.setValueAtTime(freq * 2.5, now);
+
+      const overtoneGain = this.ctx.createGain();
+      overtoneGain.gain.setValueAtTime(0.001, now);
+      overtoneGain.gain.linearRampToValueAtTime(0.08, now + 0.008);
+      overtoneGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+      this._chain(overtone, overtoneGain, this._masterGain);
+
       osc.start(now);
-      osc.stop(now + 0.45);
+      osc.stop(now + 0.55);
+      overtone.start(now);
+      overtone.stop(now + 0.35);
     } catch (e) {
       console.warn('AudioManager.playJudgeReveal error:', e);
     }

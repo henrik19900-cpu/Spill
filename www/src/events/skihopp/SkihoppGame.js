@@ -1917,7 +1917,7 @@ export default class SkihoppGame {
                 const threshold = (i + 1) / (judgeCount + 1);
                 const prevProgress = Math.min(1, Math.max(0, this._scoreAnimationTime - (1 / 60)) / SCORE_ANIMATION_DURATION);
                 if (prevProgress < threshold && progress >= threshold) {
-                    this._safeAudioCall('playJudgeReveal');
+                    this._safeAudioCall('playJudgeReveal', i);
                 }
             }
         }
