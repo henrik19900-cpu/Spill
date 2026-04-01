@@ -532,7 +532,10 @@ export default class SkihoppPhysics {
     // Landing detection — smooth with interpolated contact and impact force
     // ------------------------------------------------------------------
 
-    _checkLanding() {
+    /**
+     * @param {number} dt - timestep used for this frame's integration
+     */
+    _checkLanding(dt) {
         const j = this.jumper;
 
         // Only check on the landing slope (positive x)
@@ -543,8 +546,8 @@ export default class SkihoppPhysics {
             // --- Interpolate the exact landing point ---
             // Step back to find where the jumper crossed the surface
             // Use previous position (before this frame's integration) for precision
-            const prevX = j.x - j.vx * (1 / 60); // approximate previous x
-            const prevY = j.y - j.vy * (1 / 60); // approximate previous y
+            const prevX = j.x - j.vx * dt; // previous x using actual timestep
+            const prevY = j.y - j.vy * dt; // previous y using actual timestep
             const prevHillY = this.hill.getHeightAtDistance(prevX);
 
             // Linear interpolation factor for when jumper crossed the surface

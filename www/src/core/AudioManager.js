@@ -79,11 +79,12 @@ export default class AudioManager {
     }
 
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => { /* Android may reject if not truly interactive yet */ });
     }
 
     // Remove listeners once running
     if (this.ctx && this.ctx.state === 'running') {
+      this._resumed = true;
       const events = ['touchstart', 'touchend', 'mousedown', 'keydown', 'click'];
       events.forEach(e => document.removeEventListener(e, this._resumeHandler));
     }
@@ -95,7 +96,7 @@ export default class AudioManager {
       this._initContext();
     }
     if (!this._resumed && this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => { /* may reject on Android before user gesture */ });
     }
     if (this.ctx && this.ctx.state === 'running') {
       this._resumed = true;

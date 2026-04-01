@@ -508,7 +508,7 @@ export default class SkihoppRenderer {
      * @param {object} wind        - { speed, direction }
      */
     render(ctx, width, height, jumperState, gameState, wind) {
-        if (!this._initialized || !this.renderer) return;
+        if (!this._initialized || !this.renderer || !jumperState) return;
 
         this._wind = wind || { speed: 0, direction: 0 };
         this._time += 1 / 60;
@@ -519,7 +519,8 @@ export default class SkihoppRenderer {
         // Camera shake from vibration/landing + cinematic rotation
         const vib = jumperState.vibration || 0;
         const hasRotation = Math.abs(this._cameraRotation || 0) > 0.0001;
-        if (vib > 0.01 || hasRotation) {
+        const _shakeActive = vib > 0.01 || hasRotation;
+        if (_shakeActive) {
             const shakeX = vib > 0.01 ? (Math.random() - 0.5) * vib * 4 : 0;
             const shakeY = vib > 0.01 ? (Math.random() - 0.5) * vib * 4 : 0;
             ctx.save();
@@ -660,8 +661,8 @@ export default class SkihoppRenderer {
         // Premium: lens flare from floodlights
         try { this._drawLensFlare(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawLensFlare error:', e); }
 
-        // Restore camera shake/rotation transform
-        if ((jumperState.vibration || 0) > 0.01 || Math.abs(this._cameraRotation || 0) > 0.0001) {
+        // Restore camera shake/rotation transform (must match the save above)
+        if (_shakeActive) {
             ctx.restore();
         }
 
