@@ -374,6 +374,5 @@ console.log('\n' + '='.repeat(50));
 console.log(`  Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 console.log('='.repeat(50));
 
-if (failed > 0) {
-    process.exit(1);
-}
+// Force-exit to stop the Game singleton's background render loop
+process.exit(failed > 0 ? 1 : 0);
