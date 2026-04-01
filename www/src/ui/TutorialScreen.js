@@ -725,41 +725,57 @@ export default class TutorialScreen {
     }
 
     // --- PAGE 4: LANDING ---
-    // Jumper approaching ground, hand taps, TELEMARK flash
+    // Jumper descends toward slope, "GET READY" indicator, hand taps, TELEMARK flash
     _drawLanding(ctx, s, color, t) {
-        // Slope (landing area)
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = 2;
+        // Slope (landing area) - thicker and clearer
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.moveTo(-s * 2, -s * 0.6);
-        ctx.lineTo(s * 2, s * 0.35);
+        ctx.moveTo(-s * 2, -s * 0.5);
+        ctx.lineTo(s * 2, s * 0.4);
         ctx.stroke();
         // Snow surface texture
-        for (let i = 0; i < 6; i++) {
-            const sx = -s * 1.5 + i * s * 0.6;
-            const sy = -s * 0.6 + (sx + s * 2) * (0.95 / (s * 4)) * s;
+        for (let i = 0; i < 7; i++) {
+            const sx = -s * 1.6 + i * s * 0.55;
+            const sy = -s * 0.5 + (sx + s * 2) * (0.9 / (s * 4)) * s;
             ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(sx, sy);
-            ctx.lineTo(sx + s * 0.3, sy + 2);
+            ctx.lineTo(sx + s * 0.25, sy + 2);
             ctx.stroke();
         }
 
+        // Landing marker on slope (where to land)
+        const markerX = s * 0.3;
+        const markerY = -s * 0.05;
+        ctx.strokeStyle = 'rgba(68,255,136,0.3)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(markerX - s * 0.15, markerY - s * 0.2);
+        ctx.lineTo(markerX - s * 0.15, markerY + s * 0.1);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
         // Animated jumper descending toward ground
-        const landCycle = 3.0;
+        const landCycle = 3.5;
         const phase = (t % landCycle) / landCycle;
+        // Phases: 0-0.55 = approaching, 0.55-0.6 = about to land, 0.6-0.85 = telemark, 0.85-1 = fade/reset
+        const approaching = phase <= 0.55;
+        const aboutToLand = phase > 0.55 && phase <= 0.6;
         const justLanded = phase > 0.6 && phase < 0.85;
-        const preApproach = phase <= 0.6;
+        const fadeOut = phase >= 0.85;
 
         // Jumper position (descends along arc)
         let jx, jy;
-        if (preApproach) {
-            const p = phase / 0.6;
+        if (approaching || aboutToLand) {
+            const p = Math.min(phase / 0.6, 1);
             jx = -s * 1.0 + p * s * 1.3;
-            jy = -s * 0.9 + p * p * s * 0.8;
+            jy = -s * 0.9 + p * p * s * 0.85;
         } else {
             jx = s * 0.3;
-            jy = -s * 0.1;
+            jy = -s * 0.05;
         }
 
         ctx.strokeStyle = color;
@@ -767,12 +783,10 @@ export default class TutorialScreen {
         ctx.lineCap = 'round';
 
         if (justLanded) {
-            // Telemark pose
-            // Head
+            // Telemark pose (legs split, arms wide)
             ctx.beginPath();
             ctx.arc(jx, jy - s * 0.5, s * 0.14, 0, Math.PI * 2);
             ctx.stroke();
-            // Body upright
             ctx.beginPath();
             ctx.moveTo(jx, jy - s * 0.36);
             ctx.lineTo(jx, jy);
@@ -780,9 +794,9 @@ export default class TutorialScreen {
             // Split legs (telemark)
             ctx.beginPath();
             ctx.moveTo(jx, jy);
-            ctx.lineTo(jx + s * 0.28, jy + s * 0.1);
+            ctx.lineTo(jx + s * 0.3, jy + s * 0.1);
             ctx.moveTo(jx, jy);
-            ctx.lineTo(jx - s * 0.22, jy + s * 0.12);
+            ctx.lineTo(jx - s * 0.25, jy + s * 0.12);
             ctx.stroke();
             // Arms spread wide
             ctx.beginPath();
@@ -791,37 +805,41 @@ export default class TutorialScreen {
             ctx.lineTo(jx + s * 0.4, jy - s * 0.35);
             ctx.stroke();
 
-            // "TELEMARK!" flash
+            // "TELEMARK!" flash with score bonus hint
             const flashPhase = ((phase - 0.6) / 0.25);
             const flashAlpha = Math.sin(flashPhase * Math.PI);
             const flashScale = 0.8 + flashPhase * 0.4;
             ctx.save();
-            ctx.globalAlpha = flashAlpha;
+            ctx.globalAlpha = Math.max(0, flashAlpha);
             ctx.fillStyle = color;
             ctx.font = `bold ${Math.round(22 * flashScale)}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('TELEMARK!', jx, jy - s * 0.85);
             // Glow behind text
-            ctx.fillStyle = `rgba(68,255,136,${(flashAlpha * 0.15).toFixed(2)})`;
+            ctx.fillStyle = `rgba(68,255,136,${(Math.max(0, flashAlpha) * 0.15).toFixed(2)})`;
             ctx.beginPath();
             ctx.arc(jx, jy - s * 0.85, s * 0.6, 0, Math.PI * 2);
             ctx.fill();
+            // Score bonus indicator
+            ctx.fillStyle = `rgba(255,255,255,${(Math.max(0, flashAlpha) * 0.7).toFixed(2)})`;
+            ctx.font = '12px sans-serif';
+            ctx.fillText('+STIL', jx, jy - s * 0.55);
             ctx.restore();
 
-            // Impact particles
-            for (let i = 0; i < 5; i++) {
-                const angle = -Math.PI / 2 + (i - 2) * 0.4;
-                const dist = s * 0.2 + flashPhase * s * 0.4;
+            // Impact particles (snow spray)
+            for (let i = 0; i < 6; i++) {
+                const angle = -Math.PI / 2 + (i - 2.5) * 0.35;
+                const dist = s * 0.15 + flashPhase * s * 0.45;
                 const px = jx + Math.cos(angle) * dist;
                 const py = jy + s * 0.12 + Math.sin(angle) * dist * 0.3;
-                const pAlpha = (1 - flashPhase) * 0.5;
+                const pAlpha = Math.max(0, (1 - flashPhase) * 0.5);
                 ctx.fillStyle = `rgba(255,255,255,${pAlpha.toFixed(2)})`;
                 ctx.beginPath();
-                ctx.arc(px, py, 2, 0, Math.PI * 2);
+                ctx.arc(px, py, 2.5, 0, Math.PI * 2);
                 ctx.fill();
             }
-        } else {
+        } else if (!fadeOut) {
             // Flying/approaching pose
             ctx.beginPath();
             ctx.arc(jx - s * 0.1, jy - s * 0.08, s * 0.12, 0, Math.PI * 2);
@@ -839,28 +857,63 @@ export default class TutorialScreen {
             ctx.moveTo(jx + s * 0.45, jy);
             ctx.lineTo(jx + s * 0.9, jy + s * 0.15);
             ctx.stroke();
+
+            // "GET READY" pulsing indicator when close to landing
+            if (aboutToLand) {
+                const readyPulse = 0.5 + 0.5 * Math.sin(t * 12);
+                ctx.fillStyle = `rgba(68,255,136,${(readyPulse * 0.25).toFixed(2)})`;
+                ctx.beginPath();
+                ctx.arc(jx, jy, s * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = `rgba(68,255,136,${(0.5 + readyPulse * 0.5).toFixed(2)})`;
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('NÅ!', jx, jy - s * 0.35);
+            }
         }
 
         // --- Hand tap icon ---
         const handX = s * 1.4;
-        const handY = -s * 0.6;
-        const tapPhase = justLanded;
-        const tapOffset = tapPhase ? Math.abs(Math.sin(t * 14)) * s * 0.06 : 0;
-        ctx.fillStyle = tapPhase ? 'rgba(68,255,136,0.2)' : 'rgba(68,255,136,0.1)';
+        const handBaseY = -s * 0.5;
+        const shouldTap = aboutToLand || justLanded;
+        // Hand drops down (tapping) near landing
+        const tapDrop = shouldTap ? s * 0.08 * Math.abs(Math.sin(t * 14)) : 0;
+        const handY = handBaseY + tapDrop;
+
+        ctx.fillStyle = shouldTap ? 'rgba(68,255,136,0.25)' : 'rgba(68,255,136,0.08)';
         ctx.beginPath();
-        ctx.arc(handX, handY + tapOffset, s * 0.28, 0, Math.PI * 2);
+        ctx.arc(handX, handY, s * 0.28, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = tapPhase ? 'rgba(100,255,100,0.7)' : 'rgba(255,255,255,0.4)';
+        ctx.strokeStyle = shouldTap ? 'rgba(100,255,100,0.8)' : 'rgba(255,255,255,0.35)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(handX, handY + tapOffset, s * 0.28, 0, Math.PI * 2);
+        ctx.arc(handX, handY, s * 0.28, 0, Math.PI * 2);
         ctx.stroke();
-        this._drawFingerIcon(ctx, handX, handY + tapOffset, s * 0.16);
-        ctx.fillStyle = tapPhase ? '#88ff88' : '#ffffff';
-        ctx.font = 'bold 12px sans-serif';
+        this._drawFingerIcon(ctx, handX, handY, s * 0.16);
+
+        // Tap ripple when landing
+        if (shouldTap) {
+            const rippleP = ((t * 3.5) % 1);
+            ctx.strokeStyle = `rgba(100,255,100,${((1 - rippleP) * 0.4).toFixed(2)})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(handX, handY, s * 0.28 + rippleP * s * 0.25, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // Labels
+        ctx.fillStyle = shouldTap ? '#88ff88' : 'rgba(255,255,255,0.5)';
+        ctx.font = `bold ${shouldTap ? 14 : 12}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('TAP!', handX, handY + s * 0.48);
+        ctx.fillText('TAP!', handX, handBaseY + s * 0.5);
+        // "Vent..." label when approaching
+        if (approaching && !aboutToLand) {
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.font = '11px sans-serif';
+            ctx.fillText('Vent...', handX, handBaseY + s * 0.68);
+        }
     }
 
     // -----------------------------------------------------------------------
