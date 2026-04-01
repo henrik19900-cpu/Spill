@@ -197,83 +197,137 @@ export default class TutorialScreen {
         ctx.restore();
     }
 
-    // --- PAGE 1: TILLØP  ---
-    // Animated hand holding, speed gauge fills up
+    // --- PAGE 1: TILLOEP  ---
+    // Animated hand holding down, speed gauge steadily fills, then resets
     _drawTilloep(ctx, s, color, t) {
-        // Slope line
+        // Slope line (angled inrun)
         ctx.strokeStyle = 'rgba(255,255,255,0.15)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(-s * 2, -s * 0.2);
-        ctx.lineTo(s * 2, s * 0.6);
+        ctx.moveTo(-s * 2, -s * 0.4);
+        ctx.lineTo(s * 1.5, s * 0.5);
         ctx.stroke();
+        // Snow texture marks on slope
+        for (let i = 0; i < 5; i++) {
+            const mx = -s * 1.5 + i * s * 0.7;
+            const my = -s * 0.32 + (mx + s * 2) * 0.257;
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.beginPath();
+            ctx.moveTo(mx, my);
+            ctx.lineTo(mx + s * 0.25, my + 2);
+            ctx.stroke();
+        }
 
-        // Crouched stick figure
+        // Looping hold cycle: 3.5s hold (gauge fills) then 0.7s reset
+        const holdCycle = 4.2;
+        const holdDur = 3.5;
+        const phase = t % holdCycle;
+        const isHolding = phase < holdDur;
+        const fillPct = isHolding
+            ? Math.min(1, phase / holdDur)                              // ramp 0..1 during hold
+            : Math.max(0, 1 - (phase - holdDur) / (holdCycle - holdDur)); // drain back during reset
+
+        // Crouched stick figure (tuck position) - bounces slightly with speed
+        const tuckBob = isHolding ? Math.sin(t * 8) * s * 0.015 * fillPct : 0;
+        const figX = -s * 0.15;
+        const figY = tuckBob;
         ctx.strokeStyle = color;
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
         // Head
         ctx.beginPath();
-        ctx.arc(-s * 0.15, -s * 0.65, s * 0.18, 0, Math.PI * 2);
+        ctx.arc(figX, figY - s * 0.65, s * 0.18, 0, Math.PI * 2);
         ctx.stroke();
-        // Bent body
+        // Bent body (deep tuck)
         ctx.beginPath();
-        ctx.moveTo(-s * 0.15, -s * 0.47);
-        ctx.lineTo(s * 0.15, -s * 0.05);
-        ctx.lineTo(-s * 0.15, s * 0.15);
+        ctx.moveTo(figX, figY - s * 0.47);
+        ctx.lineTo(figX + s * 0.3, figY - s * 0.05);
+        ctx.lineTo(figX - s * 0.15, figY + s * 0.15);
         ctx.stroke();
         // Legs tucked
         ctx.beginPath();
-        ctx.moveTo(-s * 0.15, s * 0.15);
-        ctx.lineTo(s * 0.1, s * 0.25);
+        ctx.moveTo(figX - s * 0.15, figY + s * 0.15);
+        ctx.lineTo(figX + s * 0.1, figY + s * 0.25);
         ctx.stroke();
         // Skis
         ctx.strokeStyle = '#aaaaaa';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(-s * 0.5, s * 0.25);
-        ctx.lineTo(s * 0.7, s * 0.25);
+        ctx.moveTo(figX - s * 0.5, figY + s * 0.25);
+        ctx.lineTo(figX + s * 0.7, figY + s * 0.25);
         ctx.stroke();
 
-        // --- Animated hand HOLDING ---
+        // Speed lines that appear while holding (more lines = faster)
+        if (isHolding && fillPct > 0.15) {
+            const numLines = Math.floor(fillPct * 5);
+            for (let i = 0; i < numLines; i++) {
+                const lx = figX - s * 0.6 - i * s * 0.18;
+                const ly = figY - s * 0.3 + i * s * 0.18;
+                const lineAlpha = fillPct * 0.4 * (1 - i / 5);
+                ctx.strokeStyle = `rgba(255,255,255,${lineAlpha.toFixed(2)})`;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(lx, ly);
+                ctx.lineTo(lx - s * 0.35, ly);
+                ctx.stroke();
+            }
+        }
+
+        // --- Animated hand HOLDING (pressed down with pressure rings) ---
         const handX = s * 1.3;
         const handY = -s * 0.4;
-        // Pulsing press rings (ripple out from hand)
-        const holdPhase = (t * 0.8) % 1;
-        for (let i = 0; i < 3; i++) {
-            const ripple = (holdPhase + i * 0.33) % 1;
-            const rAlpha = 1 - ripple;
-            ctx.strokeStyle = `rgba(255,255,255,${(rAlpha * 0.3).toFixed(2)})`;
-            ctx.lineWidth = 2;
+        if (isHolding) {
+            // Continuous pressure ripples radiating outward
+            const holdPhase = (t * 0.7) % 1;
+            for (let i = 0; i < 3; i++) {
+                const ripple = (holdPhase + i * 0.33) % 1;
+                const rAlpha = (1 - ripple) * 0.3;
+                ctx.strokeStyle = `rgba(68,136,255,${rAlpha.toFixed(2)})`;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(handX, handY, s * 0.32 + ripple * s * 0.45, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            // Pressed-down hand (slightly squashed)
+            const pressScale = 0.92 + 0.03 * Math.sin(t * 5);
+            ctx.fillStyle = 'rgba(68,136,255,0.25)';
             ctx.beginPath();
-            ctx.arc(handX, handY, s * 0.3 + ripple * s * 0.5, 0, Math.PI * 2);
+            ctx.arc(handX, handY, s * 0.32 * pressScale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            ctx.arc(handX, handY, s * 0.32 * pressScale, 0, Math.PI * 2);
             ctx.stroke();
+            this._drawFingerIcon(ctx, handX, handY, s * 0.2);
+        } else {
+            // Finger lifted (faded, floating up)
+            const liftOffset = (phase - holdDur) / (holdCycle - holdDur) * s * 0.15;
+            ctx.globalAlpha *= 0.4;
+            ctx.fillStyle = 'rgba(68,136,255,0.1)';
+            ctx.beginPath();
+            ctx.arc(handX, handY - liftOffset, s * 0.32, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(handX, handY - liftOffset, s * 0.32, 0, Math.PI * 2);
+            ctx.stroke();
+            this._drawFingerIcon(ctx, handX, handY - liftOffset, s * 0.2);
+            ctx.globalAlpha /= 0.4;
         }
-        // Hand circle (pressed down)
-        const pressScale = 0.95 + 0.05 * Math.sin(t * 6);
-        ctx.fillStyle = 'rgba(68,136,255,0.2)';
-        ctx.beginPath();
-        ctx.arc(handX, handY, s * 0.32 * pressScale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(handX, handY, s * 0.32 * pressScale, 0, Math.PI * 2);
-        ctx.stroke();
-        // Finger icon
-        this._drawFingerIcon(ctx, handX, handY, s * 0.2);
         // HOLD label
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = isHolding ? '#ffffff' : 'rgba(255,255,255,0.4)';
         ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText('HOLD', handX, handY + s * 0.55);
 
-        // --- Speed gauge ---
+        // --- Speed gauge (fills steadily while holding) ---
         const gaugeX = -s * 1.4;
-        const gaugeY = -s * 0.6;
-        const gaugeW = s * 0.35;
-        const gaugeH = s * 1.6;
+        const gaugeY = -s * 0.7;
+        const gaugeW = s * 0.38;
+        const gaugeH = s * 1.7;
         // Gauge background
         ctx.fillStyle = 'rgba(255,255,255,0.08)';
         this._roundRect(ctx, gaugeX - gaugeW / 2, gaugeY, gaugeW, gaugeH, 6);
@@ -282,25 +336,43 @@ export default class TutorialScreen {
         ctx.lineWidth = 1;
         this._roundRect(ctx, gaugeX - gaugeW / 2, gaugeY, gaugeW, gaugeH, 6);
         ctx.stroke();
-        // Fill level animates up and down (simulating hold = speed building)
-        const fillPct = 0.3 + 0.6 * (0.5 + 0.5 * Math.sin(t * 1.2 - Math.PI / 2));
-        const fillH = gaugeH * fillPct;
+        // Tick marks on side
+        for (let i = 0; i <= 4; i++) {
+            const tickY = gaugeY + gaugeH - i * gaugeH / 4;
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(gaugeX - gaugeW / 2, tickY);
+            ctx.lineTo(gaugeX - gaugeW / 2 + 4, tickY);
+            ctx.stroke();
+        }
+        // Fill level follows holdPct
+        const barFill = 0.1 + fillPct * 0.85;
+        const fillH = gaugeH * barFill;
         const fillTop = gaugeY + gaugeH - fillH;
-        // Gradient fill
+        // Gradient fill (blue to bright cyan as it fills)
         const grd = ctx.createLinearGradient(0, fillTop + fillH, 0, fillTop);
-        grd.addColorStop(0, 'rgba(68,136,255,0.6)');
-        grd.addColorStop(1, 'rgba(68,200,255,0.9)');
+        grd.addColorStop(0, 'rgba(68,136,255,0.5)');
+        grd.addColorStop(0.6, `rgba(68,200,255,${(0.5 + fillPct * 0.4).toFixed(2)})`);
+        grd.addColorStop(1, `rgba(100,230,255,${(0.6 + fillPct * 0.35).toFixed(2)})`);
         ctx.fillStyle = grd;
-        this._roundRect(ctx, gaugeX - gaugeW / 2 + 2, fillTop, gaugeW - 4, fillH - 2, 4);
+        this._roundRect(ctx, gaugeX - gaugeW / 2 + 2, fillTop, gaugeW - 4, Math.max(0, fillH - 2), 4);
         ctx.fill();
+        // Shimmering top edge of fill when near full
+        if (fillPct > 0.7) {
+            const shimmer = 0.3 + 0.3 * Math.sin(t * 10);
+            ctx.fillStyle = `rgba(200,240,255,${shimmer.toFixed(2)})`;
+            ctx.fillRect(gaugeX - gaugeW / 2 + 3, fillTop, gaugeW - 6, 2);
+        }
         // Label
         ctx.fillStyle = 'rgba(255,255,255,0.6)';
         ctx.font = '10px sans-serif';
-        ctx.fillText('FART', gaugeX, gaugeY - 8);
+        ctx.textAlign = 'center';
+        ctx.fillText('FART', gaugeX, gaugeY - 10);
         // Speed value
-        const speedVal = Math.round(60 + fillPct * 35);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 11px sans-serif';
+        const speedVal = Math.round(60 + barFill * 35);
+        ctx.fillStyle = fillPct > 0.8 ? '#88ddff' : '#ffffff';
+        ctx.font = 'bold 12px sans-serif';
         ctx.fillText(`${speedVal}`, gaugeX, gaugeY + gaugeH + 14);
         ctx.font = '9px sans-serif';
         ctx.fillText('km/t', gaugeX, gaugeY + gaugeH + 26);

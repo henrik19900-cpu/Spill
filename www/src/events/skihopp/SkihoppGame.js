@@ -1166,10 +1166,12 @@ export default class SkihoppGame {
                     const newUnlocks = this.progression.checkUnlocks();
                     const newAchievements = this.progression.checkAchievements({
                         distance: jumperState.landingDistance,
-                        totalPoints: this._scoreResult.totalPoints,
+                        points: this._scoreResult.totalPoints,
                         hillKey: this._currentHillKey,
                         landingQuality: jumperState.landingQuality,
-                        flightStability: jumperState.flightStability,
+                        takeoffQuality: jumperState.takeoffQuality,
+                        styleScore: this._scoreResult.stylePoints,
+                        windSpeed: this._scoreResult.windSpeed,
                     });
                     this._newUnlocks = newUnlocks;
                     this._newAchievements = newAchievements;

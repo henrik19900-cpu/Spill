@@ -1530,28 +1530,34 @@ export default class SkihoppRenderer {
     _drawSnowGroundTrees(ctx, w, h) {
         if (!this.hill) return;
         const r = this.renderer;
-        const rng = seededRandom(8888);
-        const profile = this.hill.getProfile();
-        const xStart = profile[0].x;
-        const xRange = profile[profile.length - 1].x - xStart;
 
-        const sizes = ['small', 'medium', 'large'];
-        const trees = [];
-        const treeCount = 18;
-        for (let i = 0; i < treeCount; i++) {
-            const wx = xStart + rng() * xRange;
-            const wy = this.hill.getHeightAtDistance(wx);
-            const distance = rng(); // 0 = far, 1 = near
-            const offsetY = 6 + (1 - distance) * 20 + rng() * 5;
-            const sizeIdx = Math.floor(rng() * 3);
-            const sizeLabel = sizes[sizeIdx];
-            const baseH = sizeLabel === 'small' ? 1.8 : sizeLabel === 'medium' ? 3.5 : 5.5;
-            const treeH = baseH + distance * 2 + rng() * 1.5;
-            trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng(), size: sizeLabel });
+        // Cache tree data to avoid regenerating every frame
+        if (!this._snowGroundTreesData) {
+            const rng = seededRandom(8888);
+            const profile = this.hill.getProfile();
+            const xStart = profile[0].x;
+            const xRange = profile[profile.length - 1].x - xStart;
+
+            const sizes = ['small', 'medium', 'large'];
+            const trees = [];
+            const treeCount = 18;
+            for (let i = 0; i < treeCount; i++) {
+                const wx = xStart + rng() * xRange;
+                const wy = this.hill.getHeightAtDistance(wx);
+                const distance = rng(); // 0 = far, 1 = near
+                const offsetY = 6 + (1 - distance) * 20 + rng() * 5;
+                const sizeIdx = Math.floor(rng() * 3);
+                const sizeLabel = sizes[sizeIdx];
+                const baseH = sizeLabel === 'small' ? 1.8 : sizeLabel === 'medium' ? 3.5 : 5.5;
+                const treeH = baseH + distance * 2 + rng() * 1.5;
+                trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng(), size: sizeLabel });
+            }
+
+            // Sort: far trees first (drawn behind near trees)
+            trees.sort((a, b) => a.distance - b.distance);
+            this._snowGroundTreesData = trees;
         }
-
-        // Sort: far trees first (drawn behind near trees)
-        trees.sort((a, b) => a.distance - b.distance);
+        const trees = this._snowGroundTreesData;
 
         for (const tree of trees) {
             const base = r.worldToScreen(tree.wx, tree.wy);
