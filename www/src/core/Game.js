@@ -5,6 +5,49 @@
  */
 
 // ---------------------------------------------------------------------------
+// Polyfill: CanvasRenderingContext2D.roundRect
+// Older Android WebViews (pre-Chrome 99) lack this method. The UI components
+// use their own _roundRect helpers, but Game.js and SkihoppGame.js call the
+// native API directly. This polyfill ensures it exists everywhere.
+// ---------------------------------------------------------------------------
+if (typeof CanvasRenderingContext2D !== 'undefined' &&
+    !CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, radii) {
+    let r;
+    if (typeof radii === 'number') {
+      r = { tl: radii, tr: radii, br: radii, bl: radii };
+    } else if (Array.isArray(radii)) {
+      // roundRect spec accepts an array of 1-4 values
+      const len = radii.length;
+      if (len === 1) {
+        r = { tl: radii[0], tr: radii[0], br: radii[0], bl: radii[0] };
+      } else if (len === 2) {
+        r = { tl: radii[0], tr: radii[1], br: radii[0], bl: radii[1] };
+      } else if (len === 3) {
+        r = { tl: radii[0], tr: radii[1], br: radii[2], bl: radii[1] };
+      } else {
+        r = { tl: radii[0], tr: radii[1], br: radii[2], bl: radii[3] };
+      }
+    } else if (radii && typeof radii === 'object') {
+      r = { tl: radii.tl || 0, tr: radii.tr || 0, br: radii.br || 0, bl: radii.bl || 0 };
+    } else {
+      r = { tl: 0, tr: 0, br: 0, bl: 0 };
+    }
+    this.beginPath();
+    this.moveTo(x + r.tl, y);
+    this.lineTo(x + w - r.tr, y);
+    this.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+    this.lineTo(x + w, y + h - r.br);
+    this.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+    this.lineTo(x + r.bl, y + h);
+    this.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+    this.lineTo(x, y + r.tl);
+    this.quadraticCurveTo(x, y, x + r.tl, y);
+    this.closePath();
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Game states
 // ---------------------------------------------------------------------------
 export const GameState = Object.freeze({
