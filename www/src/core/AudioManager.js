@@ -166,22 +166,27 @@ export default class AudioManager {
           this.stopWind();
           return;
         }
-        const t = this.ctx.currentTime + 0.1;
+        const now = this.ctx.currentTime;
+        const t = now + 0.1;
         // Volume clearly scales with speed
+        this._windGain.gain.setValueAtTime(this._windGain.gain.value, now);
         this._windGain.gain.linearRampToValueAtTime(speed * 0.35, t);
         if (this._windFilter) {
           // Pitch/brightness rises with speed
+          this._windFilter.frequency.setValueAtTime(this._windFilter.frequency.value, now);
           this._windFilter.frequency.linearRampToValueAtTime(
             250 + speed * 900, t,
           );
         }
         // Update high whistle layer
         if (this._windHighGain) {
+          this._windHighGain.gain.setValueAtTime(this._windHighGain.gain.value, now);
           this._windHighGain.gain.linearRampToValueAtTime(
             speed * speed * 0.15, t,
           );
         }
         if (this._windHighFilter) {
+          this._windHighFilter.frequency.setValueAtTime(this._windHighFilter.frequency.value, now);
           this._windHighFilter.frequency.linearRampToValueAtTime(
             1500 + speed * 2500, t,
           );
@@ -243,9 +248,11 @@ export default class AudioManager {
     try {
       if (!this._windSource || !this.ctx) return;
       const now = this.ctx.currentTime;
+      this._windGain.gain.setValueAtTime(this._windGain.gain.value, now);
       this._windGain.gain.linearRampToValueAtTime(0, now + 0.2);
       this._windSource.stop(now + 0.25);
       if (this._windHighSource) {
+        this._windHighGain.gain.setValueAtTime(this._windHighGain.gain.value, now);
         this._windHighGain.gain.linearRampToValueAtTime(0, now + 0.2);
         this._windHighSource.stop(now + 0.25);
       }
@@ -665,25 +672,30 @@ export default class AudioManager {
           this.stopInrunSlide();
           return;
         }
-        const t = this.ctx.currentTime + 0.05;
+        const now = this.ctx.currentTime;
+        const t = now + 0.05;
         // Volume increases with speed (louder at high speed)
+        this._slideGain.gain.setValueAtTime(this._slideGain.gain.value, now);
         this._slideGain.gain.linearRampToValueAtTime(
           0.05 + speed * 0.2, t,
         );
         if (this._slideFilter) {
           // Higher speed = lower center freq (rushing, heavier) + brighter top
+          this._slideFilter.frequency.setValueAtTime(this._slideFilter.frequency.value, now);
           this._slideFilter.frequency.linearRampToValueAtTime(
             400 + speed * 1200, t,
           );
         }
         // Update rumble layer
         if (this._slideRumbleGain) {
+          this._slideRumbleGain.gain.setValueAtTime(this._slideRumbleGain.gain.value, now);
           this._slideRumbleGain.gain.linearRampToValueAtTime(
             speed * speed * 0.18, t,
           );
         }
         if (this._slideRumbleFilter) {
           // Rumble gets deeper at high speed
+          this._slideRumbleFilter.frequency.setValueAtTime(this._slideRumbleFilter.frequency.value, now);
           this._slideRumbleFilter.frequency.linearRampToValueAtTime(
             150 + (1 - speed) * 200, t,
           );
@@ -752,9 +764,11 @@ export default class AudioManager {
     try {
       if (!this._slideSource || !this.ctx) return;
       const now = this.ctx.currentTime;
+      this._slideGain.gain.setValueAtTime(this._slideGain.gain.value, now);
       this._slideGain.gain.linearRampToValueAtTime(0, now + 0.1);
       this._slideSource.stop(now + 0.15);
       if (this._slideRumbleSource) {
+        this._slideRumbleGain.gain.setValueAtTime(this._slideRumbleGain.gain.value, now);
         this._slideRumbleGain.gain.linearRampToValueAtTime(0, now + 0.1);
         this._slideRumbleSource.stop(now + 0.15);
       }
@@ -926,19 +940,23 @@ export default class AudioManager {
 
       // If already playing, just update volume (clear correlation: louder = further jump)
       if (this._crowdSource) {
-        const t = this.ctx.currentTime + 0.15;
+        const now = this.ctx.currentTime;
+        const t = now + 0.15;
         // Low murmur layer grows with distance
+        this._crowdGain.gain.setValueAtTime(this._crowdGain.gain.value, now);
         this._crowdGain.gain.linearRampToValueAtTime(
           intensity * 0.3, t,
         );
         // High excitement layer kicks in at higher intensity
         if (this._crowdHighGain) {
+          this._crowdHighGain.gain.setValueAtTime(this._crowdHighGain.gain.value, now);
           this._crowdHighGain.gain.linearRampToValueAtTime(
             Math.max(0, (intensity - 0.3) * 0.35), t,
           );
         }
         // Filter opens up with excitement
         if (this._crowdFilter) {
+          this._crowdFilter.frequency.setValueAtTime(this._crowdFilter.frequency.value, now);
           this._crowdFilter.frequency.linearRampToValueAtTime(
             400 + intensity * 800, t,
           );
@@ -997,9 +1015,11 @@ export default class AudioManager {
     try {
       if (!this._crowdSource || !this.ctx) return;
       const now = this.ctx.currentTime;
+      this._crowdGain.gain.setValueAtTime(this._crowdGain.gain.value, now);
       this._crowdGain.gain.linearRampToValueAtTime(0, now + 0.2);
       this._crowdSource.stop(now + 0.25);
       if (this._crowdHighSource) {
+        this._crowdHighGain.gain.setValueAtTime(this._crowdHighGain.gain.value, now);
         this._crowdHighGain.gain.linearRampToValueAtTime(0, now + 0.2);
         this._crowdHighSource.stop(now + 0.25);
       }
@@ -1244,6 +1264,7 @@ export default class AudioManager {
 
       // Fade out over 1 second
       if (this._menuMusicGain) {
+        this._menuMusicGain.gain.setValueAtTime(this._menuMusicGain.gain.value, now);
         this._menuMusicGain.gain.linearRampToValueAtTime(0, now + 1.0);
       }
 
