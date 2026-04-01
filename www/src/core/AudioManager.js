@@ -1157,6 +1157,80 @@ export default class AudioManager {
     }
   }
 
+  /**
+   * Rising tone warning as the jumper approaches the takeoff edge.
+   * A sine sweep from 400Hz to 900Hz over 0.4s for urgency.
+   */
+  playRisingTone() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(400, now);
+      osc.frequency.exponentialRampToValueAtTime(900, now + 0.4);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.25, now + 0.05);
+      gain.gain.setValueAtTime(0.25, now + 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+
+      this._chain(osc, gain, this._masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.5);
+    } catch (e) {
+      console.warn('AudioManager.playRisingTone error:', e);
+    }
+  }
+
+  /**
+   * Bright chime for perfect takeoff timing (quality > 0.9).
+   * High sine at 1200Hz with a quick shimmer harmonic.
+   */
+  playPerfectTakeoff() {
+    try {
+      this._ensureContext();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Main bright tone
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, now);
+      osc.frequency.setValueAtTime(1250, now + 0.05);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.35, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+      this._chain(osc, gain, this._masterGain);
+
+      // Shimmer harmonic (octave above)
+      const osc2 = this.ctx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.value = 2400;
+
+      const gain2 = this.ctx.createGain();
+      gain2.gain.setValueAtTime(0.001, now);
+      gain2.gain.linearRampToValueAtTime(0.12, now + 0.01);
+      gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+      this._chain(osc2, gain2, this._masterGain);
+
+      osc.start(now);
+      osc.stop(now + 0.35);
+      osc2.start(now);
+      osc2.stop(now + 0.25);
+    } catch (e) {
+      console.warn('AudioManager.playPerfectTakeoff error:', e);
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Volume controls
   // -----------------------------------------------------------------------

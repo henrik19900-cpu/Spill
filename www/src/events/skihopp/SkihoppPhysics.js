@@ -493,16 +493,11 @@ export default class SkihoppPhysics {
             ax -= velDir.x * windDragExtra;
             ay -= velDir.y * windDragExtra;
 
-            // Direct wind force: wind pushes horizontally against the jumper's
-            // exposed body area. Headwind decelerates (adds drag), tailwind
-            // accelerates. This is the dominant contributor to the ~5m/m/s effect.
-            const windDragDirect = 0.5 * rho * wind * Math.abs(wind) * 0.8 / jumperMass;
-            // Headwind (positive wind) opposes forward motion (negative ax)
-            // but for a ski jumper, headwind helps by increasing relative airspeed
-            // and extending flight — the net effect is beneficial for distance.
-            // The direct drag slows horizontal speed slightly, but the extra lift
-            // more than compensates. No additional direct force needed beyond
-            // the modified dynamic pressure above.
+            // Note: The modified dynamic pressure approach above captures the
+            // full wind effect. Headwind increases relative airspeed, boosting
+            // both lift and drag. The net effect is beneficial for distance
+            // because the extra lift (which extends flight time) outweighs
+            // the extra drag (which slows horizontal speed slightly).
         }
 
         // 5. Turbulence — small random perturbations
