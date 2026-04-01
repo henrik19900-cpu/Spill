@@ -838,10 +838,14 @@ export default class SkihoppGame {
                 if (!jumperState) break;
                 // Render the 3D scene
                 if (this.skihoppRenderer) {
-                    this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                        speed: this._getWindSpeed(),
-                        direction: this._getWindDirection(),
-                    });
+                    try {
+                        this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                            speed: this._getWindSpeed(),
+                            direction: this._getWindDirection(),
+                        });
+                    } catch (e) {
+                        console.error('[SkihoppGame] Renderer error (gameplay):', e);
+                    }
                 }
 
                 // Edge-approaching warning overlay (pulsing border glow)

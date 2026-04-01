@@ -166,22 +166,27 @@ export default class AudioManager {
           this.stopWind();
           return;
         }
-        const t = this.ctx.currentTime + 0.1;
+        const now = this.ctx.currentTime;
+        const t = now + 0.1;
         // Volume clearly scales with speed
+        this._windGain.gain.setValueAtTime(this._windGain.gain.value, now);
         this._windGain.gain.linearRampToValueAtTime(speed * 0.35, t);
         if (this._windFilter) {
           // Pitch/brightness rises with speed
+          this._windFilter.frequency.setValueAtTime(this._windFilter.frequency.value, now);
           this._windFilter.frequency.linearRampToValueAtTime(
             250 + speed * 900, t,
           );
         }
         // Update high whistle layer
         if (this._windHighGain) {
+          this._windHighGain.gain.setValueAtTime(this._windHighGain.gain.value, now);
           this._windHighGain.gain.linearRampToValueAtTime(
             speed * speed * 0.15, t,
           );
         }
         if (this._windHighFilter) {
+          this._windHighFilter.frequency.setValueAtTime(this._windHighFilter.frequency.value, now);
           this._windHighFilter.frequency.linearRampToValueAtTime(
             1500 + speed * 2500, t,
           );
@@ -667,25 +672,30 @@ export default class AudioManager {
           this.stopInrunSlide();
           return;
         }
-        const t = this.ctx.currentTime + 0.05;
+        const now = this.ctx.currentTime;
+        const t = now + 0.05;
         // Volume increases with speed (louder at high speed)
+        this._slideGain.gain.setValueAtTime(this._slideGain.gain.value, now);
         this._slideGain.gain.linearRampToValueAtTime(
           0.05 + speed * 0.2, t,
         );
         if (this._slideFilter) {
           // Higher speed = lower center freq (rushing, heavier) + brighter top
+          this._slideFilter.frequency.setValueAtTime(this._slideFilter.frequency.value, now);
           this._slideFilter.frequency.linearRampToValueAtTime(
             400 + speed * 1200, t,
           );
         }
         // Update rumble layer
         if (this._slideRumbleGain) {
+          this._slideRumbleGain.gain.setValueAtTime(this._slideRumbleGain.gain.value, now);
           this._slideRumbleGain.gain.linearRampToValueAtTime(
             speed * speed * 0.18, t,
           );
         }
         if (this._slideRumbleFilter) {
           // Rumble gets deeper at high speed
+          this._slideRumbleFilter.frequency.setValueAtTime(this._slideRumbleFilter.frequency.value, now);
           this._slideRumbleFilter.frequency.linearRampToValueAtTime(
             150 + (1 - speed) * 200, t,
           );
