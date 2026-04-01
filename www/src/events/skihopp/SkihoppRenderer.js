@@ -257,12 +257,19 @@ class ParticlePool {
         ctx.stroke();
     }
 
-    /** Fading trail dot (used for jumper flight trail) */
+    /** Fading trail dot (used for jumper flight path -- visible dotted line) */
     _renderTrail(ctx, sp, p, alpha) {
-        ctx.globalAlpha = alpha * 0.4;
-        ctx.fillStyle = p.color;
+        // Bright core
+        ctx.globalAlpha = alpha * 0.7;
+        ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        // Coloured halo
+        ctx.globalAlpha = alpha * 0.35;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, p.size * 1.6, 0, Math.PI * 2);
         ctx.fill();
     }
 
@@ -384,6 +391,7 @@ export default class SkihoppRenderer {
         // Reset particle effects from previous hill
         this._particles = new ParticlePool(800);
         this._trailFrameCounter = 0;
+        this._lastFrameTime = 0;
         this._windStreaks = [];
         this._impactRipples = [];
         this._milestoneFlashes = [];
@@ -2818,16 +2826,19 @@ export default class SkihoppRenderer {
     _drawJumperFlight(ctx, s, angle, isGhost) {
         ctx.rotate(angle);
 
+        // Suit flutter helper -- tiny random offset (amplitude 0.5px) for aerodynamic feel
+        const flutter = (isGhost) ? () => 0 : () => (Math.random() - 0.5) * 1.0;
+
         const hipX = 0;
         const hipY = 0;
 
         // Torso -- stretched forward with slight arch (quadratic curve)
-        const torsoLen = 0.58 * s;
+        const torsoLen = 0.62 * s;  // slightly longer for stretched look
         const shoulderX = hipX - torsoLen;
-        const shoulderY = hipY - 0.06 * s;
+        const shoulderY = hipY - 0.04 * s;
         const midTorsoX = hipX - torsoLen * 0.5;
-        const midTorsoY = hipY - 0.10 * s;
-        const torsoW = Math.max(3, 0.20 * s);
+        const midTorsoY = hipY - 0.09 * s;
+        const torsoW = Math.max(3, 0.18 * s);  // slightly slimmer for aerodynamic look
 
         // Main body suit with arch
         ctx.strokeStyle = '#1a40aa';
@@ -2859,38 +2870,48 @@ export default class SkihoppRenderer {
         ctx.quadraticCurveTo(midTorsoX, midTorsoY - 0.01 * s, shoulderX + 0.06 * s, shoulderY);
         ctx.stroke();
 
-        // Bib on chest
+        // Bib on chest (white rectangle with "1")
         const bibAngle = Math.atan2(shoulderY - hipY, shoulderX - hipX);
         ctx.save();
         ctx.translate(midTorsoX, midTorsoY);
         ctx.rotate(bibAngle);
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
         const bibW = 0.12 * s;
         const bibH = 0.08 * s;
         ctx.fillRect(-bibW / 2, -bibH / 2, bibW, bibH);
+        ctx.strokeStyle = '#999';
+        ctx.lineWidth = Math.max(0.5, 0.01 * s);
+        ctx.strokeRect(-bibW / 2, -bibH / 2, bibW, bibH);
         ctx.fillStyle = '#111';
         ctx.font = `bold ${Math.max(4, 0.06 * s)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('7', 0, 0);
+        ctx.fillText('1', 0, 0);
         ctx.restore();
 
-        // Legs (extending back from hip, nearly straight for flight)
-        const kneeX = hipX + 0.40 * s;
-        const kneeY = hipY + 0.04 * s;
-        const footX = kneeX + 0.40 * s;
-        const footY = kneeY + 0.02 * s;
+        // Legs -- fully extended back from hip, very straight for aerodynamic stretch
+        const kneeX = hipX + 0.42 * s;
+        const kneeY = hipY + 0.02 * s;
+        const footX = kneeX + 0.42 * s + flutter();
+        const footY = kneeY + 0.01 * s + flutter();
 
         this._drawLimb(ctx, hipX, hipY, kneeX, kneeY,
             Math.max(2.5, 0.13 * s), '#1a40aa');
         this._drawLimb(ctx, kneeX, kneeY, footX, footY,
             Math.max(2, 0.11 * s), '#1a40aa');
 
-        // Boots
+        // Boot detail (dark rectangles at feet)
         const legAngle = Math.atan2(footY - kneeY, footX - kneeX);
         this._drawBoot(ctx, s, footX, footY, legAngle);
+        // Extra boot detail -- small dark rectangle
+        ctx.fillStyle = '#111111';
+        ctx.save();
+        ctx.translate(footX, footY);
+        ctx.rotate(legAngle);
+        ctx.fillRect(-0.04 * s, -0.05 * s, 0.10 * s, 0.03 * s);
+        ctx.restore();
 
-        // V-style skis (25 deg spread each, tips slightly upward)
+        // V-style skis -- clearly at 25deg each side
         const vAngle = 25 * Math.PI / 180;
         ctx.save();
         ctx.translate(footX, footY);
@@ -2904,16 +2925,20 @@ export default class SkihoppRenderer {
         ctx.restore();
         ctx.restore();
 
-        // Arms pressed tight along the sides (two arms for depth)
+        // Arms pressed tight along the body with subtle flutter
         const armW = Math.max(1.5, 0.07 * s);
+        const arm1EndX = hipX - 0.10 * s + flutter();
+        const arm1EndY = hipY + 0.12 * s + flutter();
         this._drawLimb(ctx, shoulderX + 0.08 * s, shoulderY + 0.10 * s,
-            hipX - 0.10 * s, hipY + 0.12 * s, armW, '#1a40aa');
-        this._drawGlove(ctx, s, hipX - 0.10 * s, hipY + 0.12 * s);
+            arm1EndX, arm1EndY, armW, '#1a40aa');
+        this._drawGlove(ctx, s, arm1EndX, arm1EndY);
+        const arm2EndX = hipX - 0.06 * s + flutter();
+        const arm2EndY = hipY + 0.10 * s + flutter();
         this._drawLimb(ctx, shoulderX + 0.10 * s, shoulderY + 0.08 * s,
-            hipX - 0.06 * s, hipY + 0.10 * s, Math.max(1.5, 0.08 * s), '#152e80');
-        this._drawGlove(ctx, s, hipX - 0.06 * s, hipY + 0.10 * s);
+            arm2EndX, arm2EndY, Math.max(1.5, 0.08 * s), '#152e80');
+        this._drawGlove(ctx, s, arm2EndX, arm2EndY);
 
-        // Head -- stretched forward, nose-down
+        // Head -- stretched forward, nose-down, aerodynamic
         ctx.save();
         ctx.translate(shoulderX - 0.16 * s, shoulderY + 0.02 * s);
         ctx.rotate(0.15);
@@ -2921,18 +2946,18 @@ export default class SkihoppRenderer {
         ctx.restore();
     }
 
-    /** LANDING: telemark -- front foot forward, back foot behind, arms spread wide, body upright. */
+    /** LANDING: telemark -- front leg clearly forward, back leg clearly behind, arms wide at 45deg up, dynamic and balanced. */
     _drawJumperLanding(ctx, s, angle) {
         ctx.rotate(angle);
 
         const hipX = 0;
-        const hipY = -0.85 * s;
+        const hipY = -0.90 * s;
 
-        // --- Back leg (behind, deeper knee bend -- telemark) drawn first (behind) ---
-        const backFootX = -0.38 * s;
-        const backFootY = -0.12 * s;
-        const backKneeX = -0.12 * s;
-        const backKneeY = -0.52 * s;
+        // --- Back leg (clearly behind, deep telemark knee bend) drawn first (behind body) ---
+        const backFootX = -0.52 * s;   // further back for clear telemark
+        const backFootY = -0.05 * s;
+        const backKneeX = -0.22 * s;   // deeper bend
+        const backKneeY = -0.48 * s;
 
         // Back ski
         ctx.save();
@@ -2947,12 +2972,19 @@ export default class SkihoppRenderer {
             Math.max(2, 0.11 * s), '#152e80');
         const backLegAngle = Math.atan2(backFootY - backKneeY, backFootX - backKneeX);
         this._drawBoot(ctx, s, backFootX, backFootY, backLegAngle);
+        // Boot detail -- small dark rect
+        ctx.fillStyle = '#111111';
+        ctx.save();
+        ctx.translate(backFootX, backFootY);
+        ctx.rotate(backLegAngle);
+        ctx.fillRect(-0.04 * s, -0.05 * s, 0.10 * s, 0.03 * s);
+        ctx.restore();
 
-        // --- Front leg (forward, knee slightly bent) ---
-        const frontFootX = 0.45 * s;
+        // --- Front leg (clearly forward, knee gently bent for dynamic telemark) ---
+        const frontFootX = 0.55 * s;   // further forward for clear split
         const frontFootY = 0;
-        const frontKneeX = 0.25 * s;
-        const frontKneeY = -0.42 * s;
+        const frontKneeX = 0.30 * s;
+        const frontKneeY = -0.44 * s;
 
         // Front ski
         ctx.save();
@@ -2967,28 +2999,38 @@ export default class SkihoppRenderer {
             Math.max(2, 0.12 * s), '#1a40aa');
         const frontLegAngle = Math.atan2(frontFootY - frontKneeY, frontFootX - frontKneeX);
         this._drawBoot(ctx, s, frontFootX, frontFootY, frontLegAngle);
+        // Boot detail -- small dark rect
+        ctx.fillStyle = '#111111';
+        ctx.save();
+        ctx.translate(frontFootX, frontFootY);
+        ctx.rotate(frontLegAngle);
+        ctx.fillRect(-0.04 * s, -0.05 * s, 0.10 * s, 0.03 * s);
+        ctx.restore();
 
-        // Torso (mostly upright, slight forward lean)
-        const shoulderX = hipX + 0.08 * s;
-        const shoulderY = hipY - 0.52 * s;
+        // Torso (mostly upright, slight forward lean for dynamic balance)
+        const shoulderX = hipX + 0.06 * s;
+        const shoulderY = hipY - 0.54 * s;
         this._drawTorso(ctx, s, hipX, hipY, shoulderX, shoulderY);
 
-        // --- Arms spread wide and slightly up for balance ---
+        // --- Arms spread wide at 45deg up for balance ---
         const armW = Math.max(2, 0.09 * s);
-        // Forward-up arm (upper arm + forearm)
-        const fElbowX = shoulderX + 0.25 * s;
-        const fElbowY = shoulderY - 0.06 * s;
-        const fHandX = shoulderX + 0.52 * s;
-        const fHandY = shoulderY - 0.20 * s;
+        const armSpreadAngle = 45 * Math.PI / 180;  // 45 degrees up from horizontal
+
+        // Forward-up arm (upper arm + forearm) -- 45deg up and forward
+        const fArmLen = 0.30 * s;
+        const fElbowX = shoulderX + fArmLen * Math.cos(-armSpreadAngle);
+        const fElbowY = shoulderY + fArmLen * Math.sin(-armSpreadAngle);
+        const fHandX = fElbowX + fArmLen * Math.cos(-armSpreadAngle * 0.6);
+        const fHandY = fElbowY + fArmLen * Math.sin(-armSpreadAngle * 0.6);
         this._drawLimb(ctx, shoulderX, shoulderY, fElbowX, fElbowY, armW, '#1a40aa');
         this._drawLimb(ctx, fElbowX, fElbowY, fHandX, fHandY, armW, '#1a40aa');
         this._drawGlove(ctx, s, fHandX, fHandY);
 
-        // Backward-up arm (upper arm + forearm)
-        const bElbowX = shoulderX - 0.25 * s;
-        const bElbowY = shoulderY - 0.04 * s;
-        const bHandX = shoulderX - 0.52 * s;
-        const bHandY = shoulderY - 0.18 * s;
+        // Backward-up arm (upper arm + forearm) -- 45deg up and backward
+        const bElbowX = shoulderX - fArmLen * Math.cos(-armSpreadAngle);
+        const bElbowY = shoulderY + fArmLen * Math.sin(-armSpreadAngle);
+        const bHandX = bElbowX - fArmLen * Math.cos(-armSpreadAngle * 0.6);
+        const bHandY = bElbowY + fArmLen * Math.sin(-armSpreadAngle * 0.6);
         this._drawLimb(ctx, shoulderX, shoulderY, bElbowX, bElbowY, armW, '#1a40aa');
         this._drawLimb(ctx, bElbowX, bElbowY, bHandX, bHandY, armW, '#1a40aa');
         this._drawGlove(ctx, s, bHandX, bHandY);
@@ -3775,9 +3817,10 @@ export default class SkihoppRenderer {
             if (!p.isFlake) continue;
             const windFactor = 0.5 + p.depth * 0.5;
             const driftX = p.baseDriftX + windDriftX * windFactor;
+            const driftY = windDriftY * windFactor;
             const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
             const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
-            const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
+            const py = ((p.y + (p.speedY * verticalDamping + driftY) * t) % 1 + 1) % 1;
             const sx = (px * w) | 0;
             const sy = (py * h) | 0;
             const armLen = p.r * 1.2;
