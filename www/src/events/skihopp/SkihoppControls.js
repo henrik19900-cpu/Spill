@@ -374,7 +374,7 @@ export default class SkihoppControls {
     if (state === GameState.MENU) {
       const scene = this.game.currentScene;
       if (scene && scene._menuSubScreen === 'stats' && scene.statsScreen) {
-        scene.statsScreen.handleScroll(dy);
+        scene.statsScreen.handleScroll(-dy);
       }
       return;
     }

@@ -357,7 +357,14 @@ export default class SkihoppGame {
         // ----------------------------------------------------------
         this.hillSelectScreen = new HillSelectScreen(this.progression);
         this.statsScreen = new StatsScreen();
-        this.settingsScreen = new SettingsScreen();
+        this.settingsScreen = new SettingsScreen({
+            volume: (this._audio && typeof this._audio.getVolume === 'function')
+                ? Math.round(this._audio.getVolume() * 100)
+                : 70,
+            haptic: game.config && game.config.haptic != null ? game.config.haptic : true,
+            difficulty: (game.config && game.config.difficulty) || 'normal',
+            controlType: (game.config && game.config.controlType) || 'swipe',
+        });
 
         // ----------------------------------------------------------
         // 13. Initial state is set by Game._init() after scene loads
@@ -656,7 +663,7 @@ export default class SkihoppGame {
                 } else {
                     const menuData = {
                         bestDistance: this._bestDistance,
-                        record: this.progression ? this.progression.getRecord() : null,
+                        record: this.progression ? this.progression.getRecord(this._currentHillKey) : null,
                         level: this.progression ? this.progression.getLevel() : 1,
                         xp: this.progression ? this.progression.getXP() : 0,
                         xpForNextLevel: this.progression ? this.progression.getXPForNextLevel() : 100,

@@ -81,6 +81,10 @@ export default class ProgressionManager {
     }
   }
 
+  getRecords() {
+    return { ...this.records };
+  }
+
   getBestScore(hillKey) {
     return this.bestScores[hillKey] || 0;
   }
