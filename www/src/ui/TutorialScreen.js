@@ -514,7 +514,7 @@ export default class TutorialScreen {
     }
 
     // --- PAGE 3: SVEV ---
-    // Angle gauge with needle, hand swiping up/down, green zone at 35 deg
+    // Angle gauge with needle, green zone at 33-35 deg, hand swiping up/down
     _drawSvev(ctx, s, color, t) {
         // Trajectory arc background
         ctx.strokeStyle = 'rgba(255,255,255,0.1)';
@@ -524,60 +524,121 @@ export default class TutorialScreen {
         ctx.quadraticCurveTo(0, -s * 1, s * 1.8, s * 0.6);
         ctx.stroke();
 
-        // V-style jumper in flight
-        ctx.strokeStyle = color;
+        // V-style jumper in flight (body angle follows the needle)
+        const oscVal = 0.5 + 0.4 * Math.sin(t * 1.4); // 0.1..0.9
+        const bodyAngleDeg = 15 + oscVal * 40; // 15..55 degrees
+        const bodyAngleRad = bodyAngleDeg * Math.PI / 180;
+        const inOptimal = bodyAngleDeg >= 31 && bodyAngleDeg <= 37;
+        ctx.strokeStyle = inOptimal ? '#88ff88' : color;
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
         // Head
+        const headDist = s * 0.45;
+        const hx = -s * 0.1 - Math.cos(bodyAngleRad) * s * 0.1;
+        const hy = -s * 0.4 - Math.sin(bodyAngleRad) * s * 0.05;
         ctx.beginPath();
-        ctx.arc(-s * 0.2, -s * 0.45, s * 0.13, 0, Math.PI * 2);
+        ctx.arc(hx, hy, s * 0.13, 0, Math.PI * 2);
         ctx.stroke();
-        // Body (roughly horizontal)
+        // Body (tilted at current angle)
+        const bx = hx + Math.cos(bodyAngleRad) * s * 0.55;
+        const by = hy + Math.sin(bodyAngleRad) * s * 0.15;
         ctx.beginPath();
-        ctx.moveTo(-s * 0.07, -s * 0.45);
-        ctx.lineTo(s * 0.5, -s * 0.35);
+        ctx.moveTo(hx + s * 0.1, hy);
+        ctx.lineTo(bx, by);
         ctx.stroke();
         // V-style skis
-        ctx.strokeStyle = '#aaaaaa';
+        ctx.strokeStyle = inOptimal ? 'rgba(136,255,136,0.7)' : '#aaaaaa';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(s * 0.5, -s * 0.35);
-        ctx.lineTo(s * 1.0, -s * 0.58);
-        ctx.moveTo(s * 0.5, -s * 0.35);
-        ctx.lineTo(s * 1.0, -s * 0.12);
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx + s * 0.45, by - s * 0.22);
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx + s * 0.45, by + s * 0.22);
         ctx.stroke();
 
-        // --- Animated angle gauge (semicircle) ---
-        const gaugeX = -s * 1.1;
-        const gaugeY = s * 0.15;
-        const gaugeR = s * 0.7;
-        // Gauge background arc (0 to 60 degrees mapped)
-        const startAngle = -Math.PI / 2 - Math.PI / 6; // -60 deg from vertical
-        const endAngle = -Math.PI / 2 + Math.PI / 3;   // +60 deg
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        // --- Angle gauge (arc from 10 to 55 degrees) ---
+        const gaugeX = -s * 1.15;
+        const gaugeY = s * 0.2;
+        const gaugeR = s * 0.72;
+        // Map degrees: 10 deg at left, 55 deg at right
+        const minDeg = 10;
+        const maxDeg = 55;
+        const degToAngle = (deg) => -Math.PI / 2 + ((deg - minDeg) / (maxDeg - minDeg) - 0.5) * Math.PI * 0.6;
+        const startAngle = degToAngle(minDeg);
+        const endAngle = degToAngle(maxDeg);
+
+        // Gauge background arc
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
         ctx.lineWidth = 8;
         ctx.lineCap = 'butt';
         ctx.beginPath();
         ctx.arc(gaugeX, gaugeY, gaugeR, startAngle, endAngle);
         ctx.stroke();
 
-        // Green zone around 35 degrees
-        const deg35 = -Math.PI / 2 + (35 / 60) * (endAngle - startAngle + Math.PI / 6) - Math.PI / 6;
-        const zoneHalf = 0.12;
-        ctx.strokeStyle = 'rgba(100,255,100,0.35)';
+        // Red zone: too low (<25 deg) and too high (>42 deg)
+        ctx.strokeStyle = 'rgba(255,80,80,0.2)';
         ctx.lineWidth = 10;
         ctx.beginPath();
-        ctx.arc(gaugeX, gaugeY, gaugeR, deg35 - zoneHalf, deg35 + zoneHalf);
+        ctx.arc(gaugeX, gaugeY, gaugeR, degToAngle(10), degToAngle(25));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(gaugeX, gaugeY, gaugeR, degToAngle(42), degToAngle(55));
         ctx.stroke();
 
-        // Animated needle (oscillates, occasionally hitting 35 zone)
-        const needleAngle = startAngle + (endAngle - startAngle) * (0.5 + 0.35 * Math.sin(t * 1.5));
+        // Yellow zone: 25-33 and 35-42
+        ctx.strokeStyle = 'rgba(255,200,50,0.2)';
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.arc(gaugeX, gaugeY, gaugeR, degToAngle(25), degToAngle(33));
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(gaugeX, gaugeY, gaugeR, degToAngle(35), degToAngle(42));
+        ctx.stroke();
+
+        // Green zone: 33-35 degrees (the optimal zone)
+        ctx.strokeStyle = 'rgba(100,255,100,0.5)';
+        ctx.lineWidth = 12;
+        ctx.beginPath();
+        ctx.arc(gaugeX, gaugeY, gaugeR, degToAngle(33), degToAngle(35));
+        ctx.stroke();
+
+        // Degree tick marks and labels
+        const tickDegs = [10, 20, 30, 34, 40, 50];
+        for (const deg of tickDegs) {
+            if (deg > maxDeg) continue;
+            const a = degToAngle(deg);
+            const innerR = gaugeR - 14;
+            const outerR = gaugeR + 6;
+            ctx.strokeStyle = deg === 34 ? 'rgba(100,255,100,0.6)' : 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = deg === 34 ? 2 : 1;
+            ctx.beginPath();
+            ctx.moveTo(gaugeX + Math.cos(a) * innerR, gaugeY + Math.sin(a) * innerR);
+            ctx.lineTo(gaugeX + Math.cos(a) * outerR, gaugeY + Math.sin(a) * outerR);
+            ctx.stroke();
+            // Label
+            if (deg !== 34) {
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.font = '8px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`${deg}°`, gaugeX + Math.cos(a) * (outerR + 10), gaugeY + Math.sin(a) * (outerR + 10));
+            }
+        }
+
+        // "33-35°" label on green zone
+        const labelAngle = degToAngle(34);
+        ctx.fillStyle = 'rgba(100,255,100,0.8)';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('33-35°', gaugeX + Math.cos(labelAngle) * (gaugeR + 22), gaugeY + Math.sin(labelAngle) * (gaugeR + 22));
+
+        // Animated needle
+        const needleAngle = degToAngle(bodyAngleDeg);
         const needleLen = gaugeR * 0.85;
         const nx = gaugeX + Math.cos(needleAngle) * needleLen;
         const ny = gaugeY + Math.sin(needleAngle) * needleLen;
-        // Needle is in green zone?
-        const inGreen = Math.abs(needleAngle - deg35) < zoneHalf;
-        ctx.strokeStyle = inGreen ? '#88ff88' : color;
+        ctx.strokeStyle = inOptimal ? '#88ff88' : color;
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -590,55 +651,66 @@ export default class TutorialScreen {
         ctx.arc(gaugeX, gaugeY, 4, 0, Math.PI * 2);
         ctx.fill();
         // Degree readout
-        const currentDeg = Math.round(15 + (0.5 + 0.35 * Math.sin(t * 1.5)) * 45);
-        ctx.fillStyle = inGreen ? '#88ff88' : '#ffffff';
+        ctx.fillStyle = inOptimal ? '#88ff88' : '#ffffff';
         ctx.font = 'bold 14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`${currentDeg}°`, gaugeX, gaugeY + gaugeR + 18);
-        // "35°" label on green zone
-        ctx.fillStyle = 'rgba(100,255,100,0.7)';
-        ctx.font = '11px sans-serif';
-        const labelX = gaugeX + Math.cos(deg35) * (gaugeR + 16);
-        const labelY = gaugeY + Math.sin(deg35) * (gaugeR + 16);
-        ctx.fillText('35°', labelX, labelY);
+        ctx.fillText(`${Math.round(bodyAngleDeg)}°`, gaugeX, gaugeY + gaugeR + 20);
+
+        // Glow when in optimal zone
+        if (inOptimal) {
+            const glowAlpha = 0.08 + 0.06 * Math.sin(t * 6);
+            ctx.fillStyle = `rgba(100,255,100,${glowAlpha.toFixed(2)})`;
+            ctx.beginPath();
+            ctx.arc(gaugeX, gaugeY, gaugeR + 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
 
         // --- Animated swipe hand ---
         const handX = s * 1.3;
         const swipeRange = s * 0.6;
-        const swipeY = Math.sin(t * 2) * swipeRange;
-        // Trail
-        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([3, 5]);
+        const swipeY = Math.sin(t * 1.4) * swipeRange; // synced with needle
+        // Vertical track
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = s * 0.12;
+        ctx.lineCap = 'round';
         ctx.beginPath();
         ctx.moveTo(handX, -swipeRange);
         ctx.lineTo(handX, swipeRange);
         ctx.stroke();
-        ctx.setLineDash([]);
-        // Arrow indicators
-        const arrowAlpha = 0.3 + 0.2 * Math.sin(t * 4);
+        // Trail behind finger (recent path)
+        const trailLen = 5;
+        for (let i = 0; i < trailLen; i++) {
+            const tt = t - i * 0.06;
+            const ty = Math.sin(tt * 1.4) * swipeRange;
+            const ta = (1 - i / trailLen) * 0.15;
+            ctx.fillStyle = `rgba(68,221,255,${ta.toFixed(2)})`;
+            ctx.beginPath();
+            ctx.arc(handX, ty, s * 0.06, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        // Arrow indicators (up and down)
+        const arrowAlpha = 0.3 + 0.2 * Math.sin(t * 3);
         ctx.strokeStyle = `rgba(255,255,255,${arrowAlpha.toFixed(2)})`;
         ctx.lineWidth = 2;
         ctx.lineCap = 'round';
         // Up arrow
         ctx.beginPath();
-        ctx.moveTo(handX - 6, -swipeRange + 8);
+        ctx.moveTo(handX - 7, -swipeRange + 9);
         ctx.lineTo(handX, -swipeRange);
-        ctx.lineTo(handX + 6, -swipeRange + 8);
+        ctx.lineTo(handX + 7, -swipeRange + 9);
         ctx.stroke();
         // Down arrow
         ctx.beginPath();
-        ctx.moveTo(handX - 6, swipeRange - 8);
+        ctx.moveTo(handX - 7, swipeRange - 9);
         ctx.lineTo(handX, swipeRange);
-        ctx.lineTo(handX + 6, swipeRange - 8);
+        ctx.lineTo(handX + 7, swipeRange - 9);
         ctx.stroke();
         // Hand circle
-        ctx.fillStyle = 'rgba(68,221,255,0.15)';
+        const handInGreen = inOptimal;
+        ctx.fillStyle = handInGreen ? 'rgba(100,255,100,0.2)' : 'rgba(68,221,255,0.15)';
         ctx.beginPath();
         ctx.arc(handX, swipeY, s * 0.28, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.strokeStyle = handInGreen ? 'rgba(100,255,100,0.7)' : 'rgba(255,255,255,0.5)';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(handX, swipeY, s * 0.28, 0, Math.PI * 2);
@@ -648,7 +720,8 @@ export default class TutorialScreen {
         ctx.fillStyle = '#ffffff';
         ctx.font = 'bold 11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('SVEIP', handX, swipeRange + 20);
+        ctx.textBaseline = 'middle';
+        ctx.fillText('SVEIP', handX, swipeRange + 22);
     }
 
     // --- PAGE 4: LANDING ---

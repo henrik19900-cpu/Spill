@@ -1015,6 +1015,8 @@ export default class SkihoppGame {
 
                 // Stop wind sound from previous run
                 this._safeAudioCall('stopWind');
+                // Stop menu music when leaving menu
+                this._safeAudioCall('stopMenuMusic');
                 break;
             }
 
@@ -1278,6 +1280,9 @@ export default class SkihoppGame {
                 this._safeAudioCall('stopWind');
                 this._safeAudioCall('stopInrunSlide');
                 this._safeAudioCall('stopCrowdAmbience');
+
+                // Start menu music
+                this._safeAudioCall('playMenuMusic');
                 break;
 
             default:
