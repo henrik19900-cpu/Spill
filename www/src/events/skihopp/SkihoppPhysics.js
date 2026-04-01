@@ -350,11 +350,14 @@ export default class SkihoppPhysics {
     //   - Lift: L = 0.5 * rho * v² * CL * A  (perpendicular to airflow)
     //   - Drag: D = 0.5 * rho * v² * CD * A  (opposing airflow)
     //   - CL depends on angle of attack (body angle vs velocity direction)
-    //   - Optimal AoA ≈ 30-40° gives CL ≈ 1.0-1.2
-    //   - Poor AoA gives CL ≈ 0.3-0.5
-    //   - CD ranges 0.5-0.8 depending on body position
-    //   - Flight time ≈ 3-5 seconds, max height above hill ≈ 3-6m
-    //   - K120 good jump: 125-135m, great jump: 135-145m
+    //   - Optimal AoA ≈ 30-40° gives CL ≈ 1.0-1.4
+    //   - Poor AoA gives CL ≈ 0.2-0.4
+    //   - CD ranges 0.4-1.2 depending on body position
+    //   - Flight time ≈ 3-6 seconds, max height above hill ≈ 3-6m
+    //   - K120 perfect jump: 130-140m, poor jump: 90-110m
+    //
+    // The aerodynamic surface area includes both the body and skis
+    // in V-style position, totaling ~1.2 m² effective lifting area.
 
     _updateFlight(dt) {
         const j = this.jumper;
@@ -362,16 +365,20 @@ export default class SkihoppPhysics {
 
         // --- Physical constants ---
         const rho          = cfg.airDensity         || 1.1;   // kg/m³ (mountain altitude)
-        const frontalArea  = cfg.frontalArea        || 0.55;  // m² (body + skis in flight)
+        const liftArea     = cfg.liftArea           || 1.2;   // m² (body + V-style skis, effective lift surface)
+        const dragArea     = cfg.dragArea           || 0.55;  // m² (frontal cross-section for drag)
         const jumperMass   = cfg.jumperMass         || 75;    // kg (jumper + equipment)
-        const optimalAoA   = degToRad(cfg.optimalAngle || 35); // optimal angle of attack
+        const optimalAoA   = degToRad(cfg.optimalAngle || 34); // optimal angle of attack (33-35°)
         const turbStrength = cfg.turbulenceStrength || 0.3;
 
         // Aerodynamic coefficients at optimal angle of attack
-        const CL_max       = cfg.maxLiftCoeff       || 1.15;  // lift coefficient at optimal AoA
-        const CL_min       = cfg.minLiftCoeff       || 0.30;  // lift coefficient at worst AoA
-        const CD_base      = cfg.baseDragCoeff      || 0.55;  // drag coefficient at optimal
-        const CD_stall     = cfg.stallDragCoeff     || 0.90;  // drag coefficient at bad angles
+        const CL_max       = cfg.maxLiftCoeff       || 1.35;  // lift coefficient at optimal AoA
+        const CL_min       = cfg.minLiftCoeff       || 0.20;  // lift coefficient at worst AoA
+        const CD_base      = cfg.baseDragCoeff      || 0.45;  // drag coefficient at optimal (clean position)
+        const CD_stall     = cfg.stallDragCoeff     || 1.20;  // drag coefficient when stalled (>50° AoA)
+
+        // Stall threshold: beyond this AoA, lift drops sharply and drag spikes
+        const stallAoA     = degToRad(cfg.stallAngle || 50);  // degrees
 
         // Advance flight clock
         j.flightTime += dt;
@@ -382,20 +389,21 @@ export default class SkihoppPhysics {
         if (speed < 0.01) {
             j.vy += GRAVITY * dt;
             j.y += j.vy * dt;
-            this._checkLanding();
+            this._checkLanding(dt);
             return;
         }
 
         const velDir = vel.normalize();
 
         // Velocity direction angle (radians, measured from +x axis)
+        // In our coord system: positive y = downward, so positive velAngle = diving
         const velAngle = Math.atan2(j.vy, j.vx);
 
-        // Body angle in radians
+        // Body angle in radians (positive = nose pitched down from horizontal)
         const bodyRad = degToRad(j.bodyAngle);
 
         // Angle of attack: difference between body orientation and velocity direction
-        // Positive AoA = body pitched up relative to flight path (generating lift)
+        // Positive AoA = body angled more steeply than flight path = generating lift
         const aoa = bodyRad - velAngle;
 
         // Dynamic pressure: q = 0.5 * rho * v²
@@ -403,17 +411,36 @@ export default class SkihoppPhysics {
 
         // ---- Aerodynamic coefficients from angle of attack ----
 
-        // Lift coefficient: peaks near optimal AoA with a broad Gaussian envelope.
-        // At very low AoA (<5°), minimal lift. At very high AoA (>60°), stall.
+        // Lift coefficient: peaks near optimal AoA (~33-35°) with a broad
+        // Gaussian envelope. Stall occurs above stallAoA (~50°) where lift
+        // drops sharply — the body acts like a wall instead of an airfoil.
         const aoaDiff = aoa - optimalAoA;
-        const sigma = optimalAoA * 0.65; // width of the lift sweet spot (~22°)
-        const liftEfficiency = Math.exp(-(aoaDiff * aoaDiff) / (2 * sigma * sigma));
+        const sigma = degToRad(20); // width of the lift sweet spot (~20° half-width)
+        let liftEfficiency = Math.exp(-(aoaDiff * aoaDiff) / (2 * sigma * sigma));
+
+        // Sharp stall: beyond stallAoA, lift collapses rapidly
+        if (aoa > stallAoA) {
+            const stallExcess = aoa - stallAoA;
+            const stallDecay = Math.exp(-stallExcess * stallExcess / (2 * degToRad(8) * degToRad(8)));
+            liftEfficiency *= stallDecay;
+        }
+
+        // At very low AoA (<5°), minimal lift (body is too flat / diving)
+        if (aoa < degToRad(5)) {
+            const lowAoAFade = clamp(aoa / degToRad(5), 0, 1);
+            liftEfficiency *= lowAoAFade;
+        }
+
         const CL = CL_min + (CL_max - CL_min) * liftEfficiency;
 
-        // Drag coefficient: minimum at optimal angle, increases when off-angle
-        // Stalling (too high AoA) creates much more drag than being too flat
+        // Drag coefficient: minimum at optimal angle, increases when off-angle.
+        // Stalling (AoA > 50°) creates drastically more drag (body becomes a wall).
         const aoaAbs = Math.abs(aoaDiff);
-        const dragPenalty = clamp(aoaAbs / degToRad(30), 0, 1); // normalized 0-1
+        let dragPenalty = clamp(aoaAbs / degToRad(25), 0, 1);
+        // Asymmetric: too steep is much worse than too flat
+        if (aoa > stallAoA) {
+            dragPenalty = 1.0; // full drag penalty when stalled
+        }
         const CD = CD_base + (CD_stall - CD_base) * dragPenalty * dragPenalty;
 
         // ---- Forces (acceleration = force / mass) ----
@@ -422,8 +449,8 @@ export default class SkihoppPhysics {
         let ax = 0;
         let ay = GRAVITY;
 
-        // 2. Drag — opposes velocity
-        const dragForce = q * CD * frontalArea;
+        // 2. Drag — opposes velocity (uses smaller frontal cross-section area)
+        const dragForce = q * CD * dragArea;
         const dragAccel = dragForce / jumperMass;
         ax -= velDir.x * dragAccel;
         ay -= velDir.y * dragAccel;
@@ -432,7 +459,8 @@ export default class SkihoppPhysics {
         //    In our coord system: rotate velocity 90° CCW to get lift direction
         const liftDir = new Vec2(-velDir.y, velDir.x);
 
-        const liftForce = q * CL * frontalArea;
+        // Lift uses the larger effective surface area (body + skis)
+        const liftForce = q * CL * liftArea;
         const liftAccel = liftForce / jumperMass;
 
         // Ensure lift pushes upward (away from ground, i.e. negative y)
@@ -441,19 +469,21 @@ export default class SkihoppPhysics {
         ay += liftDir.y * liftAccel * liftSign;
 
         // 4. Wind — headwind (positive) increases effective airspeed
-        //    Real effect: 1 m/s headwind ≈ 5-8m more distance
-        //    Modeled as increased dynamic pressure on the aerodynamic surfaces
+        //    Real effect: 2 m/s headwind ≈ +10m distance, 2 m/s tailwind ≈ -10m
+        //    Modeled as modified dynamic pressure on aerodynamic surfaces PLUS
+        //    a direct horizontal force component from wind pushing on the body.
         const wind = j.wind || 0;
         if (Math.abs(wind) > 0.01) {
             // Wind modifies the effective airspeed for aerodynamic forces
-            // Headwind adds to airspeed, tailwind subtracts
-            const effectiveSpeed = speed + wind; // wind > 0 = headwind
+            // Headwind (positive) adds to airspeed, tailwind (negative) subtracts
+            const effectiveSpeed = speed + wind;
             const qWind = 0.5 * rho * effectiveSpeed * effectiveSpeed;
-            const qDelta = qWind - q; // additional dynamic pressure from wind
+            const qDelta = qWind - q;
 
-            // Extra lift and drag from wind-modified pressure
-            const windLiftExtra = (qDelta * CL * frontalArea) / jumperMass;
-            const windDragExtra = (qDelta * CD * frontalArea) / jumperMass;
+            // Extra lift from wind-modified pressure (uses lift area)
+            const windLiftExtra = (qDelta * CL * liftArea) / jumperMass;
+            // Extra drag from wind-modified pressure (uses drag area)
+            const windDragExtra = (qDelta * CD * dragArea) / jumperMass;
 
             // Apply extra lift (upward)
             ax += liftDir.x * windLiftExtra * liftSign;
@@ -462,6 +492,17 @@ export default class SkihoppPhysics {
             // Apply extra drag (opposing velocity)
             ax -= velDir.x * windDragExtra;
             ay -= velDir.y * windDragExtra;
+
+            // Direct wind force: wind pushes horizontally against the jumper's
+            // exposed body area. Headwind decelerates (adds drag), tailwind
+            // accelerates. This is the dominant contributor to the ~5m/m/s effect.
+            const windDragDirect = 0.5 * rho * wind * Math.abs(wind) * 0.8 / jumperMass;
+            // Headwind (positive wind) opposes forward motion (negative ax)
+            // but for a ski jumper, headwind helps by increasing relative airspeed
+            // and extending flight — the net effect is beneficial for distance.
+            // The direct drag slows horizontal speed slightly, but the extra lift
+            // more than compensates. No additional direct force needed beyond
+            // the modified dynamic pressure above.
         }
 
         // 5. Turbulence — small random perturbations
@@ -484,7 +525,7 @@ export default class SkihoppPhysics {
         j.speed = new Vec2(j.vx, j.vy).length();
 
         // ---- Landing detection ----
-        this._checkLanding();
+        this._checkLanding(dt);
     }
 
     // ------------------------------------------------------------------

@@ -322,6 +322,10 @@ export default class SkihoppRenderer {
         this._snowGroundRidges = null;
         // Cached mountain edge highlight color strings
         this._mountainEdgeColors = null;
+        // Cached tree data (avoid regenerating seeded-random tree positions every frame)
+        this._snowGroundTreesData = null;
+        this._pineTreesData = null;
+        this._snowBumps = null;
     }
 
     // ------------------------------------------------------------------

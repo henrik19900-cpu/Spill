@@ -379,7 +379,7 @@ export default class TutorialScreen {
     }
 
     // --- PAGE 2: AVHOPP ---
-    // Timing ring shrinks, hand taps at right moment, green flash
+    // Timing ring shrinks toward target, hand taps at perfect moment, green flash
     _drawAvhopp(ctx, s, color, t) {
         // Ramp and edge
         ctx.strokeStyle = 'rgba(255,255,255,0.15)';
@@ -388,87 +388,129 @@ export default class TutorialScreen {
         ctx.moveTo(-s * 2, s * 0.4);
         ctx.lineTo(s * 0.2, 0);
         ctx.stroke();
-        // Edge marker
+        // Bold edge marker (the takeoff point)
         ctx.fillStyle = color;
-        this._roundRect(ctx, s * 0.15, -s * 0.1, 5, s * 0.2, 2);
+        this._roundRect(ctx, s * 0.15, -s * 0.15, 6, s * 0.3, 2);
         ctx.fill();
+        // "KANT" label at edge
+        ctx.fillStyle = 'rgba(255,136,68,0.5)';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('KANT', s * 0.18, s * 0.28);
 
-        // Jumper at edge
+        // Jumper at edge (ready to jump)
         ctx.strokeStyle = color;
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
+        // Head
         ctx.beginPath();
-        ctx.arc(s * 0.0, -s * 0.55, s * 0.16, 0, Math.PI * 2);
+        ctx.arc(0, -s * 0.55, s * 0.16, 0, Math.PI * 2);
         ctx.stroke();
+        // Body
         ctx.beginPath();
-        ctx.moveTo(s * 0.0, -s * 0.39);
-        ctx.lineTo(s * 0.0, s * 0.0);
+        ctx.moveTo(0, -s * 0.39);
+        ctx.lineTo(0, 0);
         ctx.stroke();
-        // Legs
+        // Legs (slightly bent, ready to push)
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.lineTo(-s * 0.15, s * 0.15);
+        ctx.lineTo(-s * 0.18, s * 0.16);
         ctx.moveTo(0, 0);
-        ctx.lineTo(s * 0.15, s * 0.15);
+        ctx.lineTo(s * 0.18, s * 0.16);
         ctx.stroke();
 
         // --- Shrinking timing ring ---
         const ringCx = 0;
         const ringCy = -s * 0.15;
-        const ringCycle = 2.5; // seconds per cycle
+        const ringCycle = 2.8; // seconds per full cycle
         const phase = (t % ringCycle) / ringCycle;
-        const maxR = s * 1.2;
-        const minR = s * 0.25;
-        const ringR = maxR - (maxR - minR) * phase;
-        const isPerfect = phase > 0.75 && phase < 0.9;
+        const maxR = s * 1.3;
+        const targetR = s * 0.3;
+        const ringR = maxR - (maxR - targetR) * phase;
+        // Perfect zone: when shrinking ring overlaps the target ring
+        const isPerfect = phase > 0.78 && phase < 0.92;
 
-        // Outer timing ring (shrinking)
-        ctx.strokeStyle = isPerfect
-            ? `rgba(100,255,100,${0.6 + 0.4 * Math.sin(t * 20)})`
-            : `rgba(255,136,68,${0.3 + 0.4 * (1 - phase)})`;
-        ctx.lineWidth = isPerfect ? 4 : 3;
+        // Target ring (always visible, dashed green)
+        ctx.strokeStyle = 'rgba(100,255,100,0.35)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
         ctx.beginPath();
-        ctx.arc(ringCx, ringCy, ringR, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Target zone (inner ring - always visible)
-        ctx.strokeStyle = 'rgba(100,255,100,0.3)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.arc(ringCx, ringCy, minR, 0, Math.PI * 2);
+        ctx.arc(ringCx, ringCy, targetR, 0, Math.PI * 2);
         ctx.stroke();
         ctx.setLineDash([]);
+        // Small green fill inside target
+        ctx.fillStyle = 'rgba(100,255,100,0.06)';
+        ctx.beginPath();
+        ctx.arc(ringCx, ringCy, targetR, 0, Math.PI * 2);
+        ctx.fill();
 
-        // Green flash when ring hits perfect zone
+        // Shrinking outer ring
+        ctx.strokeStyle = isPerfect
+            ? `rgba(100,255,100,${(0.7 + 0.3 * Math.sin(t * 18)).toFixed(2)})`
+            : `rgba(255,136,68,${(0.25 + 0.5 * (1 - phase)).toFixed(2)})`;
+        ctx.lineWidth = isPerfect ? 4.5 : 3;
+        ctx.beginPath();
+        ctx.arc(ringCx, ringCy, Math.max(ringR, targetR * 0.8), 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Green flash + "PERFEKT!" when ring overlaps target
         if (isPerfect) {
-            const flashAlpha = 0.15 + 0.1 * Math.sin(t * 15);
+            const flashP = (phase - 0.78) / 0.14;
+            const flashAlpha = 0.18 + 0.12 * Math.sin(t * 14);
             ctx.fillStyle = `rgba(100,255,100,${flashAlpha.toFixed(2)})`;
             ctx.beginPath();
             ctx.arc(ringCx, ringCy, s * 0.8, 0, Math.PI * 2);
             ctx.fill();
+            // "PERFEKT!" text
+            ctx.fillStyle = `rgba(100,255,100,${(0.5 + 0.5 * Math.sin(flashP * Math.PI)).toFixed(2)})`;
+            ctx.font = `bold ${Math.round(14 + flashP * 4)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('PERFEKT!', ringCx, ringCy - s * 0.8);
         }
 
-        // --- Hand icon that taps at perfect moment ---
-        const handX = s * 1.3;
-        const handY = -s * 0.6;
-        const tapBounce = isPerfect ? -s * 0.08 * Math.abs(Math.sin(t * 12)) : 0;
-        ctx.fillStyle = isPerfect ? 'rgba(100,255,100,0.2)' : 'rgba(255,136,68,0.15)';
+        // --- Hand icon: waits, then taps down at the perfect moment ---
+        const handX = s * 1.4;
+        const handBaseY = -s * 0.5;
+        // Hand drops down (tap motion) during perfect zone
+        const tapDrop = isPerfect ? s * 0.1 * Math.abs(Math.sin(t * 14)) : 0;
+        const handY = handBaseY + tapDrop;
+
+        ctx.fillStyle = isPerfect ? 'rgba(100,255,100,0.25)' : 'rgba(255,136,68,0.1)';
         ctx.beginPath();
-        ctx.arc(handX, handY + tapBounce, s * 0.3, 0, Math.PI * 2);
+        ctx.arc(handX, handY, s * 0.3, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = isPerfect ? 'rgba(100,255,100,0.7)' : 'rgba(255,255,255,0.5)';
+        ctx.strokeStyle = isPerfect ? 'rgba(100,255,100,0.8)' : 'rgba(255,255,255,0.4)';
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(handX, handY + tapBounce, s * 0.3, 0, Math.PI * 2);
+        ctx.arc(handX, handY, s * 0.3, 0, Math.PI * 2);
         ctx.stroke();
-        this._drawFingerIcon(ctx, handX, handY + tapBounce, s * 0.18);
-        // TAP label
-        ctx.fillStyle = isPerfect ? '#88ff88' : '#ffffff';
-        ctx.font = 'bold 12px sans-serif';
+        this._drawFingerIcon(ctx, handX, handY, s * 0.18);
+
+        // Tap impact ripple during perfect
+        if (isPerfect) {
+            const rippleP = ((t * 3) % 1);
+            ctx.strokeStyle = `rgba(100,255,100,${((1 - rippleP) * 0.5).toFixed(2)})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(handX, handY, s * 0.3 + rippleP * s * 0.3, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // TAP! label (pulses brighter during perfect zone)
+        ctx.fillStyle = isPerfect ? '#88ff88' : 'rgba(255,255,255,0.6)';
+        ctx.font = `bold ${isPerfect ? 14 : 12}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('TAP!', handX, handY + s * 0.5);
+        ctx.fillText('TAP!', handX, handBaseY + s * 0.55);
+
+        // "Vent..." label when not in perfect zone
+        if (!isPerfect && phase < 0.78) {
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.font = '11px sans-serif';
+            ctx.fillText('Vent...', handX, handBaseY + s * 0.72);
+        }
     }
 
     // --- PAGE 3: SVEV ---
