@@ -205,10 +205,10 @@ export default class SkihoppPhysics {
         this._inrunTime += dt;
 
         const friction     = this.cfgInrun.friction   || 0.02;
-        const baseMaxSpeed = this.cfgInrun.maxSpeed    || 27;   // m/s (~97 km/h)
+        const baseMaxSpeed = this.cfgInrun.maxSpeed    || 29;   // m/s (~104 km/h cap)
 
         // Scale max speed by hill size: K90 stays moderate, K185 gets faster
-        // K90 (kPoint 90) -> scale ~0.96, K120 -> 1.0, K185 -> 1.07
+        // K90 -> scale ~0.96, K120 -> 1.0, K185 -> 1.07
         const kPoint = (this.hill && this.hill.kPoint) || 120;
         const hillSpeedScale = 0.85 + 0.15 * Math.min(kPoint / 120, 1.5);
         const maxSpeed = baseMaxSpeed * hillSpeedScale;
@@ -227,7 +227,7 @@ export default class SkihoppPhysics {
         //   untucked terminal velocity ≈ 80% of maxSpeed (~22 m/s, ~79 km/h)
         // Terminal speed = sqrt((g*sin(a) - friction*g*cos(a)) / dragCoeff)
         const isTucked = j.isTucked || false;
-        const airDragCoeff = isTucked ? 0.0055 : 0.0085;
+        const airDragCoeff = isTucked ? 0.0040 : 0.0065;
         const totalDrag = friction * GRAVITY * Math.cos(slopeAngle) + airDragCoeff * j.speed * j.speed;
 
         const a = gravityPull - totalDrag;
@@ -330,11 +330,17 @@ export default class SkihoppPhysics {
             // producing the large distance spreads needed for K185 (180-210m).
             const hillKPoint = (this.hill && this.hill.kPoint) || 120;
             const hillKickScale = 0.8 + 0.4 * Math.min(hillKPoint / 120, 1.6);
-            const upwardKick = quality * 2.2 * hillKickScale; // m/s upward at perfect timing
+            const upwardKick = quality * 2.8 * hillKickScale; // m/s upward at perfect timing
 
-            // Convert to velocity components
+            // Convert to velocity components.
+            // Even the worst takeoff should produce a slightly upward trajectory
+            // (the table geometry always launches the jumper into the air).
+            // We ensure vy is at most slightly positive (small downward) to
+            // avoid the jumper plunging straight into the hill.
             j.vx = launchSpeed * Math.cos(launchAngle);
-            j.vy = launchSpeed * Math.sin(launchAngle) - upwardKick;
+            const rawVy = launchSpeed * Math.sin(launchAngle) - upwardKick;
+            const maxDownwardVy = launchSpeed * 0.02; // at most 2% of speed downward
+            j.vy = Math.min(rawVy, maxDownwardVy);
 
             // Position at the launch point (end of takeoff animation)
             // j.x and j.y are already set by the lerp above; keep them
@@ -380,8 +386,8 @@ export default class SkihoppPhysics {
 
         // --- Physical constants ---
         const rho          = cfg.airDensity         || 1.1;   // kg/m³ (mountain altitude)
-        const liftArea     = cfg.liftArea           || 1.2;   // m² (body + V-style skis, effective lift surface)
-        const dragArea     = cfg.dragArea           || 0.55;  // m² (frontal cross-section for drag)
+        const liftArea     = cfg.liftArea           || 1.35;  // m² (body + V-style skis, effective lift surface)
+        const dragArea     = cfg.dragArea           || 0.50;  // m² (frontal cross-section for drag)
         const jumperMass   = cfg.jumperMass         || 75;    // kg (jumper + equipment)
         const optimalAoA   = degToRad(cfg.optimalAngle || 33); // optimal angle of attack (33-35°)
         const turbStrength = cfg.turbulenceStrength || 0.3;
@@ -528,26 +534,27 @@ export default class SkihoppPhysics {
         j.turbulenceY = turbY;
 
         // ---- Body angle evolution during flight ----
-        // The jumper's body angle tracks a target that is offset from the
-        // velocity direction by the desired angle of attack. The controls
-        // set j.targetAngle as the desired AoA offset (typically 25-35°
-        // for a skilled jumper). If the controls haven't set a value, we
-        // default to a reasonable offset (~25°) for autonomous flight.
+        // In real ski jumping, the jumper holds a relatively fixed body
+        // angle (forward lean) during flight. The controls can request a
+        // target body angle via j.targetAngle. The body angle smoothly
+        // adjusts toward the target, limited to a realistic rate (~8°/s).
         //
-        // The actual body angle smoothly tracks velAngle + desiredAoA,
-        // limited to a realistic rate of change (~12°/s).
-        const bodyAngleRate = cfg.bodyAngleRate || 12; // degrees per second
-        const desiredAoA = (j.targetAngle !== undefined && j.targetAngle !== null)
-            ? j.targetAngle
-            : 25; // default desired AoA in degrees
-        const flightTargetAngle = radToDeg(velAngle) + desiredAoA;
-        const angleDeltaBody = flightTargetAngle - j.bodyAngle;
-        const maxChange = bodyAngleRate * dt;
-        if (Math.abs(angleDeltaBody) > maxChange) {
-            j.bodyAngle += Math.sign(angleDeltaBody) * maxChange;
-        } else {
-            j.bodyAngle = flightTargetAngle;
+        // If no target is set, the body angle stays where it is (the
+        // takeoff set it based on quality). Gravity naturally steepens
+        // the velocity vector over time, which reduces AoA and eventually
+        // causes the jumper to descend -- this is the natural flight arc.
+        const bodyAngleRate = cfg.bodyAngleRate || 8; // degrees per second
+        if (j.targetAngle !== undefined && j.targetAngle !== null) {
+            const flightTargetAngle = j.targetAngle;
+            const angleDeltaBody = flightTargetAngle - j.bodyAngle;
+            const maxChange = bodyAngleRate * dt;
+            if (Math.abs(angleDeltaBody) > maxChange) {
+                j.bodyAngle += Math.sign(angleDeltaBody) * maxChange;
+            } else {
+                j.bodyAngle = flightTargetAngle;
+            }
         }
+        // Otherwise body angle stays constant (set during takeoff)
 
         // ---- Integration (semi-implicit Euler) ----
         j.vx += ax * dt;
