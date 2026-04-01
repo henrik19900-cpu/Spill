@@ -345,7 +345,7 @@ export default class SkihoppGame {
         }
 
         try {
-            const { default: ProgressionManager } = await import('./ProgressionManager.js');
+            const { default: ProgressionManager } = await import('../../data/ProgressionManager.js');
             this.progression = new ProgressionManager();
         } catch (e) {
             console.warn('[SkihoppGame] ProgressionManager not available.', e.message);

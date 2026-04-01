@@ -215,13 +215,29 @@ export default class SkihoppPhysics {
         const gravityPull = GRAVITY * Math.sin(slopeAngle);
 
         // Friction: linear (ski friction) + quadratic (air drag) for natural speed curve
-        // Tuck position reduces air drag significantly
+        // Tuck position reduces air drag significantly.
+        // Drag coefficients are tuned so that:
+        //   tucked terminal velocity  ≈ maxSpeed (26 m/s, ~94 km/h)
+        //   untucked terminal velocity ≈ 80% of maxSpeed (~21 m/s, ~75 km/h)
+        // Terminal speed = sqrt((g*sin(a) - friction*g*cos(a)) / dragCoeff)
         const isTucked = j.isTucked || false;
-        const airDragCoeff = isTucked ? 0.003 : 0.007;  // tucked = better aero
+        const airDragCoeff = isTucked ? 0.0085 : 0.0145;
         const totalDrag = friction * GRAVITY * Math.cos(slopeAngle) + airDragCoeff * j.speed * j.speed;
 
         const a = gravityPull - totalDrag;
         j.speed += a * dt;
+
+        // Enforce untucked speed floor: even without tucking, player reaches at
+        // least floor% of maxSpeed (set by Controls based on difficulty).
+        // This works by clamping the *drag* outcome — if the player isn't tucked
+        // but speed has dropped below the floor, gently push speed back up.
+        const speedFloor = (j.untuckedSpeedFloor || 0.8) * maxSpeed;
+        if (!isTucked && j.speed < speedFloor && j.speed > 0) {
+            // Nudge speed toward floor at a rate that feels natural, not instant
+            const recovery = 2.0; // m/s² recovery rate toward floor
+            j.speed = Math.min(j.speed + recovery * dt, speedFloor);
+        }
+
         j.speed = clamp(j.speed, 0, maxSpeed);
 
         // --- Vibration / camera shake at high speed ---

@@ -79,6 +79,7 @@ export default class Scoreboard {
 
         this._renderBackground(ctx, width, height);
         this._renderHeader(ctx, width, height);
+        this._renderNewRecord(ctx, width, height, data);
         this._renderTable(ctx, width, height, data);
         this._renderPlayAgainButton(ctx, width, height);
     }
@@ -150,6 +151,48 @@ export default class Scoreboard {
         ctx.fillText('Holmenkollbakken K120', width / 2, 62);
 
         ctx.letterSpacing = '0px';
+        ctx.restore();
+    }
+
+    // -------------------------------------------------------------------
+    // "NY REKORD!" banner (shown when scoreData.isNewRecord is true)
+    // -------------------------------------------------------------------
+
+    _renderNewRecord(ctx, width, height, data) {
+        if (!data.isNewRecord) return;
+
+        const bannerY = 70;
+        const flashAlpha = 0.7 + Math.sin(this._time * 5) * 0.3;
+
+        ctx.save();
+
+        // Glowing golden banner
+        ctx.shadowColor = `rgba(255,200,50,${0.6 * flashAlpha})`;
+        ctx.shadowBlur = 18;
+
+        const bannerH = 28;
+        const bannerW = Math.min(width * 0.55, 220);
+        const bannerX = (width - bannerW) / 2;
+
+        const grad = ctx.createLinearGradient(bannerX, bannerY, bannerX + bannerW, bannerY);
+        grad.addColorStop(0, 'rgba(255,200,50,0)');
+        grad.addColorStop(0.15, `rgba(255,200,50,${0.15 * flashAlpha})`);
+        grad.addColorStop(0.5, `rgba(255,210,60,${0.25 * flashAlpha})`);
+        grad.addColorStop(0.85, `rgba(255,200,50,${0.15 * flashAlpha})`);
+        grad.addColorStop(1, 'rgba(255,200,50,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(bannerX, bannerY, bannerW, bannerH);
+
+        // Text
+        ctx.globalAlpha = flashAlpha;
+        ctx.fillStyle = '#FFD700';
+        ctx.font = `900 ${Math.max(Math.min(width * 0.045, 18), 14)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = '2px';
+        ctx.fillText('\u2605 NY REKORD! \u2605', width / 2, bannerY + bannerH / 2);
+        ctx.letterSpacing = '0px';
+
         ctx.restore();
     }
 

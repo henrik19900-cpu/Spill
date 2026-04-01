@@ -369,6 +369,16 @@ export default class SkihoppControls {
 
   _onDrag(_dx, dy, _vx, vy) {
     const state = this.game.getState();
+
+    // Forward drag as scroll to StatsScreen when it's the active sub-screen
+    if (state === GameState.MENU) {
+      const scene = this.game.currentScene;
+      if (scene && scene._menuSubScreen === 'stats' && scene.statsScreen) {
+        scene.statsScreen.handleScroll(dy);
+      }
+      return;
+    }
+
     if (state !== GameState.FLIGHT) return;
 
     if (!this._jumperState) return;
