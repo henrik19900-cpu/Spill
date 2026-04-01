@@ -334,52 +334,74 @@ export default class AudioManager {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
       intensity = Math.max(0, Math.min(1, intensity));
-      const duration = 1.0 + intensity * 2.0; // 1-3 seconds
+      const duration = 1.5 + intensity * 2.5; // 1.5-4 seconds (longer = bigger jump)
 
-      // Layer 1 -- low rumble noise
+      // Layer 1 -- low rumble (crowd body)
       const rumbleBuf = this._createNoise(duration);
       const rumbleSrc = this.ctx.createBufferSource();
       rumbleSrc.buffer = rumbleBuf;
 
       const rumbleLp = this.ctx.createBiquadFilter();
       rumbleLp.type = 'lowpass';
-      rumbleLp.frequency.value = 600;
-      rumbleLp.Q.value = 1;
+      rumbleLp.frequency.value = 500 + intensity * 300;
+      rumbleLp.Q.value = 0.8;
 
       const rumbleGain = this.ctx.createGain();
       rumbleGain.gain.setValueAtTime(0.001, now);
-      rumbleGain.gain.linearRampToValueAtTime(intensity * 0.35, now + 0.15);
-      rumbleGain.gain.setValueAtTime(intensity * 0.35, now + duration * 0.6);
+      // Explosive onset then sustained roar
+      rumbleGain.gain.linearRampToValueAtTime(intensity * 0.45, now + 0.08);
+      rumbleGain.gain.setValueAtTime(intensity * 0.4, now + duration * 0.5);
       rumbleGain.gain.linearRampToValueAtTime(0.0, now + duration);
 
       this._chain(rumbleSrc, rumbleLp, rumbleGain, this._masterGain);
 
-      // Layer 2 -- mid-range "roar"
+      // Layer 2 -- mid-range roar (excitement)
       const roarBuf = this._createNoise(duration);
       const roarSrc = this.ctx.createBufferSource();
       roarSrc.buffer = roarBuf;
 
       const roarBp = this.ctx.createBiquadFilter();
       roarBp.type = 'bandpass';
-      roarBp.frequency.value = 2000;
-      roarBp.Q.value = 0.8;
+      roarBp.frequency.value = 1800;
+      roarBp.Q.value = 0.6;
 
       const roarGain = this.ctx.createGain();
       roarGain.gain.setValueAtTime(0.001, now);
-      roarGain.gain.linearRampToValueAtTime(intensity * 0.2, now + 0.2);
+      roarGain.gain.linearRampToValueAtTime(intensity * 0.25, now + 0.1);
       // Wobble the crowd -- modulate gain slightly for realism
-      for (let t = 0.3; t < duration - 0.3; t += 0.15) {
-        const wobble = intensity * (0.15 + Math.random() * 0.1);
+      for (let t = 0.3; t < duration - 0.3; t += 0.12) {
+        const wobble = intensity * (0.18 + Math.random() * 0.12);
         roarGain.gain.linearRampToValueAtTime(wobble, now + t);
       }
       roarGain.gain.linearRampToValueAtTime(0.0, now + duration);
 
       this._chain(roarSrc, roarBp, roarGain, this._masterGain);
 
+      // Layer 3 -- high excitement shriek (only at high intensity)
+      const shriekBuf = this._createNoise(duration);
+      const shriekSrc = this.ctx.createBufferSource();
+      shriekSrc.buffer = shriekBuf;
+
+      const shriekBp = this.ctx.createBiquadFilter();
+      shriekBp.type = 'bandpass';
+      shriekBp.frequency.value = 4000;
+      shriekBp.Q.value = 1.5;
+
+      const shriekGain = this.ctx.createGain();
+      const shriekVol = Math.max(0, (intensity - 0.4) * 0.2);
+      shriekGain.gain.setValueAtTime(0.001, now);
+      shriekGain.gain.linearRampToValueAtTime(shriekVol, now + 0.15);
+      shriekGain.gain.setValueAtTime(shriekVol * 0.8, now + duration * 0.4);
+      shriekGain.gain.linearRampToValueAtTime(0.0, now + duration * 0.8);
+
+      this._chain(shriekSrc, shriekBp, shriekGain, this._masterGain);
+
       rumbleSrc.start(now);
       rumbleSrc.stop(now + duration);
       roarSrc.start(now);
       roarSrc.stop(now + duration);
+      shriekSrc.start(now);
+      shriekSrc.stop(now + duration);
     } catch (e) {
       console.warn('AudioManager.playCrowdCheer error:', e);
     }
