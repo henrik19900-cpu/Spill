@@ -28,16 +28,24 @@ export default class AudioManager {
     this._windSource = null;
     this._windGain = null;
     this._windFilter = null;
+    this._windHighSource = null;
+    this._windHighGain = null;
+    this._windHighFilter = null;
 
     /** Crowd ambience node chain */
     this._crowdSource = null;
     this._crowdGain = null;
     this._crowdFilter = null;
+    this._crowdHighSource = null;
+    this._crowdHighGain = null;
 
     /** Inrun slide node chain */
     this._slideSource = null;
     this._slideGain = null;
     this._slideFilter = null;
+    this._slideRumbleSource = null;
+    this._slideRumbleGain = null;
+    this._slideRumbleFilter = null;
 
     /** Menu ambience node chain */
     this._menuOsc = null;
@@ -768,7 +776,8 @@ export default class AudioManager {
   }
 
   /**
-   * Short UI click sound for button / menu interactions.
+   * Short, crisp UI click for button / menu interactions.
+   * Designed to not be annoying on repeated taps.
    */
   playButtonClick() {
     try {
@@ -776,20 +785,25 @@ export default class AudioManager {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
 
-      // Quick sine pop
+      // Very short sine pop -- high to low for a crisp "tick" feel
       const osc = this.ctx.createOscillator();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(1400, now);
-      osc.frequency.exponentialRampToValueAtTime(1000, now + 0.04);
+      osc.frequency.setValueAtTime(1800, now);
+      osc.frequency.exponentialRampToValueAtTime(900, now + 0.025);
 
       const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(0.25, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
 
-      this._chain(osc, gain, this._masterGain);
+      // Gentle highpass to remove any low-end muddiness
+      const hp = this.ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 600;
+
+      this._chain(osc, hp, gain, this._masterGain);
 
       osc.start(now);
-      osc.stop(now + 0.07);
+      osc.stop(now + 0.04);
     } catch (e) {
       console.warn('AudioManager.playButtonClick error:', e);
     }
