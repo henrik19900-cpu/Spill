@@ -1767,6 +1767,12 @@ export default class SkihoppGame {
             this.controls.destroy();
         }
 
+        // Stop all looping audio before nulling references
+        this._safeAudioCall('stopWind');
+        this._safeAudioCall('stopInrunSlide');
+        this._safeAudioCall('stopCrowdAmbience');
+        this._safeAudioCall('stopMenuMusic');
+
         // Clear unsub handles
         for (const unsub of this._unsubs) {
             unsub();
