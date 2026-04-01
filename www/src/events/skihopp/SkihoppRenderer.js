@@ -1283,6 +1283,42 @@ export default class SkihoppRenderer {
         }
     }
 
+    /**
+     * Draw subtle fog/mist at the base of mountains (horizon level).
+     * Semi-transparent white gradient that adds atmospheric depth.
+     */
+    _drawMountainFog(ctx, w, h) {
+        ctx.save();
+
+        // Fog sits at the lower portion of the mountain area (~55-75% of screen height)
+        const fogTop = h * 0.50;
+        const fogBottom = h * 0.72;
+        const fogHeight = fogBottom - fogTop;
+
+        // Main fog band: semi-transparent white gradient
+        const fogGrad = ctx.createLinearGradient(0, fogTop, 0, fogBottom);
+        fogGrad.addColorStop(0, 'rgba(200,210,230,0)');
+        fogGrad.addColorStop(0.25, 'rgba(210,220,240,0.06)');
+        fogGrad.addColorStop(0.5, 'rgba(220,230,245,0.10)');
+        fogGrad.addColorStop(0.75, 'rgba(215,225,240,0.07)');
+        fogGrad.addColorStop(1, 'rgba(200,215,235,0)');
+        ctx.fillStyle = fogGrad;
+        ctx.fillRect(0, fogTop, w, fogHeight);
+
+        // Secondary thinner mist layer slightly higher for depth
+        const mistTop = h * 0.42;
+        const mistBottom = h * 0.58;
+        const mistGrad = ctx.createLinearGradient(0, mistTop, 0, mistBottom);
+        mistGrad.addColorStop(0, 'rgba(200,215,240,0)');
+        mistGrad.addColorStop(0.4, 'rgba(210,220,240,0.04)');
+        mistGrad.addColorStop(0.7, 'rgba(215,225,245,0.05)');
+        mistGrad.addColorStop(1, 'rgba(200,215,235,0)');
+        ctx.fillStyle = mistGrad;
+        ctx.fillRect(0, mistTop, w, mistBottom - mistTop);
+
+        ctx.restore();
+    }
+
     // ------------------------------------------------------------------
     // 3. Snow ground (fill below hill surface)
     // ------------------------------------------------------------------

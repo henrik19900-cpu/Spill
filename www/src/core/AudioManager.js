@@ -408,9 +408,8 @@ export default class AudioManager {
   }
 
   /**
-   * Landing thud with reverb-like echo for added weight.
-   * Better quality -> cleaner, less distorted sound.
-   * A delayed quieter copy plays 100ms later at 50% volume for depth.
+   * Deep, satisfying landing thud with 100ms delayed echo.
+   * Better quality = cleaner tonal hit. Poor quality = heavy crunch.
    * @param {number} quality - 0 (crash) to 1 (perfect telemark)
    */
   playLanding(quality = 0.5) {
@@ -420,63 +419,88 @@ export default class AudioManager {
       const now = this.ctx.currentTime;
       quality = Math.max(0, Math.min(1, quality));
 
-      // Play the main thud and its echo (delayed copy)
+      // Play the main thud and its echo (delayed copy for weight)
       const offsets = [
         { time: 0, vol: 1.0 },      // main hit
-        { time: 0.1, vol: 0.5 },    // reverb echo at 100ms, 50% volume
+        { time: 0.1, vol: 0.45 },   // echo at 100ms, 45% volume
       ];
 
       offsets.forEach(({ time: offset, vol: echoVol }) => {
         const t = now + offset;
 
-        // --- Deep thud oscillator (60Hz sine) ---
+        // --- Sub-bass punch (30Hz sine, very short) for visceral weight ---
+        const sub = this.ctx.createOscillator();
+        sub.type = 'sine';
+        sub.frequency.setValueAtTime(30, t);
+        sub.frequency.exponentialRampToValueAtTime(15, t + 0.2);
+
+        const subGain = this.ctx.createGain();
+        subGain.gain.setValueAtTime(0.55 * echoVol, t);
+        subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+
+        this._chain(sub, subGain, this._masterGain);
+
+        // --- Deep thud oscillator (60Hz sine, sweeps down) ---
         const thud = this.ctx.createOscillator();
         thud.type = 'sine';
         thud.frequency.setValueAtTime(60, t);
-        thud.frequency.exponentialRampToValueAtTime(25, t + 0.35);
+        thud.frequency.exponentialRampToValueAtTime(22, t + 0.4);
 
         const thudGain = this.ctx.createGain();
-        const thudVolumeBase = 0.5 + quality * 0.3;
+        const thudVolumeBase = 0.55 + quality * 0.25;
         thudGain.gain.setValueAtTime(thudVolumeBase * echoVol, t);
-        thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+        thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
 
         this._chain(thud, thudGain, this._masterGain);
 
-        // --- Mid body oscillator (80-120Hz) for tonal character ---
+        // --- Mid body oscillator (tonal character, cleaner at high quality) ---
         const body = this.ctx.createOscillator();
         body.type = 'sine';
         body.frequency.setValueAtTime(80 + quality * 40, t);
-        body.frequency.exponentialRampToValueAtTime(30, t + 0.25);
+        body.frequency.exponentialRampToValueAtTime(28, t + 0.3);
 
         const bodyGain = this.ctx.createGain();
-        bodyGain.gain.setValueAtTime(0.3 * quality * echoVol, t);
-        bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        bodyGain.gain.setValueAtTime(0.35 * quality * echoVol, t);
+        bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
 
         this._chain(body, bodyGain, this._masterGain);
 
-        // --- Noise burst for impact -- louder on bad landings ---
-        const crunchDuration = 0.1 + (1 - quality) * 0.25;
-        const noiseBuf = this._createNoise(crunchDuration);
+        // --- Noise burst for impact crunch -- louder & longer on bad landings ---
+        const crunchDuration = 0.08 + (1 - quality) * 0.3;
+        const noiseBuf = this._createNoise(crunchDuration + 0.05);
         const noiseSrc = this.ctx.createBufferSource();
         noiseSrc.buffer = noiseBuf;
 
         const hp = this.ctx.createBiquadFilter();
         hp.type = 'highpass';
-        hp.frequency.value = 600 + (1 - quality) * 400;
+        hp.frequency.value = 500 + (1 - quality) * 500;
+
+        // Waveshaper for gritty distortion on bad landings
+        const distortion = this.ctx.createWaveShaper();
+        const crunchAmount = (1 - quality) * 50;
+        const curveLen = 256;
+        const curve = new Float32Array(curveLen);
+        for (let i = 0; i < curveLen; i++) {
+          const x = (i * 2) / curveLen - 1;
+          curve[i] = (Math.PI + crunchAmount) * x / (Math.PI + crunchAmount * Math.abs(x));
+        }
+        distortion.curve = curve;
 
         const noiseGain = this.ctx.createGain();
-        const noiseVolBase = 0.1 + (1 - quality) * 0.35;
+        const noiseVolBase = 0.08 + (1 - quality) * 0.4;
         noiseGain.gain.setValueAtTime(noiseVolBase * echoVol, t);
         noiseGain.gain.exponentialRampToValueAtTime(0.001, t + crunchDuration);
 
-        this._chain(noiseSrc, hp, noiseGain, this._masterGain);
+        this._chain(noiseSrc, hp, distortion, noiseGain, this._masterGain);
 
+        sub.start(t);
+        sub.stop(t + 0.3);
         thud.start(t);
-        thud.stop(t + 0.4);
+        thud.stop(t + 0.45);
         body.start(t);
-        body.stop(t + 0.3);
+        body.stop(t + 0.35);
         noiseSrc.start(t);
-        noiseSrc.stop(t + crunchDuration);
+        noiseSrc.stop(t + crunchDuration + 0.02);
       });
     } catch (e) {
       console.warn('AudioManager.playLanding error:', e);
