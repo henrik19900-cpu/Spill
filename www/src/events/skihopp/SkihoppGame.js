@@ -1238,6 +1238,7 @@ export default class SkihoppGame {
                 break;
 
             case GameState.FLIGHT: {
+                if (!jumperState) break;
                 // Takeoff quality text with tiered feedback
                 const toq = jumperState.takeoffQuality || 0;
                 if (toq > 0.9) {
