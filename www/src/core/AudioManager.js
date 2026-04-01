@@ -1570,6 +1570,12 @@ export default class AudioManager {
       this._windGain = null;
       this._windFilter = null;
     }
+    if (this._windHighSource) {
+      try { this._windHighSource.stop(); } catch (_) { /* already stopped */ }
+      this._windHighSource = null;
+      this._windHighGain = null;
+      this._windHighFilter = null;
+    }
 
     // Stop inrun slide if playing
     if (this._slideSource) {
@@ -1578,6 +1584,12 @@ export default class AudioManager {
       this._slideGain = null;
       this._slideFilter = null;
     }
+    if (this._slideRumbleSource) {
+      try { this._slideRumbleSource.stop(); } catch (_) { /* already stopped */ }
+      this._slideRumbleSource = null;
+      this._slideRumbleGain = null;
+      this._slideRumbleFilter = null;
+    }
 
     // Stop crowd ambience if playing
     if (this._crowdSource) {
@@ -1585,6 +1597,11 @@ export default class AudioManager {
       this._crowdSource = null;
       this._crowdGain = null;
       this._crowdFilter = null;
+    }
+    if (this._crowdHighSource) {
+      try { this._crowdHighSource.stop(); } catch (_) { /* already stopped */ }
+      this._crowdHighSource = null;
+      this._crowdHighGain = null;
     }
 
     // Stop menu music if playing
