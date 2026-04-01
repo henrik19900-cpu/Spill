@@ -55,8 +55,11 @@ export default class Hill {
         const angleRad = this.inrunAngle * DEG_TO_RAD;
         const tableRad = this.tableAngle * DEG_TO_RAD;
 
-        // Transition curve radius - larger for smoother feel (real hills use ~100m+)
-        const transitionRadius = this.inrunLength * 1.2;
+        // Transition curve radius - sized for a natural feel.
+        // Real hills use ~80-120m radius; we use 0.7 * inrunLength to keep
+        // the transition compact so the jumper spends more distance on the
+        // steep straight section and reaches higher speed.
+        const transitionRadius = this.inrunLength * 0.7;
 
         // Angular span the transition must cover
         const angleDelta = angleRad - tableRad;
