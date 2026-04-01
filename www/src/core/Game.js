@@ -120,21 +120,23 @@ export class Game {
   // Canvas
   // -----------------------------------------------------------------------
   _setupCanvas() {
-    const dpr = window.devicePixelRatio || 1;
     const width = window.innerWidth;
     const height = window.innerHeight;
 
-    this.canvas.width = width * dpr;
-    this.canvas.height = height * dpr;
+    // Use 1:1 pixel mapping - simpler and avoids DPR transform issues
+    // that cause blinking on some Android WebViews
+    this.canvas.width = width;
+    this.canvas.height = height;
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
 
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Reset transform to identity
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     // Expose logical size for scenes / renderers
     this.width = width;
     this.height = height;
-    this.dpr = dpr;
+    this.dpr = 1;
   }
 
   // -----------------------------------------------------------------------
@@ -404,9 +406,8 @@ export class Game {
     const { ctx, width, height } = this;
 
     try {
-      // Ensure DPR transform is always set (can be lost after errors)
-      const dpr = this.dpr || 1;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // Ensure identity transform is always set (can be lost after errors)
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
 
       // Clear entire canvas
       ctx.clearRect(0, 0, width, height);
