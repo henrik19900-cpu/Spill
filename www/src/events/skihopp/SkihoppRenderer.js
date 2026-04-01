@@ -47,7 +47,7 @@ class ParticlePool {
     /**
      * Spawn a single particle.
      * @param {Object} config  {x, y, vx, vy, life, maxLife, size, color, gravity, drag, type}
-     *   type: 'circle' | 'star' | 'snowflake' | 'spark' | 'trail'
+     *   type: 'circle' | 'star' | 'snowflake' | 'spark' | 'trail' | 'confetti'
      */
     spawn(config) {
         if (this.particles.length >= this.maxSize) return;
@@ -163,6 +163,9 @@ class ParticlePool {
                 case 'trail':
                     this._renderTrail(ctx, sp, p, alpha);
                     break;
+                case 'confetti':
+                    this._renderConfetti(ctx, sp, p, alpha, time);
+                    break;
                 default:
                     ctx.fillStyle = p.color;
                     ctx.beginPath();
@@ -262,6 +265,22 @@ class ParticlePool {
         ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
         ctx.fill();
     }
+
+    /** Tumbling confetti rectangle */
+    _renderConfetti(ctx, sp, p, alpha, time) {
+        const rot = (time * 4 + p.sparklePhase) * 3;
+        const scaleX = Math.cos(rot);          // tumble effect
+        const w = p.size * 2;
+        const h = p.size * 1.2;
+        ctx.globalAlpha = alpha;
+        ctx.save();
+        ctx.translate(sp.x, sp.y);
+        ctx.rotate(p.sparklePhase + time * 2);
+        ctx.scale(scaleX, 1);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-w / 2, -h / 2, w, h);
+        ctx.restore();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +300,7 @@ export default class SkihoppRenderer {
         this._snowParticles = [];
 
         // Unified particle system (replaces _takeoffParticles, _landingParticles, _celebrationParticles)
-        this._particles = new ParticlePool(500);
+        this._particles = new ParticlePool(800);
         this._trailFrameCounter = 0;
         this._windStreaks = [];
         this._prevGameState = null;
@@ -296,6 +315,7 @@ export default class SkihoppRenderer {
 
         this._initialized = false;
         this._time = 0;
+        this._lastFrameTime = 0;
 
         // Cinematic camera state
         this._cameraPhaseTime = 0;
@@ -362,7 +382,7 @@ export default class SkihoppRenderer {
         this._generateSpectators();
         this._generateSnowParticles();
         // Reset particle effects from previous hill
-        this._particles = new ParticlePool(500);
+        this._particles = new ParticlePool(800);
         this._trailFrameCounter = 0;
         this._windStreaks = [];
         this._impactRipples = [];
@@ -511,10 +531,15 @@ export default class SkihoppRenderer {
         if (!this._initialized || !this.renderer || !jumperState) return;
 
         this._wind = wind || { speed: 0, direction: 0 };
-        this._time += 1 / 60;
+
+        // Frame-rate-independent dt via timestamp delta (clamped to avoid spiral of death)
+        const now = performance.now();
+        const dt = this._lastFrameTime ? Math.min((now - this._lastFrameTime) / 1000, 1 / 15) : 1 / 60;
+        this._lastFrameTime = now;
+        this._time += dt;
 
         // --- Camera management ---
-        this._updateCamera(jumperState, gameState, 1 / 60);
+        this._updateCamera(jumperState, gameState, dt);
 
         // Camera shake from vibration/landing + cinematic rotation
         const vib = jumperState.vibration || 0;
@@ -537,22 +562,24 @@ export default class SkihoppRenderer {
         // --- Detect state transitions for particle effects ---
         if (this._prevGameState !== gameState) {
             if (gameState === GameState.FLIGHT && this._prevGameState === GameState.TAKEOFF) {
-                // Takeoff spark burst
-                this._particles.spawnBurst(25, {
+                // Takeoff spark burst - 30 bright white sparks spraying upward and outward
+                this._particles.spawnBurst(30, {
                     type: 'spark', color: '#ffffff',
                     x: jumperState.x, y: jumperState.y,
-                    speedMin: 1.5, speedMax: 4.5, spread: Math.PI * 0.8,
-                    sizeMin: 1, sizeMax: 3, lifeMin: 0.4, lifeMax: 0.8,
-                    gravity: 3, drag: 0.95,
+                    speedMin: 2.0, speedMax: 6.0, spread: Math.PI * 1.0,
+                    baseAngle: -Math.PI * 0.6,
+                    sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.5, lifeMax: 1.0,
+                    gravity: 2, drag: 0.93, posSpread: 1.5,
                 });
-                // Perfect takeoff: golden stars
-                if ((jumperState.takeoffQuality || 0) > 0.85) {
-                    this._particles.spawnBurst(20, {
+                // High-quality takeoff (> 0.8): 5 golden sparkles
+                if ((jumperState.takeoffQuality || 0) > 0.8) {
+                    this._particles.spawnBurst(5, {
                         type: 'star', color: '#ffd700',
                         x: jumperState.x, y: jumperState.y,
-                        speedMin: 0.8, speedMax: 2.5, spread: Math.PI * 1.4,
-                        sizeMin: 1.5, sizeMax: 3.5, lifeMin: 0.7, lifeMax: 1.2,
-                        gravity: -0.5, drag: 0.97,
+                        speedMin: 1.0, speedMax: 3.0, spread: Math.PI * 1.2,
+                        baseAngle: -Math.PI / 2,
+                        sizeMin: 2.0, sizeMax: 4.0, lifeMin: 0.8, lifeMax: 1.4,
+                        gravity: -0.8, drag: 0.96,
                     });
                 }
                 this._triggerTakeoffFlash(jumperState.x, jumperState.y);
@@ -561,49 +588,119 @@ export default class SkihoppRenderer {
             }
             if (gameState === GameState.LANDING && this._prevGameState === GameState.FLIGHT) {
                 const impactForce = Math.abs(jumperState.vy || 0) * 2;
-                const snowCount = Math.floor(15 + Math.min(30, impactForce * 3));
-                // Landing snowflake burst
-                this._particles.spawnBurst(snowCount, {
-                    type: 'snowflake', color: '#e0f0ff',
-                    x: jumperState.x, y: jumperState.y,
-                    speedMin: 0.8, speedMax: 3.0, spread: Math.PI * 1.2,
-                    sizeMin: 2, sizeMax: 5, lifeMin: 0.8, lifeMax: 1.6,
-                    gravity: 2, drag: 0.92, posSpread: 3,
-                });
                 // Spawn impact ripples on landing
                 this._impactRipples.push({ x: jumperState.x, y: jumperState.y, startTime: this._time });
-                // Perfect telemark: green stars
-                if ((jumperState.landingQuality || 0) > 0.8) {
+
+                if (impactForce < 3) {
+                    // Gentle landing: 15 light snow puffs
                     this._particles.spawnBurst(15, {
-                        type: 'star', color: '#44ff88',
-                        x: jumperState.x, y: jumperState.y - 0.5,
-                        speedMin: 0.5, speedMax: 2.0, spread: Math.PI * 1.4,
-                        sizeMin: 1.5, sizeMax: 3.0, lifeMin: 0.8, lifeMax: 1.4,
-                        gravity: -0.8, drag: 0.96,
+                        type: 'circle', color: '#f0f8ff',
+                        x: jumperState.x, y: jumperState.y,
+                        speedMin: 0.4, speedMax: 1.5, spread: Math.PI * 1.0,
+                        sizeMin: 2, sizeMax: 4, lifeMin: 0.6, lifeMax: 1.2,
+                        gravity: 0.5, drag: 0.90, posSpread: 2,
                     });
+                } else if (impactForce > 5) {
+                    // Hard landing: 40 snow particles with debris
+                    this._particles.spawnBurst(30, {
+                        type: 'snowflake', color: '#dce8f5',
+                        x: jumperState.x, y: jumperState.y,
+                        speedMin: 1.5, speedMax: 5.0, spread: Math.PI * 1.4,
+                        sizeMin: 2, sizeMax: 6, lifeMin: 0.8, lifeMax: 1.8,
+                        gravity: 3, drag: 0.90, posSpread: 4,
+                    });
+                    // Debris chunks
+                    this._particles.spawnBurst(10, {
+                        type: 'circle', color: '#b8cfe0',
+                        x: jumperState.x, y: jumperState.y,
+                        speedMin: 2.0, speedMax: 6.0, spread: Math.PI * 0.8,
+                        baseAngle: -Math.PI * 0.4,
+                        sizeMin: 1, sizeMax: 3, lifeMin: 0.5, lifeMax: 1.0,
+                        gravity: 6, drag: 0.94, posSpread: 2,
+                    });
+                } else {
+                    // Medium landing: proportional snow burst
+                    const snowCount = Math.floor(15 + (impactForce - 3) * 6);
+                    this._particles.spawnBurst(snowCount, {
+                        type: 'snowflake', color: '#e0f0ff',
+                        x: jumperState.x, y: jumperState.y,
+                        speedMin: 0.8, speedMax: 3.0, spread: Math.PI * 1.2,
+                        sizeMin: 2, sizeMax: 5, lifeMin: 0.8, lifeMax: 1.6,
+                        gravity: 2, drag: 0.92, posSpread: 3,
+                    });
+                }
+
+                // Perfect telemark: 20 golden star particles floating upward with sine-wave drift
+                if ((jumperState.landingQuality || 0) > 0.8) {
+                    for (let i = 0; i < 20; i++) {
+                        const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.8;
+                        const speed = 0.6 + Math.random() * 1.8;
+                        this._particles.spawn({
+                            type: 'star', color: '#ffd700',
+                            x: jumperState.x + (Math.random() - 0.5) * 3,
+                            y: jumperState.y - 0.3,
+                            vx: Math.cos(angle) * speed,
+                            vy: Math.sin(angle) * speed - 0.5,
+                            life: 1, maxLife: 1.2 + Math.random() * 0.8,
+                            size: 2.0 + Math.random() * 2.0,
+                            gravity: -0.6, drag: 0.97,
+                            sparklePhase: Math.random() * Math.PI * 2,
+                            sineDrift: 0.8 + Math.random() * 0.6,   // amplitude for sine wave
+                            sineFreq: 2.0 + Math.random() * 2.0,    // frequency for sine wave
+                        });
+                    }
+                }
+
+                // New record celebration: 50 multi-colored confetti from jumper position
+                if (jumperState.isNewRecord) {
+                    const confettiColors = ['#ffd700', '#c0c0c0', '#e03030', '#3060e0'];
+                    for (let i = 0; i < 50; i++) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const speed = 1.5 + Math.random() * 5.0;
+                        this._particles.spawn({
+                            type: 'confetti',
+                            color: confettiColors[i % confettiColors.length],
+                            x: jumperState.x,
+                            y: jumperState.y - 1,
+                            vx: Math.cos(angle) * speed,
+                            vy: Math.sin(angle) * speed - 2.0,
+                            life: 1, maxLife: 2.0 + Math.random() * 1.5,
+                            size: 1.5 + Math.random() * 2.0,
+                            gravity: 3.0, drag: 0.96,
+                            sparklePhase: Math.random() * Math.PI * 2,
+                        });
+                    }
                 }
             }
             this._prevGameState = gameState;
         }
 
-        // --- Continuous trail behind jumper during flight ---
+        // --- Continuous trail behind jumper during flight (dotted flight path) ---
         if (gameState === GameState.FLIGHT && jumperState) {
             this._trailFrameCounter++;
-            if (this._trailFrameCounter % 3 === 0) {
+            if (this._trailFrameCounter % 2 === 0) {
                 this._particles.spawn({
                     type: 'trail', color: '#c8deff',
                     x: jumperState.x, y: jumperState.y,
-                    vx: (Math.random() - 0.5) * 0.2,
-                    vy: (Math.random() - 0.5) * 0.1,
-                    life: 1, maxLife: 0.5,
-                    size: 1.5 + Math.random(),
-                    gravity: 0.3, drag: 0.98,
+                    vx: 0,
+                    vy: 0,
+                    life: 1, maxLife: 1.8,
+                    size: 1.8,
+                    gravity: 0, drag: 1.0,
                 });
             }
         }
 
-        // --- Update particle system ---
-        this._particles.update(1 / 60);
+        // --- Update particle system (frame-rate independent) ---
+        this._particles.update(dt);
+
+        // Apply sine-wave drift to telemark celebration stars
+        for (let i = 0; i < this._particles.particles.length; i++) {
+            const p = this._particles.particles[i];
+            if (p.sineDrift) {
+                p.vx += Math.sin(p.age * p.sineFreq) * p.sineDrift * dt;
+            }
+        }
 
         // --- Track distance milestones during flight ---
         if (gameState === GameState.FLIGHT) {
@@ -737,7 +834,7 @@ export default class SkihoppRenderer {
                 // CINEMATIC INRUN: start wide, gradually zoom in as speed builds.
                 // Subtle forward bias - camera slightly ahead of jumper.
                 const speed = jumperState.speed || 0;
-                const maxSpeed = 26; // matches SkihoppPhysics maxSpeed
+                const maxSpeed = 27; // matches SkihoppPhysics maxSpeed
                 const speedRatio = Math.min(speed / maxSpeed, 1);
                 const zoomEased = this._easeInOutCubic(speedRatio);
 
@@ -2713,8 +2810,12 @@ export default class SkihoppRenderer {
         ctx.restore();
     }
 
-    /** FLIGHT: body nearly horizontal, stretched forward, slight back arch, arms at sides, V-style skis 25 deg. */
-    _drawJumperFlight(ctx, s, angle) {
+    /**
+     * FLIGHT: body stretched and aerodynamic, V-style skis at 25deg each.
+     * Slight suit flutter on limb endpoints when not a ghost trail.
+     * @param {boolean} isGhost - true when drawing a motion trail ghost (skip flutter)
+     */
+    _drawJumperFlight(ctx, s, angle, isGhost) {
         ctx.rotate(angle);
 
         const hipX = 0;
@@ -3279,21 +3380,24 @@ export default class SkihoppRenderer {
 
     /**
      * Draw semi-transparent wind streaks during flight.
+     * Curved streaks that clearly follow wind direction and speed.
      */
     _drawWindStreaks(ctx, w, h, wind) {
-        if (!wind || wind.speed < 0.5) return;
+        if (!wind || wind.speed < 0.3) return;
 
-        // Initialize wind streaks if needed
+        // Initialize wind streaks if needed (8-10 streaks)
         if (this._windStreaks.length === 0) {
             const rng = seededRandom(12345);
-            const count = 5 + Math.floor(rng() * 4); // 5-8 streaks
+            const count = 8 + Math.floor(rng() * 3); // 8-10 streaks
             for (let i = 0; i < count; i++) {
                 this._windStreaks.push({
                     x: rng() * w,
                     y: rng() * h,
-                    length: 30 + rng() * 60,
-                    alpha: 0.05 + rng() * 0.05,
-                    speed: 0.8 + rng() * 0.4,
+                    length: 40 + rng() * 70,
+                    alpha: 0.08 + rng() * 0.07, // 0.08-0.15 range for visibility
+                    speed: 0.8 + rng() * 0.5,
+                    curve: (rng() - 0.5) * 0.4, // curve factor per streak
+                    width: 0.8 + rng() * 0.7,   // varied widths
                 });
             }
         }
@@ -3302,24 +3406,39 @@ export default class SkihoppRenderer {
         const windSpd = wind.speed || 0;
         const dx = Math.cos(windDir);
         const dy = Math.sin(windDir);
+        // Speed-based intensity scaling
+        const spdFactor = Math.min(windSpd / 4, 1);
 
         ctx.save();
         ctx.lineCap = 'round';
         for (const streak of this._windStreaks) {
-            // Move streak position
-            streak.x += dx * windSpd * streak.speed * 2;
-            streak.y += dy * windSpd * streak.speed * 0.5;
+            // Move streak position following wind direction clearly
+            streak.x += dx * windSpd * streak.speed * 3;
+            streak.y += dy * windSpd * streak.speed * 1.5;
 
             // Wrap around screen
             streak.x = ((streak.x % w) + w) % w;
             streak.y = ((streak.y % h) + h) % h;
 
-            ctx.globalAlpha = streak.alpha;
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 0.5;
+            // Alpha scales with wind speed for clear visibility
+            ctx.globalAlpha = streak.alpha * (0.5 + spdFactor * 0.5);
+            ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+            ctx.lineWidth = streak.width;
+
+            // Draw slightly curved streak using quadratic bezier
+            const len = streak.length * (0.7 + spdFactor * 0.5);
+            const endX = streak.x + dx * len;
+            const endY = streak.y + dy * len;
+            // Control point offset perpendicular to wind direction for curve
+            const perpX = -dy;
+            const perpY = dx;
+            const curveOffset = streak.curve * len * 0.3;
+            const cpX = (streak.x + endX) / 2 + perpX * curveOffset;
+            const cpY = (streak.y + endY) / 2 + perpY * curveOffset;
+
             ctx.beginPath();
             ctx.moveTo(streak.x, streak.y);
-            ctx.lineTo(streak.x + dx * streak.length, streak.y + dy * streak.length * 0.3);
+            ctx.quadraticCurveTo(cpX, cpY, endX, endY);
             ctx.stroke();
         }
         ctx.restore();
