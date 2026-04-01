@@ -257,12 +257,19 @@ class ParticlePool {
         ctx.stroke();
     }
 
-    /** Fading trail dot (used for jumper flight trail) */
+    /** Fading trail dot (used for jumper flight path -- visible dotted line) */
     _renderTrail(ctx, sp, p, alpha) {
-        ctx.globalAlpha = alpha * 0.4;
-        ctx.fillStyle = p.color;
+        // Bright core
+        ctx.globalAlpha = alpha * 0.7;
+        ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(sp.x, sp.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        // Coloured halo
+        ctx.globalAlpha = alpha * 0.35;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, p.size * 1.6, 0, Math.PI * 2);
         ctx.fill();
     }
 
@@ -3775,9 +3782,10 @@ export default class SkihoppRenderer {
             if (!p.isFlake) continue;
             const windFactor = 0.5 + p.depth * 0.5;
             const driftX = p.baseDriftX + windDriftX * windFactor;
+            const driftY = windDriftY * windFactor;
             const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
             const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
-            const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
+            const py = ((p.y + (p.speedY * verticalDamping + driftY) * t) % 1 + 1) % 1;
             const sx = (px * w) | 0;
             const sy = (py * h) | 0;
             const armLen = p.r * 1.2;

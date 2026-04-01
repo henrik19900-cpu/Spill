@@ -51,6 +51,14 @@ export default class StatsScreen {
             ...statsData,
         };
 
+        // Apply inertia scrolling (smooth momentum)
+        if (Math.abs(this._scrollVelocity) > 0.2) {
+            this.scrollOffset += this._scrollVelocity;
+            this._scrollVelocity *= 0.92;
+        } else {
+            this._scrollVelocity = 0;
+        }
+
         // Clamp scroll
         const headerH = 60;
         const maxScroll = Math.max(0, this._contentHeight - (height - headerH));

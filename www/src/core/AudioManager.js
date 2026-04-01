@@ -533,7 +533,8 @@ export default class AudioManager {
 
   /**
    * Continuous ski sliding sound on the inrun track.
-   * Intensity scales with speed (0-1 normalised).
+   * Progressive: louder and lower-pitched at high speed (icy rushing feel).
+   * Layers a high scrape noise and a low rumble noise for richness.
    * Call repeatedly to update; pass speed <= 0 to stop.
    *
    * @param {number} speed – 0-1 normalised slide intensity
@@ -551,12 +552,27 @@ export default class AudioManager {
           this.stopInrunSlide();
           return;
         }
-        this._slideGain.gain.linearRampToValueAtTime(speed * 0.15, this.ctx.currentTime + 0.05);
+        const t = this.ctx.currentTime + 0.05;
+        // Volume increases with speed (louder at high speed)
+        this._slideGain.gain.linearRampToValueAtTime(
+          0.05 + speed * 0.2, t,
+        );
         if (this._slideFilter) {
-          // Higher speed = brighter, more aggressive sliding
+          // Higher speed = lower center freq (rushing, heavier) + brighter top
           this._slideFilter.frequency.linearRampToValueAtTime(
-            200 + speed * 1800,
-            this.ctx.currentTime + 0.05,
+            400 + speed * 1200, t,
+          );
+        }
+        // Update rumble layer
+        if (this._slideRumbleGain) {
+          this._slideRumbleGain.gain.linearRampToValueAtTime(
+            speed * speed * 0.18, t,
+          );
+        }
+        if (this._slideRumbleFilter) {
+          // Rumble gets deeper at high speed
+          this._slideRumbleFilter.frequency.linearRampToValueAtTime(
+            150 + (1 - speed) * 200, t,
           );
         }
         return;
@@ -564,34 +580,53 @@ export default class AudioManager {
 
       if (speed <= 0) return;
 
-      // Create noise source (looped)
+      // --- Layer 1: Icy scrape (high noise through bandpass) ---
       const noiseBuf = this._createNoise(2);
       const source = this.ctx.createBufferSource();
       source.buffer = noiseBuf;
       source.loop = true;
 
-      // Highpass to remove low rumble, keeping the icy scrape character
+      // Highpass to keep icy scrape character
       const hp = this.ctx.createBiquadFilter();
       hp.type = 'highpass';
-      hp.frequency.value = 400;
+      hp.frequency.value = 300;
       hp.Q.value = 0.5;
 
       // Bandpass to shape the sliding tone
       const bp = this.ctx.createBiquadFilter();
       bp.type = 'bandpass';
-      bp.frequency.value = 200 + speed * 1800;
-      bp.Q.value = 0.8;
+      bp.frequency.value = 400 + speed * 1200;
+      bp.Q.value = 0.7;
 
       const gain = this.ctx.createGain();
-      gain.gain.value = speed * 0.15;
+      gain.gain.value = 0.05 + speed * 0.2;
 
       this._chain(source, hp, bp, gain, this._masterGain);
-
       source.start();
+
+      // --- Layer 2: Low rumble (noise through lowpass, grows with speed) ---
+      const rumbleBuf = this._createNoise(2);
+      const rumbleSource = this.ctx.createBufferSource();
+      rumbleSource.buffer = rumbleBuf;
+      rumbleSource.loop = true;
+
+      const rumbleLp = this.ctx.createBiquadFilter();
+      rumbleLp.type = 'lowpass';
+      rumbleLp.frequency.value = 150 + (1 - speed) * 200;
+      rumbleLp.Q.value = 1.0;
+
+      const rumbleGain = this.ctx.createGain();
+      rumbleGain.gain.value = speed * speed * 0.18;
+
+      this._chain(rumbleSource, rumbleLp, rumbleGain, this._masterGain);
+      rumbleSource.start();
 
       this._slideSource = source;
       this._slideGain = gain;
       this._slideFilter = bp;
+      this._slideRumbleSource = rumbleSource;
+      this._slideRumbleGain = rumbleGain;
+      this._slideRumbleFilter = rumbleLp;
     } catch (e) {
       console.warn('AudioManager.playInrunSlide error:', e);
     }
@@ -606,14 +641,24 @@ export default class AudioManager {
       const now = this.ctx.currentTime;
       this._slideGain.gain.linearRampToValueAtTime(0, now + 0.1);
       this._slideSource.stop(now + 0.15);
+      if (this._slideRumbleSource) {
+        this._slideRumbleGain.gain.linearRampToValueAtTime(0, now + 0.1);
+        this._slideRumbleSource.stop(now + 0.15);
+      }
       this._slideSource = null;
       this._slideGain = null;
       this._slideFilter = null;
+      this._slideRumbleSource = null;
+      this._slideRumbleGain = null;
+      this._slideRumbleFilter = null;
     } catch (e) {
       console.warn('AudioManager.stopInrunSlide error:', e);
       this._slideSource = null;
       this._slideGain = null;
       this._slideFilter = null;
+      this._slideRumbleSource = null;
+      this._slideRumbleGain = null;
+      this._slideRumbleFilter = null;
     }
   }
 
