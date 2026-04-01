@@ -345,7 +345,7 @@ export default class SkihoppGame {
         }
 
         try {
-            const { default: ProgressionManager } = await import('./ProgressionManager.js');
+            const { default: ProgressionManager } = await import('../../data/ProgressionManager.js');
             this.progression = new ProgressionManager();
         } catch (e) {
             console.warn('[SkihoppGame] ProgressionManager not available.', e.message);
@@ -357,7 +357,14 @@ export default class SkihoppGame {
         // ----------------------------------------------------------
         this.hillSelectScreen = new HillSelectScreen(this.progression);
         this.statsScreen = new StatsScreen();
-        this.settingsScreen = new SettingsScreen();
+        this.settingsScreen = new SettingsScreen({
+            volume: (this._audio && typeof this._audio.getVolume === 'function')
+                ? Math.round(this._audio.getVolume() * 100)
+                : 70,
+            haptic: game.config && game.config.haptic != null ? game.config.haptic : true,
+            difficulty: (game.config && game.config.difficulty) || 'normal',
+            controlType: (game.config && game.config.controlType) || 'swipe',
+        });
 
         // ----------------------------------------------------------
         // 13. Initial state is set by Game._init() after scene loads
@@ -656,7 +663,7 @@ export default class SkihoppGame {
                 } else {
                     const menuData = {
                         bestDistance: this._bestDistance,
-                        record: this.progression ? this.progression.getRecord() : null,
+                        record: this.progression ? this.progression.getRecord(this._currentHillKey) : null,
                         level: this.progression ? this.progression.getLevel() : 1,
                         xp: this.progression ? this.progression.getXP() : 0,
                         xpForNextLevel: this.progression ? this.progression.getXPForNextLevel() : 100,
@@ -1159,10 +1166,12 @@ export default class SkihoppGame {
                     const newUnlocks = this.progression.checkUnlocks();
                     const newAchievements = this.progression.checkAchievements({
                         distance: jumperState.landingDistance,
-                        totalPoints: this._scoreResult.totalPoints,
+                        points: this._scoreResult.totalPoints,
                         hillKey: this._currentHillKey,
                         landingQuality: jumperState.landingQuality,
-                        flightStability: jumperState.flightStability,
+                        takeoffQuality: jumperState.takeoffQuality,
+                        styleScore: this._scoreResult.stylePoints,
+                        windSpeed: this._scoreResult.windSpeed,
                     });
                     this._newUnlocks = newUnlocks;
                     this._newAchievements = newAchievements;

@@ -79,11 +79,12 @@ export default class AudioManager {
     }
 
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => { /* Android may reject if not truly interactive yet */ });
     }
 
     // Remove listeners once running
     if (this.ctx && this.ctx.state === 'running') {
+      this._resumed = true;
       const events = ['touchstart', 'touchend', 'mousedown', 'keydown', 'click'];
       events.forEach(e => document.removeEventListener(e, this._resumeHandler));
     }
@@ -95,7 +96,7 @@ export default class AudioManager {
       this._initContext();
     }
     if (!this._resumed && this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => { /* may reject on Android before user gesture */ });
     }
     if (this.ctx && this.ctx.state === 'running') {
       this._resumed = true;
@@ -1159,6 +1160,22 @@ export default class AudioManager {
   // -----------------------------------------------------------------------
   // Volume controls
   // -----------------------------------------------------------------------
+
+  /**
+   * Alias used by settings UI. Delegates to setMasterVolume.
+   * @param {number} vol – 0 to 1
+   */
+  setVolume(vol) {
+    this.setMasterVolume(vol);
+  }
+
+  /**
+   * Return current master volume (0 to 1).
+   * @returns {number}
+   */
+  getVolume() {
+    return this._masterVolume;
+  }
 
   /**
    * Set master volume.

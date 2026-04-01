@@ -322,6 +322,10 @@ export default class SkihoppRenderer {
         this._snowGroundRidges = null;
         // Cached mountain edge highlight color strings
         this._mountainEdgeColors = null;
+        // Cached tree data (avoid regenerating seeded-random tree positions every frame)
+        this._snowGroundTreesData = null;
+        this._pineTreesData = null;
+        this._snowBumps = null;
     }
 
     // ------------------------------------------------------------------
@@ -504,7 +508,7 @@ export default class SkihoppRenderer {
      * @param {object} wind        - { speed, direction }
      */
     render(ctx, width, height, jumperState, gameState, wind) {
-        if (!this._initialized || !this.renderer) return;
+        if (!this._initialized || !this.renderer || !jumperState) return;
 
         this._wind = wind || { speed: 0, direction: 0 };
         this._time += 1 / 60;
@@ -515,7 +519,8 @@ export default class SkihoppRenderer {
         // Camera shake from vibration/landing + cinematic rotation
         const vib = jumperState.vibration || 0;
         const hasRotation = Math.abs(this._cameraRotation || 0) > 0.0001;
-        if (vib > 0.01 || hasRotation) {
+        const _shakeActive = vib > 0.01 || hasRotation;
+        if (_shakeActive) {
             const shakeX = vib > 0.01 ? (Math.random() - 0.5) * vib * 4 : 0;
             const shakeY = vib > 0.01 ? (Math.random() - 0.5) * vib * 4 : 0;
             ctx.save();
@@ -656,8 +661,8 @@ export default class SkihoppRenderer {
         // Premium: lens flare from floodlights
         try { this._drawLensFlare(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawLensFlare error:', e); }
 
-        // Restore camera shake/rotation transform
-        if ((jumperState.vibration || 0) > 0.01 || Math.abs(this._cameraRotation || 0) > 0.0001) {
+        // Restore camera shake/rotation transform (must match the save above)
+        if (_shakeActive) {
             ctx.restore();
         }
 
@@ -1530,28 +1535,34 @@ export default class SkihoppRenderer {
     _drawSnowGroundTrees(ctx, w, h) {
         if (!this.hill) return;
         const r = this.renderer;
-        const rng = seededRandom(8888);
-        const profile = this.hill.getProfile();
-        const xStart = profile[0].x;
-        const xRange = profile[profile.length - 1].x - xStart;
 
-        const sizes = ['small', 'medium', 'large'];
-        const trees = [];
-        const treeCount = 18;
-        for (let i = 0; i < treeCount; i++) {
-            const wx = xStart + rng() * xRange;
-            const wy = this.hill.getHeightAtDistance(wx);
-            const distance = rng(); // 0 = far, 1 = near
-            const offsetY = 6 + (1 - distance) * 20 + rng() * 5;
-            const sizeIdx = Math.floor(rng() * 3);
-            const sizeLabel = sizes[sizeIdx];
-            const baseH = sizeLabel === 'small' ? 1.8 : sizeLabel === 'medium' ? 3.5 : 5.5;
-            const treeH = baseH + distance * 2 + rng() * 1.5;
-            trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng(), size: sizeLabel });
+        // Cache tree data to avoid regenerating every frame
+        if (!this._snowGroundTreesData) {
+            const rng = seededRandom(8888);
+            const profile = this.hill.getProfile();
+            const xStart = profile[0].x;
+            const xRange = profile[profile.length - 1].x - xStart;
+
+            const sizes = ['small', 'medium', 'large'];
+            const trees = [];
+            const treeCount = 18;
+            for (let i = 0; i < treeCount; i++) {
+                const wx = xStart + rng() * xRange;
+                const wy = this.hill.getHeightAtDistance(wx);
+                const distance = rng(); // 0 = far, 1 = near
+                const offsetY = 6 + (1 - distance) * 20 + rng() * 5;
+                const sizeIdx = Math.floor(rng() * 3);
+                const sizeLabel = sizes[sizeIdx];
+                const baseH = sizeLabel === 'small' ? 1.8 : sizeLabel === 'medium' ? 3.5 : 5.5;
+                const treeH = baseH + distance * 2 + rng() * 1.5;
+                trees.push({ wx, wy: wy + offsetY, h: treeH, distance, seed: rng(), size: sizeLabel });
+            }
+
+            // Sort: far trees first (drawn behind near trees)
+            trees.sort((a, b) => a.distance - b.distance);
+            this._snowGroundTreesData = trees;
         }
-
-        // Sort: far trees first (drawn behind near trees)
-        trees.sort((a, b) => a.distance - b.distance);
+        const trees = this._snowGroundTreesData;
 
         for (const tree of trees) {
             const base = r.worldToScreen(tree.wx, tree.wy);
@@ -1629,25 +1640,31 @@ export default class SkihoppRenderer {
     _drawPineTrees(ctx, w, h) {
         if (!this.hill) return;
         const r = this.renderer;
-        const rng = seededRandom(3141);
-        const profile = this.hill.getProfile();
-        const startX = profile[0].x;
-        const endX = profile[profile.length - 1].x;
 
-        // Trees on both sides of the hill (offset laterally by drawing them
-        // above the hill surface at different x positions)
-        const treePositions = [];
-        for (let i = 0; i < 40; i++) {
-            const wx = startX + rng() * (endX - startX);
-            const wy = this.hill.getHeightAtDistance(wx);
-            // Offset trees below/behind the slope (positive y = further down)
-            const offsetY = 4 + rng() * 18;
-            const treeH = 3 + rng() * 5; // tree height in meters
-            treePositions.push({ wx, wy: wy + offsetY, h: treeH, shade: rng() });
+        // Cache tree data to avoid regenerating every frame
+        if (!this._pineTreesData) {
+            const rng = seededRandom(3141);
+            const profile = this.hill.getProfile();
+            const startX = profile[0].x;
+            const endX = profile[profile.length - 1].x;
+
+            // Trees on both sides of the hill (offset laterally by drawing them
+            // above the hill surface at different x positions)
+            const treePositions = [];
+            for (let i = 0; i < 40; i++) {
+                const wx = startX + rng() * (endX - startX);
+                const wy = this.hill.getHeightAtDistance(wx);
+                // Offset trees below/behind the slope (positive y = further down)
+                const offsetY = 4 + rng() * 18;
+                const treeH = 3 + rng() * 5; // tree height in meters
+                treePositions.push({ wx, wy: wy + offsetY, h: treeH, shade: rng() });
+            }
+
+            // Sort by y so farther trees draw first
+            treePositions.sort((a, b) => a.wy - b.wy);
+            this._pineTreesData = treePositions;
         }
-
-        // Sort by y so farther trees draw first
-        treePositions.sort((a, b) => a.wy - b.wy);
+        const treePositions = this._pineTreesData;
 
         for (const tree of treePositions) {
             const base = r.worldToScreen(tree.wx, tree.wy);
@@ -1700,7 +1717,6 @@ export default class SkihoppRenderer {
     _drawCrowdArea(ctx, w, h) {
         if (!this.hill) return;
         const r = this.renderer;
-        const rng = seededRandom(5555);
         const outrunEnd = this.hill.getOutrunEndPosition();
         const kp = this.hill.getKPointPosition();
 

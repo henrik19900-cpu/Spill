@@ -228,9 +228,9 @@ export default class JudgeDisplay {
         const cardY = height * 0.14;
 
         for (let i = 0; i < cardCount; i++) {
-            // Each card flips in at a staggered point in animation
-            const cardStart = i * 0.10;
-            const cardEnd = cardStart + 0.15;
+            // Each card flips in at a staggered point in animation (0.2–0.7 range)
+            const cardStart = 0.20 + i * 0.08;
+            const cardEnd = cardStart + 0.12;
             const cardProgress = Math.max(0, Math.min(1, (progress - cardStart) / (cardEnd - cardStart)));
 
             if (cardProgress <= 0) continue;
