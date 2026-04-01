@@ -404,7 +404,11 @@ export class Game {
     const { ctx, width, height } = this;
 
     try {
-      // Clear
+      // Ensure DPR transform is always set (can be lost after errors)
+      const dpr = this.dpr || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Clear entire canvas
       ctx.clearRect(0, 0, width, height);
 
       if (this._state === GameState.LOADING) {
