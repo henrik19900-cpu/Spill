@@ -243,9 +243,11 @@ export default class AudioManager {
     try {
       if (!this._windSource || !this.ctx) return;
       const now = this.ctx.currentTime;
+      this._windGain.gain.setValueAtTime(this._windGain.gain.value, now);
       this._windGain.gain.linearRampToValueAtTime(0, now + 0.2);
       this._windSource.stop(now + 0.25);
       if (this._windHighSource) {
+        this._windHighGain.gain.setValueAtTime(this._windHighGain.gain.value, now);
         this._windHighGain.gain.linearRampToValueAtTime(0, now + 0.2);
         this._windHighSource.stop(now + 0.25);
       }
@@ -752,9 +754,11 @@ export default class AudioManager {
     try {
       if (!this._slideSource || !this.ctx) return;
       const now = this.ctx.currentTime;
+      this._slideGain.gain.setValueAtTime(this._slideGain.gain.value, now);
       this._slideGain.gain.linearRampToValueAtTime(0, now + 0.1);
       this._slideSource.stop(now + 0.15);
       if (this._slideRumbleSource) {
+        this._slideRumbleGain.gain.setValueAtTime(this._slideRumbleGain.gain.value, now);
         this._slideRumbleGain.gain.linearRampToValueAtTime(0, now + 0.1);
         this._slideRumbleSource.stop(now + 0.15);
       }

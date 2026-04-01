@@ -592,12 +592,12 @@ export default class SkihoppGame {
         }
 
         // Track max height and top speed during active phases
-        if (state === GameState.INRUN || state === GameState.TAKEOFF) {
-            const spd = this.jumper.getState().speed || 0;
+        if (jumperState && (state === GameState.INRUN || state === GameState.TAKEOFF)) {
+            const spd = jumperState.speed || 0;
             if (spd > this._trackTopSpeed) this._trackTopSpeed = spd;
         }
-        if (state === GameState.FLIGHT) {
-            const hag = this.jumper.getState().heightAboveGround || 0;
+        if (jumperState && state === GameState.FLIGHT) {
+            const hag = jumperState.heightAboveGround || 0;
             if (hag > this._trackMaxHeight) this._trackMaxHeight = hag;
         }
 
@@ -696,8 +696,7 @@ export default class SkihoppGame {
     render(ctx, width, height) {
         if (!this.game) return;
         const state = this.game.getState();
-        if (!this.jumper) return;
-        const jumperState = this.jumper.getState();
+        const jumperState = this.jumper ? this.jumper.getState() : null;
 
         // --- PREMIUM: Screen shake offset ---
         const shake = this._getShakeOffset();
@@ -750,6 +749,7 @@ export default class SkihoppGame {
                 break;
 
             case GameState.READY: {
+                if (!jumperState) break;
                 // MENU->READY zoom-in effect (0.5s)
                 const zoomFx = this._transitionEffects.menuToReadyZoom;
                 const hasZoom = zoomFx.active;
@@ -835,6 +835,7 @@ export default class SkihoppGame {
             case GameState.TAKEOFF:
             case GameState.FLIGHT:
             case GameState.LANDING: {
+                if (!jumperState) break;
                 // Render the 3D scene
                 if (this.skihoppRenderer) {
                     this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
@@ -962,7 +963,8 @@ export default class SkihoppGame {
                 break;
             }
 
-            case GameState.SCORE:
+            case GameState.SCORE: {
+                if (!jumperState) break;
                 // Frozen scene behind the score overlay
                 if (this.skihoppRenderer) {
                     this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
@@ -993,6 +995,7 @@ export default class SkihoppGame {
                     });
                 }
                 break;
+            }
 
             case GameState.RESULTS: {
                 if (!this.scoreboard) break;

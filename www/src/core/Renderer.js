@@ -8,6 +8,8 @@
 export default class Renderer {
     constructor(game) {
         this.game = game;
+        this.canvas = game.canvas;
+        this.ctx = game.ctx;
 
         // Camera state (world coordinates in meters)
         this.cameraX = 0;
@@ -84,18 +86,15 @@ export default class Renderer {
     }
 
     /**
-     * Smoothly interpolate zoom toward a target value using cubic easing.
+     * Smoothly interpolate zoom toward a target value.
+     * Uses the same exponential easing as smoothFollow.
      * @param {number} targetZoom
      * @param {number} dt
      * @param {number} speed
      */
     smoothZoom(targetZoom, dt, speed = 3) {
-        const diff = targetZoom - this.zoom;
-        // Use cubic easing on the exponential factor for smoother acceleration
-        const rawFactor = 1 - Math.exp(-speed * dt);
-        // Map the raw factor through cubic ease for non-linear smoothness
-        const factor = this._easeInOutCubic(rawFactor / 0.5) * 0.5;
-        this.zoom += diff * (factor || rawFactor);
+        const factor = 1 - Math.exp(-speed * dt);
+        this.zoom += (targetZoom - this.zoom) * factor;
         this._recalcScale();
     }
 

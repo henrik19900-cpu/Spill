@@ -320,7 +320,7 @@ export default class SkihoppControls {
         break;
 
       case GameState.SCORE:
-        this._handleScoreTap();
+        this._handleScoreTap(x, y);
         break;
 
       case GameState.RESULTS:

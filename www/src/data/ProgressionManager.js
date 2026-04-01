@@ -334,6 +334,26 @@ export default class ProgressionManager {
   }
 
   // ----------------------------------------------------------------
+  // Streak / Combo
+  // ----------------------------------------------------------------
+
+  /**
+   * Store the current combo-streak length (e.g. consecutive good jumps).
+   * Called by SkihoppGame when comboCount >= 2.
+   * @param {number} count
+   */
+  setStreak(count) {
+    const prev = this.storage.load('bestStreak', 0);
+    if (count > prev) {
+      this.storage.save('bestStreak', count);
+    }
+  }
+
+  getStreak() {
+    return this.storage.load('bestStreak', 0);
+  }
+
+  // ----------------------------------------------------------------
   // Settings
   // ----------------------------------------------------------------
 
