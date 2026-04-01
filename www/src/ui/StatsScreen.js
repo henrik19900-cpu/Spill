@@ -298,19 +298,30 @@ export default class StatsScreen {
         const cols = 2;
         const rows = 3;
         const cellW = (width - padX * 2 - gap) / cols;
-        const cellH = 68;
+        const cellH = 78;
+
+        // Section header
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = `bold ${Math.min(width * 0.032, 13)}px sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('OVERSIKT', padX, y + 8);
+        ctx.restore();
+
+        y += 24;
 
         const stats = [
-            { value: data.totalJumps, label: 'Total hopp' },
-            { value: this._formatDist(data.bestDistances?.K90), label: 'Beste K90' },
-            { value: this._formatDist(data.bestDistances?.K120), label: 'Beste K120' },
-            { value: this._formatDist(data.bestDistances?.K185), label: 'Beste K185' },
-            { value: data.avgScore != null ? data.avgScore.toFixed(1) : '-', label: 'Snittpoeng' },
-            { value: data.perfectLandings, label: 'Perfekte landinger' },
+            { value: data.totalJumps, label: 'Total hopp', icon: '\u26F7' },
+            { value: this._formatDist(data.bestDistances?.K90), label: 'Beste K90', icon: '\u2B50' },
+            { value: this._formatDist(data.bestDistances?.K120), label: 'Beste K120', icon: '\u2B50' },
+            { value: this._formatDist(data.bestDistances?.K185), label: 'Beste K185', icon: '\u2B50' },
+            { value: data.avgScore != null ? data.avgScore.toFixed(1) : '-', label: 'Snittpoeng', icon: '\u2300' },
+            { value: data.perfectLandings, label: 'Perfekte landinger', icon: '\u2714' },
         ];
 
-        const valueFontSize = Math.min(width * 0.065, 26);
-        const labelFontSize = Math.min(width * 0.03, 12);
+        const valueFontSize = Math.min(width * 0.075, 30);
+        const labelFontSize = Math.min(width * 0.028, 11);
 
         for (let i = 0; i < stats.length; i++) {
             const col = i % cols;
@@ -318,25 +329,47 @@ export default class StatsScreen {
             const cx = padX + col * (cellW + gap);
             const cy = y + row * (cellH + gap);
 
-            // Cell background
             ctx.save();
-            ctx.fillStyle = 'rgba(255,255,255,0.05)';
-            this._roundRect(ctx, cx, cy, cellW, cellH, 10);
+
+            // Cell background with subtle gradient
+            const cellGrad = ctx.createLinearGradient(cx, cy, cx, cy + cellH);
+            cellGrad.addColorStop(0, 'rgba(255,255,255,0.07)');
+            cellGrad.addColorStop(1, 'rgba(255,255,255,0.03)');
+            ctx.fillStyle = cellGrad;
+            this._roundRect(ctx, cx, cy, cellW, cellH, 12);
             ctx.fill();
 
-            // Value
+            // Subtle top border highlight
+            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            ctx.lineWidth = 1;
+            this._roundRect(ctx, cx, cy, cellW, cellH, 12);
+            ctx.stroke();
+
+            // Large bold value
             ctx.fillStyle = '#ffffff';
             ctx.font = `bold ${valueFontSize}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(String(stats[i].value), cx + cellW / 2, cy + cellH * 0.38);
 
-            // Label
-            ctx.fillStyle = 'rgba(255,255,255,0.45)';
+            // Label below
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
             ctx.font = `${labelFontSize}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(stats[i].label, cx + cellW / 2, cy + cellH * 0.75);
+            ctx.letterSpacing = '0.5px';
+            ctx.fillText(stats[i].label.toUpperCase(), cx + cellW / 2, cy + cellH * 0.72);
+            ctx.letterSpacing = '0px';
+
+            // Subtle bottom accent line
+            const accentW = cellW * 0.3;
+            ctx.strokeStyle = 'rgba(100,160,255,0.15)';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(cx + (cellW - accentW) / 2, cy + cellH - 6);
+            ctx.lineTo(cx + (cellW + accentW) / 2, cy + cellH - 6);
+            ctx.stroke();
 
             ctx.restore();
         }
@@ -468,15 +501,34 @@ export default class StatsScreen {
             ctx.restore();
         }
 
-        // Dots
+        // Dots with glow
         for (let i = 0; i < points.length; i++) {
+            ctx.save();
+            // Outer glow
+            ctx.shadowColor = 'rgba(74,222,128,0.5)';
+            ctx.shadowBlur = 6;
             ctx.beginPath();
-            ctx.arc(points[i].x, points[i].y, 3.5, 0, Math.PI * 2);
+            ctx.arc(points[i].x, points[i].y, 4, 0, Math.PI * 2);
             ctx.fillStyle = '#4ade80';
             ctx.fill();
-            ctx.strokeStyle = '#0a0e1a';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            ctx.shadowBlur = 0;
+            // White center dot
+            ctx.beginPath();
+            ctx.arc(points[i].x, points[i].y, 1.5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.fill();
+            ctx.restore();
+
+            // Distance label on last point
+            if (i === points.length - 1 && jumps[i] != null) {
+                ctx.save();
+                ctx.fillStyle = '#4ade80';
+                ctx.font = `bold ${Math.min(width * 0.025, 10)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(`${jumps[i].toFixed(1)}m`, points[i].x, points[i].y - 8);
+                ctx.restore();
+            }
         }
 
         // X-axis: jump numbers

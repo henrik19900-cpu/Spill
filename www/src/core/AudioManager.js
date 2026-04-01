@@ -919,14 +919,22 @@ export default class AudioManager {
       const now = this.ctx.currentTime;
       this._crowdGain.gain.linearRampToValueAtTime(0, now + 0.2);
       this._crowdSource.stop(now + 0.25);
+      if (this._crowdHighSource) {
+        this._crowdHighGain.gain.linearRampToValueAtTime(0, now + 0.2);
+        this._crowdHighSource.stop(now + 0.25);
+      }
       this._crowdSource = null;
       this._crowdGain = null;
       this._crowdFilter = null;
+      this._crowdHighSource = null;
+      this._crowdHighGain = null;
     } catch (e) {
       console.warn('AudioManager.stopCrowdAmbience error:', e);
       this._crowdSource = null;
       this._crowdGain = null;
       this._crowdFilter = null;
+      this._crowdHighSource = null;
+      this._crowdHighGain = null;
     }
   }
 
