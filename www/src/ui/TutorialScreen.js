@@ -61,7 +61,7 @@ export default class TutorialScreen {
                 title: 'SVEV',
                 color: '#44ddff',
                 desc: 'SVEIP opp/ned for å justere\nkroppsvinkelen',
-                hint: 'Optimal vinkel ≈ 35° for maks lengde',
+                hint: 'Optimal vinkel ≈ 33-35° for maks lengde',
             },
             {
                 title: 'LANDING',
