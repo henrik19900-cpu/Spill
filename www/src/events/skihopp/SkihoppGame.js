@@ -1276,7 +1276,8 @@ export default class SkihoppGame {
                 break;
             }
 
-            case GameState.LANDING:
+            case GameState.LANDING: {
+                if (!jumperState) break;
                 // Stop replay recording
                 if (this.replay && typeof this.replay.stopRecording === 'function') {
                     this.replay.stopRecording();
@@ -1338,13 +1339,14 @@ export default class SkihoppGame {
                     this._safeAudioCall('playCrowdCheer', cheerIntensity);
                 }
                 break;
+            }
 
             case GameState.SCORE:
                 // Stop wind sound when leaving active phases
                 this._safeAudioCall('stopWind');
 
                 // Calculate score
-                this._scoreResult = this.scoringSystem ? this.scoringSystem.calculateScore({
+                this._scoreResult = (this.scoringSystem && jumperState) ? this.scoringSystem.calculateScore({
                     distance: jumperState.landingDistance,
                     takeoffQuality: jumperState.takeoffQuality,
                     flightStability: jumperState.flightStability,
@@ -1374,7 +1376,7 @@ export default class SkihoppGame {
                 }
 
                 // Progression tracking
-                if (this.progression && this._scoreResult) {
+                if (this.progression && this._scoreResult && jumperState) {
                     this.progression.addJump(
                         this._currentHillKey,
                         jumperState.landingDistance,
