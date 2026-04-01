@@ -223,8 +223,8 @@ export default class SkihoppPhysics {
         // Friction: linear (ski friction) + quadratic (air drag) for natural speed curve
         // Tuck position reduces air drag significantly.
         // Drag coefficients are tuned so that:
-        //   tucked terminal velocity  ≈ maxSpeed (~27 m/s, ~97 km/h)
-        //   untucked terminal velocity ≈ 80% of maxSpeed (~22 m/s, ~79 km/h)
+        //   tucked terminal velocity  ≈ maxSpeed on steep slope (~85-90 km/h on K120)
+        //   untucked terminal velocity ≈ 80% of tucked
         // Terminal speed = sqrt((g*sin(a) - friction*g*cos(a)) / dragCoeff)
         const isTucked = j.isTucked || false;
         const airDragCoeff = isTucked ? 0.0040 : 0.0065;
