@@ -720,6 +720,10 @@ export default class SkihoppRenderer {
         // prevent the remaining layers from rendering.
         try { this._drawSky(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawSky error:', e); }
         try { this._drawMountains(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawMountains error:', e); }
+
+        // Ambient fog/mist at the base of mountains
+        try { this._drawMountainFog(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawMountainFog error:', e); }
+
         try { this._drawSnowGround(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawSnowGround error:', e); }
         try { this._drawHillSurface(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawHillSurface error:', e); }
 
@@ -1277,6 +1281,42 @@ export default class SkihoppRenderer {
                 }
             }
         }
+    }
+
+    /**
+     * Draw subtle fog/mist at the base of mountains (horizon level).
+     * Semi-transparent white gradient that adds atmospheric depth.
+     */
+    _drawMountainFog(ctx, w, h) {
+        ctx.save();
+
+        // Fog sits at the lower portion of the mountain area (~55-75% of screen height)
+        const fogTop = h * 0.50;
+        const fogBottom = h * 0.72;
+        const fogHeight = fogBottom - fogTop;
+
+        // Main fog band: semi-transparent white gradient
+        const fogGrad = ctx.createLinearGradient(0, fogTop, 0, fogBottom);
+        fogGrad.addColorStop(0, 'rgba(200,210,230,0)');
+        fogGrad.addColorStop(0.25, 'rgba(210,220,240,0.06)');
+        fogGrad.addColorStop(0.5, 'rgba(220,230,245,0.10)');
+        fogGrad.addColorStop(0.75, 'rgba(215,225,240,0.07)');
+        fogGrad.addColorStop(1, 'rgba(200,215,235,0)');
+        ctx.fillStyle = fogGrad;
+        ctx.fillRect(0, fogTop, w, fogHeight);
+
+        // Secondary thinner mist layer slightly higher for depth
+        const mistTop = h * 0.42;
+        const mistBottom = h * 0.58;
+        const mistGrad = ctx.createLinearGradient(0, mistTop, 0, mistBottom);
+        mistGrad.addColorStop(0, 'rgba(200,215,240,0)');
+        mistGrad.addColorStop(0.4, 'rgba(210,220,240,0.04)');
+        mistGrad.addColorStop(0.7, 'rgba(215,225,245,0.05)');
+        mistGrad.addColorStop(1, 'rgba(200,215,235,0)');
+        ctx.fillStyle = mistGrad;
+        ctx.fillRect(0, mistTop, w, mistBottom - mistTop);
+
+        ctx.restore();
     }
 
     // ------------------------------------------------------------------
@@ -2450,6 +2490,95 @@ export default class SkihoppRenderer {
         ctx.strokeStyle = '#556677';
         ctx.lineWidth = 1;
         ctx.strokeRect(top.x - towerWidth / 2 - 3, top.y - 7, towerWidth + 6, 3);
+
+        // Windsock on a pole near the judges tower
+        this._drawWindsock(ctx, top, towerWidth);
+    }
+
+    /**
+     * Draw a windsock on a pole near the judges tower.
+     * Sock angle follows wind direction, droop follows wind speed.
+     */
+    _drawWindsock(ctx, towerTop, towerWidth) {
+        const wind = this._wind || { speed: 0, direction: 0 };
+        const t = this._time || 0;
+        const windSpd = wind.speed || 0;
+        const windDir = wind.direction || 0;
+
+        // Pole position: to the right of the tower roof
+        const poleBaseX = towerTop.x + towerWidth / 2 + 8;
+        const poleBaseY = towerTop.y - 4;
+        const poleHeight = 20;
+        const poleTopX = poleBaseX;
+        const poleTopY = poleBaseY - poleHeight;
+
+        ctx.save();
+
+        // Draw pole
+        ctx.beginPath();
+        ctx.moveTo(poleBaseX, poleBaseY);
+        ctx.lineTo(poleTopX, poleTopY);
+        ctx.strokeStyle = '#778899';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Small ball at top of pole
+        ctx.beginPath();
+        ctx.arc(poleTopX, poleTopY, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#aabbcc';
+        ctx.fill();
+
+        // Windsock: angle and droop based on wind
+        // At 0 wind: sock hangs straight down. At strong wind: nearly horizontal.
+        const maxSockLen = 14;
+        const sockSegments = 5;
+        const segLen = maxSockLen / sockSegments;
+
+        // Wind direction projected to screen
+        const windDx = Math.cos(windDir);
+        // Droop factor: 0 = fully drooping, 1 = fully extended
+        const extension = Math.min(windSpd / 4, 1);
+        // Sock angle: from straight down (PI/2) to horizontal (0) based on wind
+        const droopAngle = (Math.PI / 2) * (1 - extension);
+        // Horizontal direction: follow wind
+        const hDir = windDx >= 0 ? 1 : -1;
+
+        // Draw sock as connected segments with decreasing width (tapered cone)
+        let sx = poleTopX;
+        let sy = poleTopY;
+        const colors = ['#ff3333', '#ffffff', '#ff3333', '#ffffff', '#ff6633'];
+
+        for (let seg = 0; seg < sockSegments; seg++) {
+            const segFrac = seg / sockSegments;
+            const segWidth = (3.5 - segFrac * 2.5);
+            const flutter = Math.sin(t * 6 + seg * 1.2) * (1 - extension) * 2;
+
+            const angle = droopAngle + Math.sin(t * 4 + seg * 0.8) * 0.1 * (1 - extension * 0.5);
+            const nx = hDir * Math.cos(angle) * segLen;
+            const ny = Math.sin(angle) * segLen + flutter * 0.3;
+
+            const ex = sx + nx;
+            const ey = sy + ny;
+
+            const perpX = -ny / segLen;
+            const perpY = nx / segLen;
+
+            ctx.beginPath();
+            ctx.moveTo(sx + perpX * segWidth, sy + perpY * segWidth);
+            ctx.lineTo(sx - perpX * segWidth, sy - perpY * segWidth);
+            const nextWidth = (3.5 - (segFrac + 1 / sockSegments) * 2.5);
+            ctx.lineTo(ex - perpX * nextWidth, ey - perpY * nextWidth);
+            ctx.lineTo(ex + perpX * nextWidth, ey + perpY * nextWidth);
+            ctx.closePath();
+            ctx.fillStyle = colors[seg % colors.length];
+            ctx.globalAlpha = 0.85;
+            ctx.fill();
+
+            sx = ex;
+            sy = ey;
+        }
+
+        ctx.restore();
     }
 
     // ------------------------------------------------------------------

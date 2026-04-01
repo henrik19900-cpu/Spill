@@ -334,61 +334,82 @@ export default class AudioManager {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
       intensity = Math.max(0, Math.min(1, intensity));
-      const duration = 1.0 + intensity * 2.0; // 1-3 seconds
+      const duration = 1.5 + intensity * 2.5; // 1.5-4 seconds (longer = bigger jump)
 
-      // Layer 1 -- low rumble noise
+      // Layer 1 -- low rumble (crowd body)
       const rumbleBuf = this._createNoise(duration);
       const rumbleSrc = this.ctx.createBufferSource();
       rumbleSrc.buffer = rumbleBuf;
 
       const rumbleLp = this.ctx.createBiquadFilter();
       rumbleLp.type = 'lowpass';
-      rumbleLp.frequency.value = 600;
-      rumbleLp.Q.value = 1;
+      rumbleLp.frequency.value = 500 + intensity * 300;
+      rumbleLp.Q.value = 0.8;
 
       const rumbleGain = this.ctx.createGain();
       rumbleGain.gain.setValueAtTime(0.001, now);
-      rumbleGain.gain.linearRampToValueAtTime(intensity * 0.35, now + 0.15);
-      rumbleGain.gain.setValueAtTime(intensity * 0.35, now + duration * 0.6);
+      // Explosive onset then sustained roar
+      rumbleGain.gain.linearRampToValueAtTime(intensity * 0.45, now + 0.08);
+      rumbleGain.gain.setValueAtTime(intensity * 0.4, now + duration * 0.5);
       rumbleGain.gain.linearRampToValueAtTime(0.0, now + duration);
 
       this._chain(rumbleSrc, rumbleLp, rumbleGain, this._masterGain);
 
-      // Layer 2 -- mid-range "roar"
+      // Layer 2 -- mid-range roar (excitement)
       const roarBuf = this._createNoise(duration);
       const roarSrc = this.ctx.createBufferSource();
       roarSrc.buffer = roarBuf;
 
       const roarBp = this.ctx.createBiquadFilter();
       roarBp.type = 'bandpass';
-      roarBp.frequency.value = 2000;
-      roarBp.Q.value = 0.8;
+      roarBp.frequency.value = 1800;
+      roarBp.Q.value = 0.6;
 
       const roarGain = this.ctx.createGain();
       roarGain.gain.setValueAtTime(0.001, now);
-      roarGain.gain.linearRampToValueAtTime(intensity * 0.2, now + 0.2);
+      roarGain.gain.linearRampToValueAtTime(intensity * 0.25, now + 0.1);
       // Wobble the crowd -- modulate gain slightly for realism
-      for (let t = 0.3; t < duration - 0.3; t += 0.15) {
-        const wobble = intensity * (0.15 + Math.random() * 0.1);
+      for (let t = 0.3; t < duration - 0.3; t += 0.12) {
+        const wobble = intensity * (0.18 + Math.random() * 0.12);
         roarGain.gain.linearRampToValueAtTime(wobble, now + t);
       }
       roarGain.gain.linearRampToValueAtTime(0.0, now + duration);
 
       this._chain(roarSrc, roarBp, roarGain, this._masterGain);
 
+      // Layer 3 -- high excitement shriek (only at high intensity)
+      const shriekBuf = this._createNoise(duration);
+      const shriekSrc = this.ctx.createBufferSource();
+      shriekSrc.buffer = shriekBuf;
+
+      const shriekBp = this.ctx.createBiquadFilter();
+      shriekBp.type = 'bandpass';
+      shriekBp.frequency.value = 4000;
+      shriekBp.Q.value = 1.5;
+
+      const shriekGain = this.ctx.createGain();
+      const shriekVol = Math.max(0, (intensity - 0.4) * 0.2);
+      shriekGain.gain.setValueAtTime(0.001, now);
+      shriekGain.gain.linearRampToValueAtTime(shriekVol, now + 0.15);
+      shriekGain.gain.setValueAtTime(shriekVol * 0.8, now + duration * 0.4);
+      shriekGain.gain.linearRampToValueAtTime(0.0, now + duration * 0.8);
+
+      this._chain(shriekSrc, shriekBp, shriekGain, this._masterGain);
+
       rumbleSrc.start(now);
       rumbleSrc.stop(now + duration);
       roarSrc.start(now);
       roarSrc.stop(now + duration);
+      shriekSrc.start(now);
+      shriekSrc.stop(now + duration);
     } catch (e) {
       console.warn('AudioManager.playCrowdCheer error:', e);
     }
   }
 
   /**
-   * Landing thud with reverb-like echo for added weight.
-   * Better quality -> cleaner, less distorted sound.
-   * A delayed quieter copy plays 100ms later at 50% volume for depth.
+   * Deep, satisfying landing thud with 100ms delayed echo.
+   * Better quality = cleaner tonal hit. Poor quality = heavy crunch.
    * @param {number} quality - 0 (crash) to 1 (perfect telemark)
    */
   playLanding(quality = 0.5) {
@@ -398,63 +419,88 @@ export default class AudioManager {
       const now = this.ctx.currentTime;
       quality = Math.max(0, Math.min(1, quality));
 
-      // Play the main thud and its echo (delayed copy)
+      // Play the main thud and its echo (delayed copy for weight)
       const offsets = [
         { time: 0, vol: 1.0 },      // main hit
-        { time: 0.1, vol: 0.5 },    // reverb echo at 100ms, 50% volume
+        { time: 0.1, vol: 0.45 },   // echo at 100ms, 45% volume
       ];
 
       offsets.forEach(({ time: offset, vol: echoVol }) => {
         const t = now + offset;
 
-        // --- Deep thud oscillator (60Hz sine) ---
+        // --- Sub-bass punch (30Hz sine, very short) for visceral weight ---
+        const sub = this.ctx.createOscillator();
+        sub.type = 'sine';
+        sub.frequency.setValueAtTime(30, t);
+        sub.frequency.exponentialRampToValueAtTime(15, t + 0.2);
+
+        const subGain = this.ctx.createGain();
+        subGain.gain.setValueAtTime(0.55 * echoVol, t);
+        subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+
+        this._chain(sub, subGain, this._masterGain);
+
+        // --- Deep thud oscillator (60Hz sine, sweeps down) ---
         const thud = this.ctx.createOscillator();
         thud.type = 'sine';
         thud.frequency.setValueAtTime(60, t);
-        thud.frequency.exponentialRampToValueAtTime(25, t + 0.35);
+        thud.frequency.exponentialRampToValueAtTime(22, t + 0.4);
 
         const thudGain = this.ctx.createGain();
-        const thudVolumeBase = 0.5 + quality * 0.3;
+        const thudVolumeBase = 0.55 + quality * 0.25;
         thudGain.gain.setValueAtTime(thudVolumeBase * echoVol, t);
-        thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+        thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
 
         this._chain(thud, thudGain, this._masterGain);
 
-        // --- Mid body oscillator (80-120Hz) for tonal character ---
+        // --- Mid body oscillator (tonal character, cleaner at high quality) ---
         const body = this.ctx.createOscillator();
         body.type = 'sine';
         body.frequency.setValueAtTime(80 + quality * 40, t);
-        body.frequency.exponentialRampToValueAtTime(30, t + 0.25);
+        body.frequency.exponentialRampToValueAtTime(28, t + 0.3);
 
         const bodyGain = this.ctx.createGain();
-        bodyGain.gain.setValueAtTime(0.3 * quality * echoVol, t);
-        bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+        bodyGain.gain.setValueAtTime(0.35 * quality * echoVol, t);
+        bodyGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
 
         this._chain(body, bodyGain, this._masterGain);
 
-        // --- Noise burst for impact -- louder on bad landings ---
-        const crunchDuration = 0.1 + (1 - quality) * 0.25;
-        const noiseBuf = this._createNoise(crunchDuration);
+        // --- Noise burst for impact crunch -- louder & longer on bad landings ---
+        const crunchDuration = 0.08 + (1 - quality) * 0.3;
+        const noiseBuf = this._createNoise(crunchDuration + 0.05);
         const noiseSrc = this.ctx.createBufferSource();
         noiseSrc.buffer = noiseBuf;
 
         const hp = this.ctx.createBiquadFilter();
         hp.type = 'highpass';
-        hp.frequency.value = 600 + (1 - quality) * 400;
+        hp.frequency.value = 500 + (1 - quality) * 500;
+
+        // Waveshaper for gritty distortion on bad landings
+        const distortion = this.ctx.createWaveShaper();
+        const crunchAmount = (1 - quality) * 50;
+        const curveLen = 256;
+        const curve = new Float32Array(curveLen);
+        for (let i = 0; i < curveLen; i++) {
+          const x = (i * 2) / curveLen - 1;
+          curve[i] = (Math.PI + crunchAmount) * x / (Math.PI + crunchAmount * Math.abs(x));
+        }
+        distortion.curve = curve;
 
         const noiseGain = this.ctx.createGain();
-        const noiseVolBase = 0.1 + (1 - quality) * 0.35;
+        const noiseVolBase = 0.08 + (1 - quality) * 0.4;
         noiseGain.gain.setValueAtTime(noiseVolBase * echoVol, t);
         noiseGain.gain.exponentialRampToValueAtTime(0.001, t + crunchDuration);
 
-        this._chain(noiseSrc, hp, noiseGain, this._masterGain);
+        this._chain(noiseSrc, hp, distortion, noiseGain, this._masterGain);
 
+        sub.start(t);
+        sub.stop(t + 0.3);
         thud.start(t);
-        thud.stop(t + 0.4);
+        thud.stop(t + 0.45);
         body.start(t);
-        body.stop(t + 0.3);
+        body.stop(t + 0.35);
         noiseSrc.start(t);
-        noiseSrc.stop(t + crunchDuration);
+        noiseSrc.stop(t + crunchDuration + 0.02);
       });
     } catch (e) {
       console.warn('AudioManager.playLanding error:', e);
@@ -844,37 +890,67 @@ export default class AudioManager {
 
       intensity = Math.max(0, Math.min(1, intensity));
 
-      // If already playing, just update volume
+      // If already playing, just update volume (clear correlation: louder = further jump)
       if (this._crowdSource) {
+        const t = this.ctx.currentTime + 0.15;
+        // Low murmur layer grows with distance
         this._crowdGain.gain.linearRampToValueAtTime(
-          intensity * 0.25,
-          this.ctx.currentTime + 0.1,
+          intensity * 0.3, t,
         );
+        // High excitement layer kicks in at higher intensity
+        if (this._crowdHighGain) {
+          this._crowdHighGain.gain.linearRampToValueAtTime(
+            Math.max(0, (intensity - 0.3) * 0.35), t,
+          );
+        }
+        // Filter opens up with excitement
+        if (this._crowdFilter) {
+          this._crowdFilter.frequency.linearRampToValueAtTime(
+            400 + intensity * 800, t,
+          );
+        }
         return;
       }
 
-      // Create looped noise source
+      // --- Layer 1: Low crowd murmur (bandpass noise, always present) ---
       const noiseBuf = this._createNoise(2);
       const source = this.ctx.createBufferSource();
       source.buffer = noiseBuf;
       source.loop = true;
 
-      // Bandpass filter to shape crowd-like murmur
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'bandpass';
-      filter.frequency.value = 800;
-      filter.Q.value = 0.6;
+      filter.frequency.value = 400 + intensity * 800;
+      filter.Q.value = 0.5;
 
       const gain = this.ctx.createGain();
-      gain.gain.value = intensity * 0.25;
+      gain.gain.value = intensity * 0.3;
 
       this._chain(source, filter, gain, this._masterGain);
-
       source.start();
+
+      // --- Layer 2: Higher excitement roar (separate noise, higher band) ---
+      const highBuf = this._createNoise(2);
+      const highSource = this.ctx.createBufferSource();
+      highSource.buffer = highBuf;
+      highSource.loop = true;
+
+      const highBp = this.ctx.createBiquadFilter();
+      highBp.type = 'bandpass';
+      highBp.frequency.value = 2000;
+      highBp.Q.value = 0.7;
+
+      const highGain = this.ctx.createGain();
+      highGain.gain.value = Math.max(0, (intensity - 0.3) * 0.35);
+
+      this._chain(highSource, highBp, highGain, this._masterGain);
+      highSource.start();
 
       this._crowdSource = source;
       this._crowdGain = gain;
       this._crowdFilter = filter;
+      this._crowdHighSource = highSource;
+      this._crowdHighGain = highGain;
     } catch (e) {
       console.warn('AudioManager.playCrowdAmbience error:', e);
     }
@@ -889,14 +965,22 @@ export default class AudioManager {
       const now = this.ctx.currentTime;
       this._crowdGain.gain.linearRampToValueAtTime(0, now + 0.2);
       this._crowdSource.stop(now + 0.25);
+      if (this._crowdHighSource) {
+        this._crowdHighGain.gain.linearRampToValueAtTime(0, now + 0.2);
+        this._crowdHighSource.stop(now + 0.25);
+      }
       this._crowdSource = null;
       this._crowdGain = null;
       this._crowdFilter = null;
+      this._crowdHighSource = null;
+      this._crowdHighGain = null;
     } catch (e) {
       console.warn('AudioManager.stopCrowdAmbience error:', e);
       this._crowdSource = null;
       this._crowdGain = null;
       this._crowdFilter = null;
+      this._crowdHighSource = null;
+      this._crowdHighGain = null;
     }
   }
 

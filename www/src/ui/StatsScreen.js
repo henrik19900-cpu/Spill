@@ -298,19 +298,30 @@ export default class StatsScreen {
         const cols = 2;
         const rows = 3;
         const cellW = (width - padX * 2 - gap) / cols;
-        const cellH = 68;
+        const cellH = 78;
+
+        // Section header
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = `bold ${Math.min(width * 0.032, 13)}px sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('OVERSIKT', padX, y + 8);
+        ctx.restore();
+
+        y += 24;
 
         const stats = [
-            { value: data.totalJumps, label: 'Total hopp' },
-            { value: this._formatDist(data.bestDistances?.K90), label: 'Beste K90' },
-            { value: this._formatDist(data.bestDistances?.K120), label: 'Beste K120' },
-            { value: this._formatDist(data.bestDistances?.K185), label: 'Beste K185' },
-            { value: data.avgScore != null ? data.avgScore.toFixed(1) : '-', label: 'Snittpoeng' },
-            { value: data.perfectLandings, label: 'Perfekte landinger' },
+            { value: data.totalJumps, label: 'Total hopp', icon: '\u26F7' },
+            { value: this._formatDist(data.bestDistances?.K90), label: 'Beste K90', icon: '\u2B50' },
+            { value: this._formatDist(data.bestDistances?.K120), label: 'Beste K120', icon: '\u2B50' },
+            { value: this._formatDist(data.bestDistances?.K185), label: 'Beste K185', icon: '\u2B50' },
+            { value: data.avgScore != null ? data.avgScore.toFixed(1) : '-', label: 'Snittpoeng', icon: '\u2300' },
+            { value: data.perfectLandings, label: 'Perfekte landinger', icon: '\u2714' },
         ];
 
-        const valueFontSize = Math.min(width * 0.065, 26);
-        const labelFontSize = Math.min(width * 0.03, 12);
+        const valueFontSize = Math.min(width * 0.075, 30);
+        const labelFontSize = Math.min(width * 0.028, 11);
 
         for (let i = 0; i < stats.length; i++) {
             const col = i % cols;
@@ -318,25 +329,47 @@ export default class StatsScreen {
             const cx = padX + col * (cellW + gap);
             const cy = y + row * (cellH + gap);
 
-            // Cell background
             ctx.save();
-            ctx.fillStyle = 'rgba(255,255,255,0.05)';
-            this._roundRect(ctx, cx, cy, cellW, cellH, 10);
+
+            // Cell background with subtle gradient
+            const cellGrad = ctx.createLinearGradient(cx, cy, cx, cy + cellH);
+            cellGrad.addColorStop(0, 'rgba(255,255,255,0.07)');
+            cellGrad.addColorStop(1, 'rgba(255,255,255,0.03)');
+            ctx.fillStyle = cellGrad;
+            this._roundRect(ctx, cx, cy, cellW, cellH, 12);
             ctx.fill();
 
-            // Value
+            // Subtle top border highlight
+            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            ctx.lineWidth = 1;
+            this._roundRect(ctx, cx, cy, cellW, cellH, 12);
+            ctx.stroke();
+
+            // Large bold value
             ctx.fillStyle = '#ffffff';
             ctx.font = `bold ${valueFontSize}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(String(stats[i].value), cx + cellW / 2, cy + cellH * 0.38);
 
-            // Label
-            ctx.fillStyle = 'rgba(255,255,255,0.45)';
+            // Label below
+            ctx.fillStyle = 'rgba(255,255,255,0.4)';
             ctx.font = `${labelFontSize}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(stats[i].label, cx + cellW / 2, cy + cellH * 0.75);
+            ctx.letterSpacing = '0.5px';
+            ctx.fillText(stats[i].label.toUpperCase(), cx + cellW / 2, cy + cellH * 0.72);
+            ctx.letterSpacing = '0px';
+
+            // Subtle bottom accent line
+            const accentW = cellW * 0.3;
+            ctx.strokeStyle = 'rgba(100,160,255,0.15)';
+            ctx.lineWidth = 2;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(cx + (cellW - accentW) / 2, cy + cellH - 6);
+            ctx.lineTo(cx + (cellW + accentW) / 2, cy + cellH - 6);
+            ctx.stroke();
 
             ctx.restore();
         }
@@ -468,15 +501,34 @@ export default class StatsScreen {
             ctx.restore();
         }
 
-        // Dots
+        // Dots with glow
         for (let i = 0; i < points.length; i++) {
+            ctx.save();
+            // Outer glow
+            ctx.shadowColor = 'rgba(74,222,128,0.5)';
+            ctx.shadowBlur = 6;
             ctx.beginPath();
-            ctx.arc(points[i].x, points[i].y, 3.5, 0, Math.PI * 2);
+            ctx.arc(points[i].x, points[i].y, 4, 0, Math.PI * 2);
             ctx.fillStyle = '#4ade80';
             ctx.fill();
-            ctx.strokeStyle = '#0a0e1a';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+            ctx.shadowBlur = 0;
+            // White center dot
+            ctx.beginPath();
+            ctx.arc(points[i].x, points[i].y, 1.5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.fill();
+            ctx.restore();
+
+            // Distance label on last point
+            if (i === points.length - 1 && jumps[i] != null) {
+                ctx.save();
+                ctx.fillStyle = '#4ade80';
+                ctx.font = `bold ${Math.min(width * 0.025, 10)}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(`${jumps[i].toFixed(1)}m`, points[i].x, points[i].y - 8);
+                ctx.restore();
+            }
         }
 
         // X-axis: jump numbers
@@ -504,13 +556,27 @@ export default class StatsScreen {
 
         const padX = 20;
 
-        // Section header
+        // Section header with count
+        const unlockedCount = achievements.filter(a => a.unlocked).length;
         ctx.save();
         ctx.fillStyle = 'rgba(255,255,255,0.5)';
         ctx.font = `bold ${Math.min(width * 0.032, 13)}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText('OPPN\u00c5ELSER', padX, y + 8);
+
+        // Count badge
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        const countText = `${unlockedCount}/${achievements.length}`;
+        const countFontSize = Math.min(width * 0.028, 11);
+        ctx.font = `bold ${countFontSize}px sans-serif`;
+        const countW = ctx.measureText(countText).width + 14;
+        const countX = padX + ctx.measureText('OPPN\u00c5ELSER').width + 12;
+        this._roundRect(ctx, countX, y, countW, 18, 9);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.textAlign = 'center';
+        ctx.fillText(countText, countX + countW / 2, y + 9);
         ctx.restore();
 
         y += 26;
@@ -519,10 +585,9 @@ export default class StatsScreen {
         const gap = 10;
         const cols = 2;
         const cardW = (width - padX * 2 - gap) / cols;
-        const cardH = 80;
+        const cardH = 88;
 
         const nameFontSize = Math.min(width * 0.03, 12);
-        const descFontSize = Math.min(width * 0.025, 10);
         const iconFontSize = Math.min(width * 0.06, 24);
 
         for (let i = 0; i < achievements.length; i++) {
@@ -537,54 +602,101 @@ export default class StatsScreen {
 
             // Card background
             if (unlocked) {
-                ctx.fillStyle = 'rgba(74,222,128,0.1)';
+                const cardGrad = ctx.createLinearGradient(cx, cy, cx, cy + cardH);
+                cardGrad.addColorStop(0, 'rgba(74,222,128,0.15)');
+                cardGrad.addColorStop(1, 'rgba(74,222,128,0.05)');
+                ctx.fillStyle = cardGrad;
             } else {
-                ctx.fillStyle = 'rgba(255,255,255,0.03)';
+                ctx.fillStyle = 'rgba(255,255,255,0.025)';
             }
-            this._roundRect(ctx, cx, cy, cardW, cardH, 10);
+            this._roundRect(ctx, cx, cy, cardW, cardH, 12);
             ctx.fill();
 
-            // Border for unlocked
+            // Border
             if (unlocked) {
-                ctx.strokeStyle = 'rgba(74,222,128,0.3)';
+                ctx.strokeStyle = 'rgba(74,222,128,0.35)';
                 ctx.lineWidth = 1;
-                this._roundRect(ctx, cx, cy, cardW, cardH, 10);
+                this._roundRect(ctx, cx, cy, cardW, cardH, 12);
+                ctx.stroke();
+            } else {
+                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+                ctx.lineWidth = 1;
+                this._roundRect(ctx, cx, cy, cardW, cardH, 12);
                 ctx.stroke();
             }
 
-            // Dimming for locked
-            if (!unlocked) {
-                ctx.globalAlpha = 0.4;
-            }
-
-            // Icon or lock
-            ctx.font = `${iconFontSize}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
             if (unlocked) {
-                ctx.fillText(ach.icon || '', cx + cardW / 2, cy + 26);
-            } else {
-                ctx.fillStyle = 'rgba(255,255,255,0.5)';
-                // Lock symbol
-                ctx.font = `${iconFontSize * 0.8}px sans-serif`;
-                ctx.fillText('\uD83D\uDD12', cx + cardW / 2, cy + 26);
-            }
+                // --- Unlocked card ---
+                // Icon
+                ctx.font = `${iconFontSize}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(ach.icon || '', cx + cardW / 2, cy + 28);
 
-            // Name
-            ctx.fillStyle = unlocked ? '#ffffff' : 'rgba(255,255,255,0.7)';
-            ctx.font = `bold ${nameFontSize}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(ach.name || '', cx + cardW / 2, cy + 50);
+                // Name
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `bold ${nameFontSize}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(ach.name || '', cx + cardW / 2, cy + 54);
 
-            // Checkmark for unlocked
-            if (unlocked) {
-                ctx.globalAlpha = 1;
+                // Description if available
+                if (ach.description) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                    ctx.font = `${Math.min(width * 0.023, 9)}px sans-serif`;
+                    ctx.fillText(ach.description, cx + cardW / 2, cy + 70);
+                }
+
+                // Green checkmark badge in top-right
                 ctx.fillStyle = '#4ade80';
-                ctx.font = `bold ${Math.min(width * 0.028, 11)}px sans-serif`;
-                ctx.textAlign = 'right';
-                ctx.textBaseline = 'top';
-                ctx.fillText('\u2713', cx + cardW - 8, cy + 6);
+                ctx.beginPath();
+                ctx.arc(cx + cardW - 12, cy + 12, 8, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#0a0e1a';
+                ctx.font = `bold 10px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('\u2713', cx + cardW - 12, cy + 12);
+            } else {
+                // --- Locked card: dimmed with lock icon ---
+                ctx.globalAlpha = 0.35;
+
+                // Draw a lock icon (canvas drawn, not emoji for consistency)
+                const lockCX = cx + cardW / 2;
+                const lockCY = cy + 26;
+                const lockW = 14;
+                const lockH = 12;
+
+                // Lock shackle (arc)
+                ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+                ctx.lineWidth = 2;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.arc(lockCX, lockCY - 4, 6, Math.PI, 0);
+                ctx.stroke();
+
+                // Lock body (rounded rect)
+                ctx.fillStyle = 'rgba(255,255,255,0.5)';
+                this._roundRect(ctx, lockCX - lockW / 2, lockCY, lockW, lockH, 2);
+                ctx.fill();
+
+                // Keyhole dot
+                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx.beginPath();
+                ctx.arc(lockCX, lockCY + lockH * 0.4, 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Name (dimmed)
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                ctx.font = `bold ${nameFontSize}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(ach.name || '???', cx + cardW / 2, cy + 54);
+
+                // "Locked" text
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.font = `${Math.min(width * 0.023, 9)}px sans-serif`;
+                ctx.fillText('L\u00e5st', cx + cardW / 2, cy + 70);
             }
 
             ctx.restore();
@@ -615,11 +727,30 @@ export default class StatsScreen {
     }
 
     /**
-     * Scroll through the content.
-     * @param {number} deltaY - scroll delta (positive = scroll down)
+     * Scroll through the content. Supports both delta and touch modes.
+     * @param {number|string} deltaYOrType - scroll delta (positive = scroll down), or touch type ('start'/'move'/'end')
+     * @param {number} [touchY] - touch Y position (for touch mode)
      */
-    handleScroll(deltaY) {
-        this.scrollOffset += deltaY;
+    handleScroll(deltaYOrType, touchY) {
+        if (typeof deltaYOrType === 'string') {
+            // Touch-based scrolling with momentum
+            const type = deltaYOrType;
+            if (type === 'start') {
+                this._touchStartY = touchY;
+                this._scrollVelocity = 0;
+            } else if (type === 'move' && this._touchStartY !== null) {
+                const dy = this._touchStartY - touchY;
+                this.scrollOffset += dy;
+                this._scrollVelocity = dy;
+                this._touchStartY = touchY;
+            } else if (type === 'end') {
+                this._touchStartY = null;
+                // Velocity is preserved for momentum in render loop
+            }
+        } else {
+            // Simple delta scrolling
+            this.scrollOffset += deltaYOrType;
+        }
     }
 
     // -------------------------------------------------------------------
