@@ -720,6 +720,10 @@ export default class SkihoppRenderer {
         // prevent the remaining layers from rendering.
         try { this._drawSky(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawSky error:', e); }
         try { this._drawMountains(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawMountains error:', e); }
+
+        // Ambient fog/mist at the base of mountains
+        try { this._drawMountainFog(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawMountainFog error:', e); }
+
         try { this._drawSnowGround(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawSnowGround error:', e); }
         try { this._drawHillSurface(ctx, width, height); } catch (e) { console.warn('[SkihoppRenderer] _drawHillSurface error:', e); }
 
