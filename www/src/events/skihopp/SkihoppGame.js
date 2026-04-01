@@ -925,22 +925,26 @@ export default class SkihoppGame {
                     displayDistance = jumperState.landingDistance;
                 }
                 if (this.hud) {
-                this.hud.render(ctx, width, height, {
-                    speed: jumperState.speed,
-                    distance: displayDistance,
-                    bodyAngle: jumperState.bodyAngle,
-                    windSpeed: this._getWindSpeed(),
-                    windDirection: this._getWindDirection(),
-                    phase: state,
-                    takeoffQuality: jumperState.takeoffQuality,
-                    landingQuality: jumperState.landingQuality,
-                    kPoint: (this.hill && this.hill.kPoint) || 0,
-                    feedback: this.game.feedback || {},
-                    heightAboveGround: jumperState.heightAboveGround || 0,
-                    isTucked: jumperState.isTucked || false,
-                    edgeWarning: this._edgeWarningActive && state === GameState.INRUN,
-                    edgeWarningPulse: this._edgeWarningActive ? Math.sin(this._edgeWarningTime * 12) : 0,
-                });
+                    try {
+                        this.hud.render(ctx, width, height, {
+                            speed: jumperState.speed,
+                            distance: displayDistance,
+                            bodyAngle: jumperState.bodyAngle,
+                            windSpeed: this._getWindSpeed(),
+                            windDirection: this._getWindDirection(),
+                            phase: state,
+                            takeoffQuality: jumperState.takeoffQuality,
+                            landingQuality: jumperState.landingQuality,
+                            kPoint: (this.hill && this.hill.kPoint) || 0,
+                            feedback: this.game.feedback || {},
+                            heightAboveGround: jumperState.heightAboveGround || 0,
+                            isTucked: jumperState.isTucked || false,
+                            edgeWarning: this._edgeWarningActive && state === GameState.INRUN,
+                            edgeWarningPulse: this._edgeWarningActive ? Math.sin(this._edgeWarningTime * 12) : 0,
+                        });
+                    } catch (e) {
+                        console.error('[SkihoppGame] HUD render error:', e);
+                    }
                 }
 
                 // Landing: show distance text during the 1.5s hold period

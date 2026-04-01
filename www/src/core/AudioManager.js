@@ -1001,9 +1001,11 @@ export default class AudioManager {
     try {
       if (!this._crowdSource || !this.ctx) return;
       const now = this.ctx.currentTime;
+      this._crowdGain.gain.setValueAtTime(this._crowdGain.gain.value, now);
       this._crowdGain.gain.linearRampToValueAtTime(0, now + 0.2);
       this._crowdSource.stop(now + 0.25);
       if (this._crowdHighSource) {
+        this._crowdHighGain.gain.setValueAtTime(this._crowdHighGain.gain.value, now);
         this._crowdHighGain.gain.linearRampToValueAtTime(0, now + 0.2);
         this._crowdHighSource.stop(now + 0.25);
       }
@@ -1248,6 +1250,7 @@ export default class AudioManager {
 
       // Fade out over 1 second
       if (this._menuMusicGain) {
+        this._menuMusicGain.gain.setValueAtTime(this._menuMusicGain.gain.value, now);
         this._menuMusicGain.gain.linearRampToValueAtTime(0, now + 1.0);
       }
 

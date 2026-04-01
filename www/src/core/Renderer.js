@@ -73,19 +73,6 @@ export default class Renderer {
     }
 
     /**
-     * Cubic ease-in-out helper for smooth transitions.
-     * @param {number} t - value in [0, 1]
-     * @returns {number} eased value in [0, 1]
-     */
-    _easeInOutCubic(t) {
-        if (t < 0) return 0;
-        if (t > 1) return 1;
-        return t < 0.5
-            ? 4 * t * t * t
-            : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    }
-
-    /**
      * Smoothly interpolate zoom toward a target value.
      * Uses the same exponential easing as smoothFollow.
      * @param {number} targetZoom
