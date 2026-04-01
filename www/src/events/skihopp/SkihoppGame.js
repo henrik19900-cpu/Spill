@@ -764,12 +764,16 @@ export default class SkihoppGame {
                 }
                 // Render the 3D scene behind with camera pan progress
                 if (this.skihoppRenderer) {
-                    this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                        speed: this._getWindSpeed(),
-                        direction: this._getWindDirection(),
-                        cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
-                        cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
-                    });
+                    try {
+                        this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                            speed: this._getWindSpeed(),
+                            direction: this._getWindDirection(),
+                            cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
+                            cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
+                        });
+                    } catch (e) {
+                        console.error('[SkihoppGame] Renderer error (ready):', e);
+                    }
                 }
 
                 // Show tutorial overlay if active
