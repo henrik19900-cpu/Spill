@@ -2362,21 +2362,21 @@ export default class SkihoppRenderer {
         const phase = js.phase;
         const bodyAngle = (js.bodyAngle || 0) * Math.PI / 180;
 
-        // --- Motion trail during FLIGHT (last 4 positions, fading afterimages) ---
+        // --- Motion trail during FLIGHT (5 ghost copies, decreasing alpha 0.08→0.01) ---
         if (phase === GameState.FLIGHT || phase === 'FLIGHT') {
             if (!this._jumperTrail) this._jumperTrail = [];
             this._jumperTrail.push({ x: js.x, y: js.y, angle: bodyAngle });
-            if (this._jumperTrail.length > 5) this._jumperTrail.shift();
+            if (this._jumperTrail.length > 6) this._jumperTrail.shift();
 
-            const trailAlphas = [0.05, 0.1, 0.15, 0.2];
-            const trailCount = Math.min(4, this._jumperTrail.length - 1);
+            const trailAlphas = [0.01, 0.02, 0.04, 0.06, 0.08];
+            const trailCount = Math.min(5, this._jumperTrail.length - 1);
             for (let i = 0; i < trailCount; i++) {
                 const t = this._jumperTrail[i];
                 const tsp = r.worldToScreen(t.x, t.y);
                 ctx.save();
-                ctx.globalAlpha = trailAlphas[i] || 0.05;
+                ctx.globalAlpha = trailAlphas[i] || 0.01;
                 ctx.translate(tsp.x, tsp.y);
-                this._drawJumperFlight(ctx, scale, t.angle);
+                this._drawJumperFlight(ctx, scale, t.angle, true);
                 ctx.restore();
             }
         } else {
@@ -2392,7 +2392,7 @@ export default class SkihoppRenderer {
         } else if (phase === GameState.TAKEOFF || phase === 'TAKEOFF') {
             this._drawJumperInrun(ctx, scale, bodyAngle);
         } else if (phase === GameState.FLIGHT || phase === 'FLIGHT') {
-            this._drawJumperFlight(ctx, scale, bodyAngle);
+            this._drawJumperFlight(ctx, scale, bodyAngle, false);
         } else if (phase === GameState.LANDING || phase === 'LANDING') {
             this._drawJumperLanding(ctx, scale, bodyAngle);
         } else {
@@ -2639,11 +2639,11 @@ export default class SkihoppRenderer {
         ctx.font = `bold ${Math.max(5, 0.07 * s)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('7', 0, 0);
+        ctx.fillText('1', 0, 0);
         ctx.restore();
     }
 
-    /** INRUN: DEEP crouch, knees bent, body folded forward, arms tucked behind lower back, chin tucked. */
+    /** INRUN: DEEP crouch -- knees at 90°, torso almost parallel to thighs, chin tucked hard. */
     _drawJumperInrun(ctx, s, angle) {
         ctx.rotate(angle);
 
@@ -2652,28 +2652,35 @@ export default class SkihoppRenderer {
         this._drawSki(ctx, s, -1.2 * s, 2.4 * s);
         ctx.restore();
 
-        // Deep crouch articulation: feet at origin, very compact
+        // Very deep crouch: knees at ~90°, hip extremely low
         const footX = 0;
         const footY = 0;
-        const kneeX = 0.10 * s;       // knee pushed forward (deep bend)
-        const kneeY = -0.32 * s;
-        const hipX = -0.05 * s;       // hip low and back
-        const hipY = -0.38 * s;
+        // Shin nearly vertical, knee pushed well forward for 90° bend
+        const kneeX = 0.18 * s;
+        const kneeY = -0.34 * s;
+        // Hip drops low and sits back -- thigh roughly horizontal at 90° to shin
+        const hipX = -0.16 * s;
+        const hipY = -0.36 * s;
 
-        // Boot
+        // Boot detail (dark rectangles at feet)
         this._drawBoot(ctx, s, footX, footY - 0.02 * s, 0);
+        // Additional boot detail -- small dark rect on top of foot
+        ctx.fillStyle = '#111111';
+        ctx.fillRect(footX - 0.04 * s, footY - 0.06 * s, 0.10 * s, 0.04 * s);
 
-        // Lower leg (shin) -- deep angle
+        // Lower leg (shin) -- steep angle for deep bend
         this._drawLimb(ctx, footX, footY - 0.02 * s, kneeX, kneeY,
             Math.max(2.5, 0.13 * s), '#1a40aa');
 
-        // Upper leg (thigh) -- folded tight
+        // Upper leg (thigh) -- nearly horizontal, giving 90° at knee
         this._drawLimb(ctx, kneeX, kneeY, hipX, hipY,
             Math.max(2.5, 0.14 * s), '#1a40aa');
 
-        // Torso -- folded forward aggressively, nearly parallel to thighs
-        const shoulderX = hipX + 0.52 * s;
-        const shoulderY = hipY - 0.08 * s;
+        // Torso -- folded forward aggressively, almost parallel to thigh line
+        // The angle from hip to shoulder should be similar to the thigh angle
+        const thighAngle = Math.atan2(hipY - kneeY, hipX - kneeX);
+        const shoulderX = hipX + 0.52 * s * Math.cos(thighAngle + 0.10);
+        const shoulderY = hipY + 0.52 * s * Math.sin(thighAngle + 0.10);
         this._drawTorso(ctx, s, hipX, hipY, shoulderX, shoulderY);
 
         // Arms tucked behind lower back (two segments per arm)
@@ -2698,10 +2705,10 @@ export default class SkihoppRenderer {
             Math.max(1.5, 0.06 * s), '#1a40aa');
         this._drawGlove(ctx, s, hand2X, hand2Y);
 
-        // Head (tilted down, chin tucked)
+        // Head -- visibly tucked down, chin toward chest
         ctx.save();
-        ctx.translate(shoulderX + 0.16 * s, shoulderY + 0.02 * s);
-        ctx.rotate(0.4);
+        ctx.translate(shoulderX + 0.12 * s, shoulderY + 0.06 * s);
+        ctx.rotate(0.7);  // Stronger tilt for tucked-down look
         this._drawHelmet(ctx, s);
         ctx.restore();
     }

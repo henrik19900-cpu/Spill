@@ -183,6 +183,16 @@ export default class SkihoppGame {
         // --- PREMIUM: Woosh transition (RESULTS -> READY) ---
         this._wooshProgress = 0;  // 0 = not active, 0..1 = animating
         this._wooshActive = false;
+
+        // --- Transition effects tracker ---
+        // Each key holds { active, timer, duration } plus effect-specific fields
+        this._transitionEffects = {
+            menuToReadyZoom: { active: false, timer: 0, duration: 0.5 },
+            takeoffFlash: { active: false, timer: 0, duration: 0.1, alpha: 0 },
+            takeoffQualityText: { active: false, timer: 0, duration: 0.8, text: '', color: '#ffffff', scale: 0 },
+            landingImpactFlash: { active: false, timer: 0, duration: 0.15, alpha: 0 },
+            scoreToResultsCrossfade: { active: false, timer: 0, duration: 0.4, alpha: 0 },
+        };
     }
 
     // ------------------------------------------------------------------
@@ -499,7 +509,7 @@ export default class SkihoppGame {
                     this._hopFlashAlpha = 0.6;
                 }
             }
-            this._countdownScaleAnim = Math.min(1, this._countdownScaleAnim + dt * 2.5);
+            this._countdownScaleAnim = Math.min(1, this._countdownScaleAnim + dt * 3.0);
 
             if (this._countdownTimer >= COUNTDOWN_DURATION) {
                 this.game.setState(GameState.INRUN);
@@ -594,6 +604,65 @@ export default class SkihoppGame {
             if (this._wooshProgress >= 1) {
                 this._wooshActive = false;
                 this._wooshProgress = 0;
+            }
+        }
+
+        // --- Transition effects update ---
+        const fx = this._transitionEffects;
+
+        // 1. MENU->READY zoom-in (0.5s)
+        if (fx.menuToReadyZoom.active) {
+            fx.menuToReadyZoom.timer += dt;
+            if (fx.menuToReadyZoom.timer >= fx.menuToReadyZoom.duration) {
+                fx.menuToReadyZoom.active = false;
+            }
+        }
+
+        // 3. INRUN->TAKEOFF white HUD flash (0.1s)
+        if (fx.takeoffFlash.active) {
+            fx.takeoffFlash.timer += dt;
+            fx.takeoffFlash.alpha = Math.max(0, 1.0 - fx.takeoffFlash.timer / fx.takeoffFlash.duration);
+            if (fx.takeoffFlash.timer >= fx.takeoffFlash.duration) {
+                fx.takeoffFlash.active = false;
+                fx.takeoffFlash.alpha = 0;
+            }
+        }
+
+        // 4. TAKEOFF quality text (0.8s scale-in)
+        if (fx.takeoffQualityText.active) {
+            fx.takeoffQualityText.timer += dt;
+            const qt = fx.takeoffQualityText.timer / fx.takeoffQualityText.duration;
+            // easeOutBack for scale: overshoot then settle
+            if (qt < 0.4) {
+                const t2 = qt / 0.4;
+                const c1 = 1.70158;
+                const c3 = c1 + 1;
+                fx.takeoffQualityText.scale = 1 + c3 * Math.pow(t2 - 1, 3) + c1 * Math.pow(t2 - 1, 2);
+            } else {
+                fx.takeoffQualityText.scale = 1.0;
+            }
+            if (fx.takeoffQualityText.timer >= fx.takeoffQualityText.duration) {
+                fx.takeoffQualityText.active = false;
+            }
+        }
+
+        // 5. FLIGHT->LANDING impact flash (0.15s)
+        if (fx.landingImpactFlash.active) {
+            fx.landingImpactFlash.timer += dt;
+            fx.landingImpactFlash.alpha = Math.max(0, 1.0 - fx.landingImpactFlash.timer / fx.landingImpactFlash.duration);
+            if (fx.landingImpactFlash.timer >= fx.landingImpactFlash.duration) {
+                fx.landingImpactFlash.active = false;
+                fx.landingImpactFlash.alpha = 0;
+            }
+        }
+
+        // 6. SCORE->RESULTS crossfade (0.4s)
+        if (fx.scoreToResultsCrossfade.active) {
+            fx.scoreToResultsCrossfade.timer += dt;
+            // alpha goes 0->1 (fade out old) then stays at 1 (new fully visible)
+            fx.scoreToResultsCrossfade.alpha = Math.min(1, fx.scoreToResultsCrossfade.timer / fx.scoreToResultsCrossfade.duration);
+            if (fx.scoreToResultsCrossfade.timer >= fx.scoreToResultsCrossfade.duration) {
+                fx.scoreToResultsCrossfade.active = false;
             }
         }
 
@@ -704,9 +773,12 @@ export default class SkihoppGame {
                     else if (remaining > 0) countdownText = '1...';
                     else { countdownText = 'HOP!'; isHop = true; }
 
-                    // Scale: 1.0 -> 1.5 over the animation, then fade out
+                    // Scale: easeOutBack bounce 0 -> ~1.3 -> 1.0
                     const t = this._countdownScaleAnim;
-                    const scale = 1.0 + 0.5 * t;
+                    // easeOutBack curve: overshoots to ~1.3 then settles to 1.0
+                    const c1 = 1.70158;
+                    const c3 = c1 + 1;
+                    const scale = t < 0.01 ? 0 : (1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2));
                     // Fade: fully visible for first 60%, then fade out
                     const fadeAlpha = t < 0.6 ? 1.0 : Math.max(0, 1.0 - (t - 0.6) / 0.4);
 
