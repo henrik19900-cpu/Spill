@@ -227,7 +227,7 @@ export default class SkihoppPhysics {
         //   untucked terminal velocity ≈ 80% of maxSpeed (~22 m/s, ~79 km/h)
         // Terminal speed = sqrt((g*sin(a) - friction*g*cos(a)) / dragCoeff)
         const isTucked = j.isTucked || false;
-        const airDragCoeff = isTucked ? 0.0075 : 0.0135;
+        const airDragCoeff = isTucked ? 0.0055 : 0.0085;
         const totalDrag = friction * GRAVITY * Math.cos(slopeAngle) + airDragCoeff * j.speed * j.speed;
 
         const a = gravityPull - totalDrag;
@@ -339,8 +339,14 @@ export default class SkihoppPhysics {
             // Position at the launch point (end of takeoff animation)
             // j.x and j.y are already set by the lerp above; keep them
 
-            // Set body angle to launch angle
-            j.bodyAngle = radToDeg(launchAngle);
+            // Set body angle: the jumper pitches forward into flight position.
+            // A perfect takeoff produces a body angle near the optimal AoA
+            // (~30-35°), while a poor takeoff results in a flatter posture
+            // (~15-20°) that generates much less lift.
+            const flightCfg = this.cfgFlight || {};
+            const optimalAngle = flightCfg.optimalAngle || 33;
+            const minFlightBodyAngle = 15;  // poor takeoff body angle
+            j.bodyAngle = lerp(minFlightBodyAngle, optimalAngle, quality);
 
             // Reset flight time
             j.flightTime = 0;
@@ -520,6 +526,23 @@ export default class SkihoppPhysics {
         ay += turbY;
         j.turbulenceX = turbX;
         j.turbulenceY = turbY;
+
+        // ---- Body angle evolution during flight ----
+        // The jumper can adjust body angle toward a target (set by controls).
+        // If no target is set, body angle drifts toward the velocity direction
+        // (natural aerodynamic weathervaning). The rate of change is limited
+        // to ~15°/s for realism — you can't instantly change posture in the air.
+        const bodyAngleRate = cfg.bodyAngleRate || 15; // degrees per second
+        const targetAngle = (j.targetAngle !== undefined && j.targetAngle !== null)
+            ? j.targetAngle
+            : radToDeg(Math.atan2(j.vy, j.vx)) + 20; // natural drift toward AoA ~20°
+        const angleDelta = targetAngle - j.bodyAngle;
+        const maxChange = bodyAngleRate * dt;
+        if (Math.abs(angleDelta) > maxChange) {
+            j.bodyAngle += Math.sign(angleDelta) * maxChange;
+        } else {
+            j.bodyAngle = targetAngle;
+        }
 
         // ---- Integration (semi-implicit Euler) ----
         j.vx += ax * dt;

@@ -764,12 +764,16 @@ export default class SkihoppGame {
                 }
                 // Render the 3D scene behind with camera pan progress
                 if (this.skihoppRenderer) {
-                    this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                        speed: this._getWindSpeed(),
-                        direction: this._getWindDirection(),
-                        cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
-                        cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
-                    });
+                    try {
+                        this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                            speed: this._getWindSpeed(),
+                            direction: this._getWindDirection(),
+                            cameraPan: this._cameraPanActive ? this._cameraPanProgress : 1,
+                            cameraResetPan: this._resetCameraPanActive ? this._resetCameraPanProgress : 1,
+                        });
+                    } catch (e) {
+                        console.error('[SkihoppGame] Renderer error (ready):', e);
+                    }
                 }
 
                 // Show tutorial overlay if active
@@ -1019,45 +1023,55 @@ export default class SkihoppGame {
                 // SCORE -> RESULTS smooth crossfade (0.4s)
                 // During crossfade, render the score screen at fading-out opacity behind
                 const cfx = this._transitionEffects.scoreToResultsCrossfade;
-                if (cfx.active && this._scoreResult && this.judgeDisplay) {
-                    const fadeOutAlpha = 1.0 - cfx.alpha;
-                    ctx.save();
-                    ctx.globalAlpha = fadeOutAlpha;
-                    // Draw the frozen score scene behind
-                    if (this.skihoppRenderer) {
-                        this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
-                            speed: this._getWindSpeed(),
-                            direction: this._getWindDirection(),
+                if (cfx.active && this._scoreResult && this.judgeDisplay && jumperState) {
+                    try {
+                        const fadeOutAlpha = 1.0 - cfx.alpha;
+                        ctx.save();
+                        ctx.globalAlpha = fadeOutAlpha;
+                        // Draw the frozen score scene behind
+                        if (this.skihoppRenderer) {
+                            this.skihoppRenderer.render(ctx, width, height, jumperState, state, {
+                                speed: this._getWindSpeed(),
+                                direction: this._getWindDirection(),
+                            });
+                        }
+                        this.judgeDisplay.render(ctx, width, height, {
+                            judges: this._scoreResult.judges,
+                            distancePoints: this._scoreResult.distancePoints,
+                            stylePoints: this._scoreResult.stylePoints,
+                            windComp: this._scoreResult.windCompensation,
+                            totalPoints: this._scoreResult.totalPoints,
+                            distance: this._scoreResult.distance,
+                            kPoint: (this.hill && this.hill.kPoint) || 120,
+                            hillName: (this.hill && this.hill.name) || 'Storbakke',
+                            rating: this._scoreResult.rating,
+                            ratingTier: this._scoreResult.ratingTier,
+                            bestDistance: this._bestDistance,
+                            animationProgress: 1,
                         });
+                        ctx.restore();
+                    } catch (e) {
+                        console.error('[SkihoppGame] Results crossfade render error:', e);
+                        try { ctx.restore(); } catch (_) {}
                     }
-                    this.judgeDisplay.render(ctx, width, height, {
-                        judges: this._scoreResult.judges,
-                        distancePoints: this._scoreResult.distancePoints,
-                        stylePoints: this._scoreResult.stylePoints,
-                        windComp: this._scoreResult.windCompensation,
-                        totalPoints: this._scoreResult.totalPoints,
-                        distance: this._scoreResult.distance,
-                        kPoint: (this.hill && this.hill.kPoint) || 120,
-                        hillName: (this.hill && this.hill.name) || 'Storbakke',
-                        rating: this._scoreResult.rating,
-                        ratingTier: this._scoreResult.ratingTier,
-                        bestDistance: this._bestDistance,
-                        animationProgress: 1,
-                    });
-                    ctx.restore();
                 }
 
                 // Draw the results scoreboard (fades in during crossfade)
-                const resultsAlpha = cfx.active ? cfx.alpha : 1.0;
-                ctx.save();
-                ctx.globalAlpha = resultsAlpha;
-                // Find the index of the latest jump (tagged with _latest)
-                const latestIdx = this._jumpResults.findIndex(j => j._latest);
-                this.scoreboard.render(ctx, width, height, {
-                    jumps: this._jumpResults,
-                    currentJumper: latestIdx >= 0 ? latestIdx : this._jumpResults.length - 1,
-                });
-                ctx.restore();
+                try {
+                    const resultsAlpha = cfx.active ? cfx.alpha : 1.0;
+                    ctx.save();
+                    ctx.globalAlpha = resultsAlpha;
+                    // Find the index of the latest jump (tagged with _latest)
+                    const latestIdx = this._jumpResults.findIndex(j => j._latest);
+                    this.scoreboard.render(ctx, width, height, {
+                        jumps: this._jumpResults,
+                        currentJumper: latestIdx >= 0 ? latestIdx : this._jumpResults.length - 1,
+                    });
+                    ctx.restore();
+                } catch (e) {
+                    console.error('[SkihoppGame] Scoreboard render error:', e);
+                    try { ctx.restore(); } catch (_) {}
+                }
 
                 // Legacy SCORE -> RESULTS black fade overlay (kept for backward compat)
                 if (this._scoreToResultsFade > 0 && !cfx.active) {

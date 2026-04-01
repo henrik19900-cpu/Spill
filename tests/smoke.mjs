@@ -82,11 +82,21 @@ globalThis.innerHeight = 844;
 globalThis.devicePixelRatio = 2;
 globalThis.performance = globalThis.performance || { now: () => Date.now() };
 
+function createMockGradient() {
+    return { addColorStop: () => {} };
+}
+
 function createMockCtx() {
     const noop = () => {};
+    const gradientFn = () => createMockGradient();
     return new Proxy({}, {
         get(target, prop) {
             if (prop === 'canvas') return { width: 390, height: 844 };
+            if (prop === 'createLinearGradient') return gradientFn;
+            if (prop === 'createRadialGradient') return gradientFn;
+            if (prop === 'createPattern') return () => ({});
+            if (prop === 'measureText') return () => ({ width: 10 });
+            if (prop === 'getImageData') return () => ({ data: new Uint8ClampedArray(4) });
             if (prop in target) return target[prop];
             return typeof prop === 'string' ? noop : undefined;
         },
@@ -364,6 +374,5 @@ console.log('\n' + '='.repeat(50));
 console.log(`  Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 console.log('='.repeat(50));
 
-if (failed > 0) {
-    process.exit(1);
-}
+// Force-exit to stop the Game singleton's background render loop
+process.exit(failed > 0 ? 1 : 0);
