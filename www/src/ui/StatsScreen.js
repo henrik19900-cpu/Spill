@@ -158,56 +158,128 @@ export default class StatsScreen {
     // Level + XP bar
     // -------------------------------------------------------------------
 
+    /**
+     * Get level tier colors based on level number.
+     */
+    _getLevelTier(level) {
+        if (level >= 50) return { name: 'DIAMANT', primary: '#b9f2ff', secondary: '#00d4ff', dark: '#006080', glow: 'rgba(0,212,255,0.6)' };
+        if (level >= 25) return { name: 'GULL', primary: '#FFD700', secondary: '#FFA500', dark: '#8B6914', glow: 'rgba(255,215,0,0.6)' };
+        if (level >= 10) return { name: 'SOLV', primary: '#E0E0E0', secondary: '#B0B0B0', dark: '#606060', glow: 'rgba(200,200,200,0.5)' };
+        return { name: 'BRONSE', primary: '#CD7F32', secondary: '#A0522D', dark: '#5C3317', glow: 'rgba(205,127,50,0.5)' };
+    }
+
     _renderLevelSection(ctx, width, y, data) {
         const padX = 20;
         const panelW = width - padX * 2;
-        const panelH = 72;
+        const panelH = 90;
+        const tier = this._getLevelTier(data.level);
 
-        // Panel background
+        // Panel background with subtle tier-colored border
         ctx.save();
         ctx.fillStyle = 'rgba(255,255,255,0.06)';
-        this._roundRect(ctx, padX, y, panelW, panelH, 12);
+        this._roundRect(ctx, padX, y, panelW, panelH, 14);
+        ctx.fill();
+        ctx.strokeStyle = `${tier.glow.replace(/[\d.]+\)$/, '0.2)')}`;
+        ctx.lineWidth = 1;
+        this._roundRect(ctx, padX, y, panelW, panelH, 14);
+        ctx.stroke();
+
+        // Level badge circle
+        const badgeR = 24;
+        const badgeCX = padX + 16 + badgeR;
+        const badgeCY = y + 34;
+
+        // Badge glow
+        ctx.shadowColor = tier.glow;
+        ctx.shadowBlur = 12;
+
+        // Badge gradient circle
+        const badgeGrad = ctx.createRadialGradient(badgeCX - 4, badgeCY - 4, 2, badgeCX, badgeCY, badgeR);
+        badgeGrad.addColorStop(0, tier.primary);
+        badgeGrad.addColorStop(0.7, tier.secondary);
+        badgeGrad.addColorStop(1, tier.dark);
+        ctx.beginPath();
+        ctx.arc(badgeCX, badgeCY, badgeR, 0, Math.PI * 2);
+        ctx.fillStyle = badgeGrad;
         ctx.fill();
 
-        // "Level N" text
-        const levelFontSize = Math.min(width * 0.065, 26);
+        // Badge shine arc
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.arc(badgeCX - 3, badgeCY - 3, badgeR - 6, -Math.PI * 0.8, -Math.PI * 0.2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+
+        // Level number inside badge
+        ctx.fillStyle = data.level >= 50 ? '#003040' : (data.level >= 25 ? '#5a4800' : '#ffffff');
+        ctx.font = `bold ${Math.min(badgeR * 0.9, 20)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(data.level), badgeCX, badgeCY + 1);
+
+        // Level text and tier name
+        const textLeft = badgeCX + badgeR + 14;
         ctx.fillStyle = '#ffffff';
-        ctx.font = `bold ${levelFontSize}px sans-serif`;
+        ctx.font = `bold ${Math.min(width * 0.05, 20)}px sans-serif`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`Level ${data.level}`, padX + 16, y + 26);
+        ctx.fillText(`Level ${data.level}`, textLeft, y + 24);
+
+        // Tier name
+        ctx.fillStyle = tier.primary;
+        ctx.font = `bold ${Math.min(width * 0.028, 11)}px sans-serif`;
+        ctx.letterSpacing = '2px';
+        ctx.fillText(tier.name, textLeft, y + 40);
+        ctx.letterSpacing = '0px';
 
         // XP text on the right
+        const progress = data.xpForNextLevel > 0
+            ? Math.min(1, data.xp / data.xpForNextLevel)
+            : 0;
+        const pctText = `${Math.round(progress * 100)}%`;
         const xpText = `${data.xp} / ${data.xpForNextLevel} XP`;
+
         ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.font = `${Math.min(width * 0.032, 13)}px sans-serif`;
+        ctx.font = `${Math.min(width * 0.03, 12)}px sans-serif`;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
-        ctx.fillText(xpText, padX + panelW - 16, y + 26);
+        ctx.fillText(xpText, padX + panelW - 16, y + 24);
+
+        // Percentage text
+        ctx.fillStyle = tier.primary;
+        ctx.font = `bold ${Math.min(width * 0.03, 12)}px sans-serif`;
+        ctx.fillText(pctText, padX + panelW - 16, y + 40);
 
         // XP bar track
         const barX = padX + 16;
-        const barY = y + 46;
+        const barY = y + 60;
         const barW = panelW - 32;
-        const barH = 10;
+        const barH = 12;
 
         ctx.fillStyle = 'rgba(255,255,255,0.1)';
         this._roundRect(ctx, barX, barY, barW, barH, barH / 2);
         ctx.fill();
 
-        // XP bar fill with gradient
-        const progress = data.xpForNextLevel > 0
-            ? Math.min(1, data.xp / data.xpForNextLevel)
-            : 0;
+        // XP bar fill with tier-colored gradient
         const fillW = Math.max(barH, barW * progress);
 
         if (progress > 0) {
             const barGrad = ctx.createLinearGradient(barX, barY, barX + fillW, barY);
-            barGrad.addColorStop(0, '#3b82f6');
-            barGrad.addColorStop(0.5, '#60a5fa');
-            barGrad.addColorStop(1, '#a78bfa');
+            barGrad.addColorStop(0, tier.dark);
+            barGrad.addColorStop(0.5, tier.secondary);
+            barGrad.addColorStop(1, tier.primary);
             ctx.fillStyle = barGrad;
             this._roundRect(ctx, barX, barY, fillW, barH, barH / 2);
+            ctx.fill();
+
+            // Sheen on bar
+            const sheenGrad = ctx.createLinearGradient(barX, barY, barX, barY + barH * 0.5);
+            sheenGrad.addColorStop(0, 'rgba(255,255,255,0.25)');
+            sheenGrad.addColorStop(1, 'rgba(255,255,255,0)');
+            ctx.fillStyle = sheenGrad;
+            this._roundRect(ctx, barX, barY, fillW, barH * 0.5, barH / 2);
             ctx.fill();
         }
 

@@ -158,12 +158,24 @@ export default class AudioManager {
           this.stopWind();
           return;
         }
-        // Smoothly change volume & filter
-        this._windGain.gain.linearRampToValueAtTime(speed * 0.3, this.ctx.currentTime + 0.1);
+        const t = this.ctx.currentTime + 0.1;
+        // Volume clearly scales with speed
+        this._windGain.gain.linearRampToValueAtTime(speed * 0.35, t);
         if (this._windFilter) {
+          // Pitch/brightness rises with speed
           this._windFilter.frequency.linearRampToValueAtTime(
-            300 + speed * 700,
-            this.ctx.currentTime + 0.1,
+            250 + speed * 900, t,
+          );
+        }
+        // Update high whistle layer
+        if (this._windHighGain) {
+          this._windHighGain.gain.linearRampToValueAtTime(
+            speed * speed * 0.15, t,
+          );
+        }
+        if (this._windHighFilter) {
+          this._windHighFilter.frequency.linearRampToValueAtTime(
+            1500 + speed * 2500, t,
           );
         }
         return;
@@ -171,29 +183,46 @@ export default class AudioManager {
 
       if (speed <= 0) return;
 
-      // Create noise source (long buffer, looped)
+      // --- Layer 1: Low/mid wind body (noise through lowpass) ---
       const noiseBuf = this._createNoise(2);
       const source = this.ctx.createBufferSource();
       source.buffer = noiseBuf;
       source.loop = true;
 
-      // Low-pass filter — higher speed -> higher cutoff -> brighter wind
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.value = 300 + speed * 700;
+      filter.frequency.value = 250 + speed * 900;
       filter.Q.value = 1.0;
 
-      // Gain
       const gain = this.ctx.createGain();
-      gain.gain.value = speed * 0.3;
+      gain.gain.value = speed * 0.35;
 
       this._chain(source, filter, gain, this._masterGain);
-
       source.start();
+
+      // --- Layer 2: High wind whistle (separate noise through bandpass) ---
+      const highNoiseBuf = this._createNoise(2);
+      const highSource = this.ctx.createBufferSource();
+      highSource.buffer = highNoiseBuf;
+      highSource.loop = true;
+
+      const highBp = this.ctx.createBiquadFilter();
+      highBp.type = 'bandpass';
+      highBp.frequency.value = 1500 + speed * 2500;
+      highBp.Q.value = 2.0; // narrow band for whistle character
+
+      const highGain = this.ctx.createGain();
+      highGain.gain.value = speed * speed * 0.15; // fades in at higher speeds
+
+      this._chain(highSource, highBp, highGain, this._masterGain);
+      highSource.start();
 
       this._windSource = source;
       this._windGain = gain;
       this._windFilter = filter;
+      this._windHighSource = highSource;
+      this._windHighGain = highGain;
+      this._windHighFilter = highBp;
     } catch (e) {
       console.warn('AudioManager.playWind error:', e);
     }
@@ -208,14 +237,24 @@ export default class AudioManager {
       const now = this.ctx.currentTime;
       this._windGain.gain.linearRampToValueAtTime(0, now + 0.2);
       this._windSource.stop(now + 0.25);
+      if (this._windHighSource) {
+        this._windHighGain.gain.linearRampToValueAtTime(0, now + 0.2);
+        this._windHighSource.stop(now + 0.25);
+      }
       this._windSource = null;
       this._windGain = null;
       this._windFilter = null;
+      this._windHighSource = null;
+      this._windHighGain = null;
+      this._windHighFilter = null;
     } catch (e) {
       console.warn('AudioManager.stopWind error:', e);
       this._windSource = null;
       this._windGain = null;
       this._windFilter = null;
+      this._windHighSource = null;
+      this._windHighGain = null;
+      this._windHighFilter = null;
     }
   }
 
