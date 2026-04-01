@@ -1635,25 +1635,31 @@ export default class SkihoppRenderer {
     _drawPineTrees(ctx, w, h) {
         if (!this.hill) return;
         const r = this.renderer;
-        const rng = seededRandom(3141);
-        const profile = this.hill.getProfile();
-        const startX = profile[0].x;
-        const endX = profile[profile.length - 1].x;
 
-        // Trees on both sides of the hill (offset laterally by drawing them
-        // above the hill surface at different x positions)
-        const treePositions = [];
-        for (let i = 0; i < 40; i++) {
-            const wx = startX + rng() * (endX - startX);
-            const wy = this.hill.getHeightAtDistance(wx);
-            // Offset trees below/behind the slope (positive y = further down)
-            const offsetY = 4 + rng() * 18;
-            const treeH = 3 + rng() * 5; // tree height in meters
-            treePositions.push({ wx, wy: wy + offsetY, h: treeH, shade: rng() });
+        // Cache tree data to avoid regenerating every frame
+        if (!this._pineTreesData) {
+            const rng = seededRandom(3141);
+            const profile = this.hill.getProfile();
+            const startX = profile[0].x;
+            const endX = profile[profile.length - 1].x;
+
+            // Trees on both sides of the hill (offset laterally by drawing them
+            // above the hill surface at different x positions)
+            const treePositions = [];
+            for (let i = 0; i < 40; i++) {
+                const wx = startX + rng() * (endX - startX);
+                const wy = this.hill.getHeightAtDistance(wx);
+                // Offset trees below/behind the slope (positive y = further down)
+                const offsetY = 4 + rng() * 18;
+                const treeH = 3 + rng() * 5; // tree height in meters
+                treePositions.push({ wx, wy: wy + offsetY, h: treeH, shade: rng() });
+            }
+
+            // Sort by y so farther trees draw first
+            treePositions.sort((a, b) => a.wy - b.wy);
+            this._pineTreesData = treePositions;
         }
-
-        // Sort by y so farther trees draw first
-        treePositions.sort((a, b) => a.wy - b.wy);
+        const treePositions = this._pineTreesData;
 
         for (const tree of treePositions) {
             const base = r.worldToScreen(tree.wx, tree.wy);
@@ -1706,7 +1712,6 @@ export default class SkihoppRenderer {
     _drawCrowdArea(ctx, w, h) {
         if (!this.hill) return;
         const r = this.renderer;
-        const rng = seededRandom(5555);
         const outrunEnd = this.hill.getOutrunEndPosition();
         const kp = this.hill.getKPointPosition();
 
