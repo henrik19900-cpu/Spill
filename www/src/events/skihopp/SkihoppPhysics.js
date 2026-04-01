@@ -527,6 +527,23 @@ export default class SkihoppPhysics {
         j.turbulenceX = turbX;
         j.turbulenceY = turbY;
 
+        // ---- Body angle evolution during flight ----
+        // The jumper can adjust body angle toward a target (set by controls).
+        // If no target is set, body angle drifts toward the velocity direction
+        // (natural aerodynamic weathervaning). The rate of change is limited
+        // to ~15°/s for realism — you can't instantly change posture in the air.
+        const bodyAngleRate = cfg.bodyAngleRate || 15; // degrees per second
+        const targetAngle = (j.targetAngle !== undefined && j.targetAngle !== null)
+            ? j.targetAngle
+            : radToDeg(Math.atan2(j.vy, j.vx)) + 20; // natural drift toward AoA ~20°
+        const angleDelta = targetAngle - j.bodyAngle;
+        const maxChange = bodyAngleRate * dt;
+        if (Math.abs(angleDelta) > maxChange) {
+            j.bodyAngle += Math.sign(angleDelta) * maxChange;
+        } else {
+            j.bodyAngle = targetAngle;
+        }
+
         // ---- Integration (semi-implicit Euler) ----
         j.vx += ax * dt;
         j.vy += ay * dt;
