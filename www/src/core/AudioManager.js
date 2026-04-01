@@ -1162,6 +1162,22 @@ export default class AudioManager {
   // -----------------------------------------------------------------------
 
   /**
+   * Alias used by settings UI. Delegates to setMasterVolume.
+   * @param {number} vol – 0 to 1
+   */
+  setVolume(vol) {
+    this.setMasterVolume(vol);
+  }
+
+  /**
+   * Return current master volume (0 to 1).
+   * @returns {number}
+   */
+  getVolume() {
+    return this._masterVolume;
+  }
+
+  /**
    * Set master volume.
    * @param {number} vol – 0 to 1
    */
