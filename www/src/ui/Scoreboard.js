@@ -544,11 +544,38 @@ export default class Scoreboard {
     _renderPlayAgainButton(ctx, width, height) {
         const padX = 14;
 
-        // --- "Hopp igjen" button: full width, large, prominent ---
+        // --- "Meny" subtle link at the very bottom ---
+        const menuBtnH = 30;
+        const menuBtnY = height - menuBtnH - 8;
+        const menuBtnW = 120;
+        const menuBtnX = (width - menuBtnW) / 2;
+
+        this._menuButtonRect = { x: menuBtnX, y: menuBtnY, w: menuBtnW, h: menuBtnH };
+
+        ctx.save();
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = `${Math.max(Math.min(width * 0.033, 13), 11)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // Subtle underline effect
+        const menuText = 'Meny';
+        const menuCX = menuBtnX + menuBtnW / 2;
+        const menuCY = menuBtnY + menuBtnH / 2;
+        ctx.fillText(menuText, menuCX, menuCY);
+        const menuTextW = ctx.measureText(menuText).width;
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(menuCX - menuTextW / 2, menuCY + 8);
+        ctx.lineTo(menuCX + menuTextW / 2, menuCY + 8);
+        ctx.stroke();
+        ctx.restore();
+
+        // --- "HOPP IGJEN" button: full width, 60px, green gradient, very prominent ---
         const btnW = width - padX * 2;
         const btnH = 60;
         const btnX = padX;
-        const btnY = height - btnH - 12;
+        const btnY = menuBtnY - btnH - 10;
 
         // Store for hit testing
         this._buttonRect = { x: btnX, y: btnY, w: btnW, h: btnH };
@@ -558,37 +585,58 @@ export default class Scoreboard {
         // Pulsing glow effect to draw attention
         const pulse = 0.7 + Math.sin(this._time * 3) * 0.3;
 
-        // Button shadow (strong glow)
-        ctx.shadowColor = `rgba(0,200,100,${0.5 * pulse})`;
-        ctx.shadowBlur = 20;
+        // Strong outer glow
+        ctx.shadowColor = `rgba(40,220,80,${0.6 * pulse})`;
+        ctx.shadowBlur = 28;
 
-        // Button gradient (green - action color)
+        // Button gradient (vibrant green)
         const grad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
-        grad.addColorStop(0, '#43A047');
-        grad.addColorStop(1, '#2E7D32');
+        grad.addColorStop(0, '#56d364');
+        grad.addColorStop(0.45, '#3fb950');
+        grad.addColorStop(1, '#238636');
         ctx.fillStyle = grad;
-        this._roundRect(ctx, btnX, btnY, btnW, btnH, 12);
+        this._roundRect(ctx, btnX, btnY, btnW, btnH, 14);
         ctx.fill();
 
-        // Top highlight
+        // Top highlight (gloss)
         ctx.shadowBlur = 0;
-        const highGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH * 0.45);
-        highGrad.addColorStop(0, 'rgba(255,255,255,0.25)');
+        const highGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH * 0.5);
+        highGrad.addColorStop(0, 'rgba(255,255,255,0.3)');
         highGrad.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = highGrad;
-        this._roundRect(ctx, btnX, btnY, btnW, btnH * 0.45, 12);
+        this._roundRect(ctx, btnX, btnY, btnW, btnH * 0.5, 14);
         ctx.fill();
 
-        // Button text - large and bold
-        ctx.fillStyle = '#ffffff';
-        const fontSize = Math.max(Math.min(width * 0.065, 26), 20);
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        // Bottom inner shadow
+        const bottomGrad = ctx.createLinearGradient(btnX, btnY + btnH * 0.7, btnX, btnY + btnH);
+        bottomGrad.addColorStop(0, 'rgba(0,0,0,0)');
+        bottomGrad.addColorStop(1, 'rgba(0,0,0,0.15)');
+        ctx.fillStyle = bottomGrad;
+        this._roundRect(ctx, btnX, btnY, btnW, btnH, 14);
+        ctx.fill();
 
+        // Subtle border
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        this._roundRect(ctx, btnX, btnY, btnW, btnH, 14);
+        ctx.stroke();
+
+        // Button text - large and bold with shadow
+        const fontSize = Math.max(Math.min(width * 0.065, 26), 20);
         const label = 'HOPP IGJEN';
         const centerX = btnX + btnW / 2;
         const centerY = btnY + btnH / 2;
+
+        // Text shadow
+        ctx.fillStyle = 'rgba(0,60,0,0.4)';
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.letterSpacing = '2px';
+        ctx.fillText(label, centerX + 11, centerY + 2);
+
+        // Main text
+        ctx.fillStyle = '#ffffff';
         ctx.fillText(label, centerX + 10, centerY);
 
         // Ski jump arrow icon to the left of text
@@ -596,34 +644,16 @@ export default class Scoreboard {
         const iconX = centerX - textW / 2 - 8;
         const iconY = centerY;
         ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 3;
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.beginPath();
         ctx.moveTo(iconX - 8, iconY + 5);
         ctx.lineTo(iconX, iconY - 5);
         ctx.lineTo(iconX + 8, iconY - 3);
         ctx.stroke();
 
-        ctx.restore();
-
-        // --- "Tilbake til meny" small text link above main button ---
-        const menuBtnH = 32;
-        const menuBtnY = btnY - menuBtnH - 6;
-        const menuBtnW = width - padX * 2;
-        const menuBtnX = padX;
-
-        this._menuButtonRect = { x: menuBtnX, y: menuBtnY, w: menuBtnW, h: menuBtnH };
-
-        ctx.save();
-        ctx.fillStyle = 'rgba(255,255,255,0.12)';
-        this._roundRect(ctx, menuBtnX, menuBtnY, menuBtnW, menuBtnH, 8);
-        ctx.fill();
-
-        ctx.fillStyle = 'rgba(255,255,255,0.55)';
-        ctx.font = `${Math.max(Math.min(width * 0.035, 14), 12)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('Tilbake til meny', menuBtnX + menuBtnW / 2, menuBtnY + menuBtnH / 2);
+        ctx.letterSpacing = '0px';
         ctx.restore();
     }
 

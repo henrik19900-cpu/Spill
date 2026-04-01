@@ -1271,9 +1271,14 @@ export default class SkihoppGame {
                 // --- PREMIUM: Record flight end time ---
                 this._trackFlightEndTime = performance.now();
 
-                // Track best distance
-                if (jumperState.landingDistance > this._bestDistance) {
-                    this._bestDistance = jumperState.landingDistance;
+                // Track best distance and mark new records
+                {
+                    const prevBestForRecord = this._bestDistance;
+                    if (jumperState.landingDistance > this._bestDistance) {
+                        this._bestDistance = jumperState.landingDistance;
+                    }
+                    // Flag for renderer particle celebration (first jump cannot be a "record")
+                    jumperState.isNewRecord = prevBestForRecord > 0 && jumperState.landingDistance > prevBestForRecord;
                 }
 
                 // --- PREMIUM: Screen shake on landing ---

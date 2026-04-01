@@ -3717,7 +3717,14 @@ export default class SkihoppRenderer {
     _drawSnowParticles(ctx, w, h) {
         const t = this._time || 0;
         const wind = this._wind || { speed: 0, direction: 0 };
-        const windDriftX = Math.cos(wind.direction || 0) * (wind.speed || 0) * 0.012;
+        const windSpd = wind.speed || 0;
+        const windAngle = wind.direction || 0;
+        // Stronger wind drift: at >2 m/s particles go nearly horizontal
+        const windStrength = Math.min(windSpd / 2, 1);
+        const windDriftX = Math.cos(windAngle) * windSpd * 0.04;
+        const windDriftY = Math.sin(windAngle) * windSpd * 0.015;
+        // Strong wind reduces vertical fall speed (particles blow sideways)
+        const verticalDamping = 1 - windStrength * 0.6;
         const particles = this._snowParticles;
 
         ctx.save();
@@ -3738,9 +3745,10 @@ export default class SkihoppRenderer {
             if (p.isFlake) continue;
             const windFactor = 0.5 + p.depth * 0.5;
             const driftX = p.baseDriftX + windDriftX * windFactor;
+            const driftY = windDriftY * windFactor;
             const wobble = Math.sin(t * p.wobbleSpeed + p.wobblePhase) * 0.02 * (1 - p.depth * 0.5);
             const px = ((p.x + (driftX + wobble) * t) % 1 + 1) % 1;
-            const py = ((p.y + p.speedY * t) % 1 + 1) % 1;
+            const py = ((p.y + (p.speedY * verticalDamping + driftY) * t) % 1 + 1) % 1;
             const sx = (px * w) | 0;
             const sy = (py * h) | 0;
             const bucket = (p.alpha * 10) | 0;
