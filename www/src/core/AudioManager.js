@@ -28,16 +28,24 @@ export default class AudioManager {
     this._windSource = null;
     this._windGain = null;
     this._windFilter = null;
+    this._windHighSource = null;
+    this._windHighGain = null;
+    this._windHighFilter = null;
 
     /** Crowd ambience node chain */
     this._crowdSource = null;
     this._crowdGain = null;
     this._crowdFilter = null;
+    this._crowdHighSource = null;
+    this._crowdHighGain = null;
 
     /** Inrun slide node chain */
     this._slideSource = null;
     this._slideGain = null;
     this._slideFilter = null;
+    this._slideRumbleSource = null;
+    this._slideRumbleGain = null;
+    this._slideRumbleFilter = null;
 
     /** Menu ambience node chain */
     this._menuOsc = null;
