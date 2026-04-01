@@ -82,11 +82,21 @@ globalThis.innerHeight = 844;
 globalThis.devicePixelRatio = 2;
 globalThis.performance = globalThis.performance || { now: () => Date.now() };
 
+function createMockGradient() {
+    return { addColorStop: () => {} };
+}
+
 function createMockCtx() {
     const noop = () => {};
+    const gradientFn = () => createMockGradient();
     return new Proxy({}, {
         get(target, prop) {
             if (prop === 'canvas') return { width: 390, height: 844 };
+            if (prop === 'createLinearGradient') return gradientFn;
+            if (prop === 'createRadialGradient') return gradientFn;
+            if (prop === 'createPattern') return () => ({});
+            if (prop === 'measureText') return () => ({ width: 10 });
+            if (prop === 'getImageData') return () => ({ data: new Uint8ClampedArray(4) });
             if (prop in target) return target[prop];
             return typeof prop === 'string' ? noop : undefined;
         },
