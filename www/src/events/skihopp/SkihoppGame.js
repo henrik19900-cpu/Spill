@@ -1424,7 +1424,7 @@ export default class SkihoppGame {
                 }
 
                 // Check for new distance record and trigger record popup
-                {
+                if (jumperState) {
                     const prevBest = this._bestDistance;
                     // _bestDistance was already updated in LANDING, so check if
                     // the current landing distance matches the new best
@@ -1469,7 +1469,7 @@ export default class SkihoppGame {
                 this._jumpResults.push({
                     name: 'Spiller',
                     country: 'NOR',
-                    distance: jumperState.landingDistance,
+                    distance: jumperState ? jumperState.landingDistance : 0,
                     totalPoints: this._scoreResult ? this._scoreResult.totalPoints : 0,
                     rank: this._jumpResults.length + 1,
                     _latest: true,
