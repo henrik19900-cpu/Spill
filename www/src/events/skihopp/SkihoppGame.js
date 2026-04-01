@@ -1276,7 +1276,8 @@ export default class SkihoppGame {
                 break;
             }
 
-            case GameState.LANDING:
+            case GameState.LANDING: {
+                if (!jumperState) break;
                 // Stop replay recording
                 if (this.replay && typeof this.replay.stopRecording === 'function') {
                     this.replay.stopRecording();
@@ -1338,13 +1339,14 @@ export default class SkihoppGame {
                     this._safeAudioCall('playCrowdCheer', cheerIntensity);
                 }
                 break;
+            }
 
             case GameState.SCORE:
                 // Stop wind sound when leaving active phases
                 this._safeAudioCall('stopWind');
 
                 // Calculate score
-                this._scoreResult = this.scoringSystem ? this.scoringSystem.calculateScore({
+                this._scoreResult = (this.scoringSystem && jumperState) ? this.scoringSystem.calculateScore({
                     distance: jumperState.landingDistance,
                     takeoffQuality: jumperState.takeoffQuality,
                     flightStability: jumperState.flightStability,
@@ -1374,7 +1376,7 @@ export default class SkihoppGame {
                 }
 
                 // Progression tracking
-                if (this.progression && this._scoreResult) {
+                if (this.progression && this._scoreResult && jumperState) {
                     this.progression.addJump(
                         this._currentHillKey,
                         jumperState.landingDistance,
@@ -1422,7 +1424,7 @@ export default class SkihoppGame {
                 }
 
                 // Check for new distance record and trigger record popup
-                {
+                if (jumperState) {
                     const prevBest = this._bestDistance;
                     // _bestDistance was already updated in LANDING, so check if
                     // the current landing distance matches the new best
@@ -1467,7 +1469,7 @@ export default class SkihoppGame {
                 this._jumpResults.push({
                     name: 'Spiller',
                     country: 'NOR',
-                    distance: jumperState.landingDistance,
+                    distance: jumperState ? jumperState.landingDistance : 0,
                     totalPoints: this._scoreResult ? this._scoreResult.totalPoints : 0,
                     rank: this._jumpResults.length + 1,
                     _latest: true,
@@ -1496,7 +1498,7 @@ export default class SkihoppGame {
                 }
 
                 // Full reset when returning to menu
-                this.jumper.reset(this.hill);
+                if (this.jumper) this.jumper.reset(this.hill);
                 if (this.physics) this.physics.reset();
                 this._resetFlightTracking();
                 this._countdownTimer = 0;

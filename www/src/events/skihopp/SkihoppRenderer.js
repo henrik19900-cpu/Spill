@@ -396,6 +396,13 @@ export default class SkihoppRenderer {
         this._impactRipples = [];
         this._milestoneFlashes = [];
         this._passedMilestones.clear();
+        // Invalidate lazily-cached data that stores absolute hill coordinates
+        this._snowGroundTreesData = null;
+        this._pineTreesData = null;
+        this._iceStreaks = null;
+        this._snowNoiseDots = null;
+        this._cachedProfileScreen = [];
+        this._cachedCameraX = NaN;
     }
 
     // ------------------------------------------------------------------
@@ -3242,8 +3249,8 @@ export default class SkihoppRenderer {
     _drawSpectators(ctx) {
         const r = this.renderer;
         const t = this._time || 0;
-        const cw = r.width || 400;
-        const ch = r.height || 900;
+        const cw = (r.game && r.game.width) || 400;
+        const ch = (r.game && r.game.height) || 900;
         const gameState = this._prevGameState;
         const jumperX = this._lastJumperX || 0;
 
@@ -3266,7 +3273,7 @@ export default class SkihoppRenderer {
 
             // --- Landing celebration: all jump up briefly ---
             let jumpOffset = 0;
-            if (gameState === 'LANDING' || gameState === 4) {
+            if (gameState === GameState.LANDING || gameState === 'LANDING') {
                 const landT = this._cameraPhaseTime || 0;
                 if (landT < 0.8) {
                     const jumpPhase = Math.sin(landT * 8 + spec.wavePhase * 0.5);
@@ -3277,7 +3284,7 @@ export default class SkihoppRenderer {
             // --- Mexican wave during FLIGHT ---
             let waveArmOverride = false;
             let waveIntensity = 0;
-            if (gameState === 'FLIGHT' || gameState === 3) {
+            if (gameState === GameState.FLIGHT || gameState === 'FLIGHT') {
                 const dx = spec.x - jumperX;
                 const waveDelay = dx * 0.15;
                 const wavePh = Math.sin(t * 4 - waveDelay);
@@ -3885,8 +3892,8 @@ export default class SkihoppRenderer {
         const r = this.renderer;
         const t = this._time;
         const jumperX = js.x;
-        const cw = r.width || 400;
-        const ch = r.height || 900;
+        const cw = (r.game && r.game.width) || 400;
+        const ch = (r.game && r.game.height) || 900;
 
         for (const spec of this._spectators) {
             // Distance from jumper x to spectator
