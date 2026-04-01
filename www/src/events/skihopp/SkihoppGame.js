@@ -1498,7 +1498,7 @@ export default class SkihoppGame {
                 }
 
                 // Full reset when returning to menu
-                this.jumper.reset(this.hill);
+                if (this.jumper) this.jumper.reset(this.hill);
                 if (this.physics) this.physics.reset();
                 this._resetFlightTracking();
                 this._countdownTimer = 0;

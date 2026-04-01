@@ -18,6 +18,10 @@ import { pathToFileURL } from 'node:url';
 // on import.
 // ---------------------------------------------------------------------------
 
+globalThis.addEventListener = globalThis.addEventListener || (() => {});
+globalThis.removeEventListener = globalThis.removeEventListener || (() => {});
+globalThis.location = { search: '', href: '', pathname: '/', hash: '' };
+globalThis.history = { pushState: () => {}, replaceState: () => {} };
 globalThis.window = globalThis;
 globalThis.document = {
     createElement: (tag) => {

@@ -396,6 +396,13 @@ export default class SkihoppRenderer {
         this._impactRipples = [];
         this._milestoneFlashes = [];
         this._passedMilestones.clear();
+        // Invalidate lazily-cached data that stores absolute hill coordinates
+        this._snowGroundTreesData = null;
+        this._pineTreesData = null;
+        this._iceStreaks = null;
+        this._snowNoiseDots = null;
+        this._cachedProfileScreen = [];
+        this._cachedCameraX = NaN;
     }
 
     // ------------------------------------------------------------------
