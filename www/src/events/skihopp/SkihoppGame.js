@@ -365,16 +365,20 @@ export default class SkihoppGame {
         // ----------------------------------------------------------
         // 12. Create sub-menu screens (hills, stats, settings)
         // ----------------------------------------------------------
-        this.hillSelectScreen = new HillSelectScreen(this.progression);
-        this.statsScreen = new StatsScreen();
-        this.settingsScreen = new SettingsScreen({
-            volume: (this._audio && typeof this._audio.getVolume === 'function')
-                ? Math.round(this._audio.getVolume() * 100)
-                : 70,
-            haptic: game.config && game.config.haptic != null ? game.config.haptic : true,
-            difficulty: (game.config && game.config.difficulty) || 'normal',
-            controlType: (game.config && game.config.controlType) || 'swipe',
-        });
+        try { this.hillSelectScreen = new HillSelectScreen(this.progression); }
+        catch (e) { console.warn('[SkihoppGame] HillSelectScreen failed:', e.message); }
+        try { this.statsScreen = new StatsScreen(); }
+        catch (e) { console.warn('[SkihoppGame] StatsScreen failed:', e.message); }
+        try {
+            this.settingsScreen = new SettingsScreen({
+                volume: (this._audio && typeof this._audio.getVolume === 'function')
+                    ? Math.round(this._audio.getVolume() * 100)
+                    : 70,
+                haptic: game.config && game.config.haptic != null ? game.config.haptic : true,
+                difficulty: (game.config && game.config.difficulty) || 'normal',
+                controlType: (game.config && game.config.controlType) || 'swipe',
+            });
+        } catch (e) { console.warn('[SkihoppGame] SettingsScreen failed:', e.message); }
 
         // ----------------------------------------------------------
         // 13. Initial state is set by Game._init() after scene loads
@@ -475,9 +479,8 @@ export default class SkihoppGame {
         }
 
         // Feed wind speed into jumper state so physics can use it
-        if (!this.jumper) return;
-        const jumperState = this.jumper.getState();
-        if (this.wind) {
+        const jumperState = this.jumper ? this.jumper.getState() : null;
+        if (jumperState && this.wind) {
             jumperState.wind = this.wind.isHeadwind()
                 ? -this.wind.getSpeed()
                 : this.wind.getSpeed();
@@ -537,7 +540,7 @@ export default class SkihoppGame {
         }
 
         // Replay recording during active phases
-        if (this.replay) {
+        if (this.replay && jumperState) {
             if (state === GameState.INRUN || state === GameState.TAKEOFF ||
                 state === GameState.FLIGHT || state === GameState.LANDING) {
                 this.replay.recordFrame(jumperState, dt);
@@ -545,7 +548,7 @@ export default class SkihoppGame {
         }
 
         // Height above ground during flight
-        if (state === GameState.FLIGHT) {
+        if (state === GameState.FLIGHT && jumperState) {
             if (this.hill && typeof this.hill.getHeightAtDistance === 'function') {
                 const hillY = this.hill.getHeightAtDistance(jumperState.x);
                 jumperState.heightAboveGround = hillY - jumperState.y;
@@ -553,7 +556,7 @@ export default class SkihoppGame {
         }
 
         // Track flight stability during FLIGHT phase
-        if (state === GameState.FLIGHT) {
+        if (state === GameState.FLIGHT && this.jumper) {
             this._trackFlightStability(dt);
         }
 

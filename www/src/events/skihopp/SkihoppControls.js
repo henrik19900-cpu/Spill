@@ -656,7 +656,7 @@ export default class SkihoppControls {
     }
   }
 
-  _handleScoreTap() {
+  _handleScoreTap(x, y) {
     // Enforce minimum display time so the player can read the score
     const elapsed = performance.now() - this._scoreShownAt;
     if (elapsed < SCORE_READ_DELAY_MS) return;
@@ -668,6 +668,19 @@ export default class SkihoppControls {
       scene._postJumpStatsTimer = 0;
       this.game.setState(GameState.RESULTS);
       return;
+    }
+
+    // Delegate to JudgeDisplay buttons if present
+    if (scene && scene.judgeDisplay) {
+      const action = scene.judgeDisplay.handleTap(x, y);
+      if (action === 'replay') {
+        this.game.setState(GameState.READY);
+        return;
+      }
+      if (action === 'continue') {
+        this.game.setState(GameState.RESULTS);
+        return;
+      }
     }
 
     this.game.setState(GameState.RESULTS);
